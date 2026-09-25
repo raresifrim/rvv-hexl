@@ -1,0 +1,331 @@
+# rvv-hexl porting guide
+
+What every class and interface is for, what is already done, and what you have to write.
+Read sections 1 and 2 first. Section 3 is the reference, section 4 the suggested order of
+work, and sections 5 and 6 cover RVV design and methodology.
+
+---
+
+## 1. How the port plugs into OpenFHE
+
+OpenFHE does not call HEXL directly. The `openfhe-hexl` overlay replaces OpenFHE's native math
+HAL (`math/hal/intnat-hexl/*`, `lattice/hal/hexl/*`) with versions that forward hot loops to
+the `intel::hexl` API. That API is the only thing OpenFHE sees, so a library with **the same
+headers, same namespace, same signatures and same semantics** is a drop-in replacement:
+
+```
+            OpenFHE v1.5.1 + openfhe-hexl v1.5.1.0   (make openfhe WITH_RVV_HEXL=ON)
+                   │   #include "hexl/hexl.hpp"
+                   │   find_package(HEXL 1.2.6)  ← cmake/HEXLConfig.cmake from `make install`
+                   ▼
+   include/hexl/*  public API ─────────────── identical to Intel HEXL 1.2.6         [DONE]
+                   │
+   src/*/<op>.cpp  argument checks + dispatch ─ HEXL_HAS_RVV && has_rvv ?          [DONE]
+                   │                                    │
+                   ▼                                    ▼
+          <Op>Native (portable C++)          <Op>RVV / RVV32 / RVV64 (intrinsics)  [TODO]
+          = "no RVV" path, = reference       = the port proper
+```
+
+### What OpenFHE actually calls
+
+Measured by grepping openfhe-hexl v1.5.1.0. These nine entry points are the whole surface
+that matters for the protocol benchmarks:
+
+| HEXL API | OpenFHE call site | Weight in our workloads |
+|---|---|---|
+| `NTT(N, q, root)`, `ComputeForward(d, d, 1, 1)`, `ComputeInverse(d, d, 1, 1)` | `transformnathexl-impl.h`: every forward/inverse transform | **~44% of a binfhe bootstrap, ~80% (with modmul) of the central node** (D01) |
+| `EltwiseMultMod(r, a, b, n, q, 1)` | `NativeVector::ModMul`, `DCRTPoly::operator*` | #2 hotspot (NTT-domain products) |
+| `EltwiseFMAMod(r, a, s, c\|nullptr, n, q, 1)` | scalar `ModMul`, RNS basis switching (`hexldcrtpoly-impl.h`) | BFV rescale / key switching |
+| `EltwiseAddMod` (vector + scalar forms) | `ModAdd`, `DCRTPoly::operator+` | frequent, memory-bound |
+| `EltwiseCmpAdd`, `EltwiseCmpSubMod` | `NativeVector::SwitchModulus` | modulus switching (binfhe, BFV) |
+| `EltwiseReduceMod(r, a, n, q, 1, 1)` | `NativeVector::Mod` | occasional |
+| `AlignedVector64<T>` | storage of **every** `NativeVector` | type only |
+| `CMPINT` | argument of the two Cmp* calls | type only |
+
+`EltwiseSubMod` is not called by OpenFHE's backend, but it is part of the API (SEAL uses it).
+Keep it: cheap to write, and it makes the port a complete HEXL 1.2.6.
+
+### Three invariants OpenFHE imposes
+
+1. **In place.** Almost every call has `result == operand1` (and FMA may have `result == arg3`).
+   Every kernel must be correct under that aliasing. The tests check both ways.
+2. **Concurrency.** OpenFHE caches one `NTT` per (N, q) in a static map and calls
+   `ComputeForward` on the *same object* from many OpenMP threads. Never keep mutable scratch
+   in the object. Use `thread_local` or the stack. `Ntt_ConcurrentUse` checks this.
+3. **64-bit storage.** OpenFHE's HEXL HAL `reinterpret_cast`s coefficient vectors to
+   `uint64_t*`, so OpenFHE must be built with `NATIVE_SIZE=64` (the script enforces it). The
+   K3 measurements say compute should happen at **SEW=e32**, so the RVV kernels narrow on load
+   and widen on store internally when `q < 2^30` (see section 5).
+
+---
+
+## 2. Layer model: what is done and what is yours
+
+| Layer | Files | State |
+|---|---|---|
+| Public API declarations | `include/hexl/**` | **done**: exact upstream signatures, checked at compile time by `test/test-api-compat.cpp` |
+| Header-inline helpers | `number-theory.hpp` (MultiplyFactor, ReduceMod, BarrettReduce64, MultiplyModLazy, …), `util/*.hpp` | **done**: part of the upstream header API |
+| Entry points + dispatch | `src/eltwise/<op>.cpp` (top half), `src/ntt/ntt.cpp` (except one method) | **done** |
+| CPU detection, port info, allocator | `src/util/cpu-features.*`, `aligned-allocator.cpp` | **done** |
+| Scalar number theory | `src/number-theory/number-theory.cpp` | **TODO**: 11 functions |
+| Native kernels | `src/eltwise/<op>.cpp` (bottom half), `src/ntt/ntt-radix-2.cpp` | **TODO** |
+| Twiddle precomputation | `NTT::ComputeRootOfUnityPowers` in `src/ntt/ntt.cpp` | **TODO** |
+| RVV kernels | `src/eltwise/<op>-rvv.cpp`, `src/ntt/ntt-rvv.cpp` | **TODO** |
+| RVV helpers | `src/util/rvv-util.hpp` | **TODO** (signatures fixed, bodies empty) |
+
+Every TODO body is `HEXL_NOT_IMPLEMENTED();`. It throws `std::logic_error("[rvv-hexl TODO] <fn>
+(<file>:<line>)")`, so:
+* `make test` reports each test as PASS / FAIL / **TODO ← name of the stub it hit**,
+* benchmarks skip that entry and print the stub name,
+* OpenFHE's unit tests print the stub name instead of crashing or silently computing garbage,
+* `make todo` lists every remaining stub.
+
+---
+
+## 3. Reference: every class and interface
+
+### 3.1 `hexl/util/*`: infrastructure (nothing to implement)
+
+| Header | Purpose |
+|---|---|
+| `defines.hpp` | Compiler detection (`HEXL_USE_GNU`/`HEXL_USE_CLANG`), `HEXL_UNUSED`. Upstream generates it with CMake; here it is static. Adds `HEXL_RVV_PORT` so consumers can detect the port. |
+| `types.hpp` | Global `int128_t` / `uint128_t` typedefs (RV64 lowers a 64×64→128 product to `mul`+`mulhu`). |
+| `check.hpp` | `HEXL_CHECK(cond, msg)` / `HEXL_CHECK_BOUNDS`: argument validation. Compiled out in release. In `make BUILD=debug` it throws with the message. Keep the checks at the top of each entry point: they document the contract and catch misuse from OpenFHE. |
+| `compiler.hpp`, `gcc.hpp`, `clang.hpp` | Scalar 128-bit helpers: `MultiplyUInt64` (full product), `MultiplyUInt64Hi<Shift>` (high part, one `mulhu` for Shift=64), `BarrettReduce128`, `DivideUInt128UInt64Lo` (precomputation only: a 128-bit division), `MSB` (uses `clz`, not upstream's `log2l`, which is a soft-float quad routine on RISC-V). Building blocks of your native kernels. |
+| `util.hpp` | `enum class CMPINT` (8 predicates) and `Not()`. |
+| `allocator.hpp` | `AllocatorBase` (virtual allocate/deallocate) and the CRTP `AllocatorInterface`. Lets callers (SEAL) inject memory pools into `NTT`. |
+| `aligned-allocator.hpp` | `AlignedAllocator<T, Alignment>` and `AlignedVector64<T>`: 64-byte aligned `std::vector`. OpenFHE stores every coefficient vector in it, so every buffer you receive from OpenFHE is 64 B aligned. RVV unit-stride loads only need element alignment, but alignment keeps each vector load in the fewest cache lines. |
+| `logging/logging.hpp` | `HEXL_VLOG(level, msg)`: debug-build tracing to stderr gated by `HEXL_VLOG=<n>`. Every dispatch logs `Calling <Kernel>` at level 3, so `HEXL_VLOG=3` shows which path ran. |
+
+### 3.2 `hexl/number-theory/number-theory.hpp`: scalar modular arithmetic
+
+**Purpose.** Everything scalar that the NTT constructor, the native kernels and the tests
+build on. Nothing here is RISC-V specific and nothing is on a hot path (it runs once per
+parameter set). Write for exactness and clarity.
+
+**Done (inline, header API):** `MultiplyFactor` (Barrett/Shoup precomputation
+`floor(operand·2^s / q)` for s ∈ {32, 52, 64}), `IsPowerOfTwo`, `Log2`, `MaximumValue`,
+`MultiplyModLazy<S>` (Shoup product in [0, 2q)), `AddUInt64`, `BarrettReduce64<F>`,
+`ReduceMod<F>` (fold [0, F·q) to [0, q)), `MontgomeryReduce`, `HenselLemma2adicRoot`.
+
+**To implement** in `src/number-theory/number-theory.cpp`:
+
+| Function | Contract | Hint |
+|---|---|---|
+| `ReverseBits(x, w)` | reverse the low `w` bits; `w=0 → 0` | loop is fine (table building only) |
+| `InverseMod(x, q)` | x⁻¹ mod q, **q not necessarily prime** | extended Euclid in `int64_t` |
+| `MultiplyMod(x, y, q)` | x·y mod q, x,y < q | `MultiplyUInt64` + `BarrettReduce128` |
+| `MultiplyMod(x, y, y_precon, q)` | same; `y_precon = floor(y·2^64/q)` | Shoup: `Q = hi(x·y_precon)`, `r = x·y − Q·q ∈ [0,2q)`, one conditional subtract. (Upstream's doc comment calls y_precon `floor(2^64/q)`, which is wrong.) |
+| `AddUIntMod`, `SubUIntMod` | x ± y mod q, x,y < q | one conditional correction |
+| `PowMod(b, e, q)` | bᵉ mod q | square-and-multiply |
+| `IsPrimitiveRoot(r, d, q)` | r has order exactly d (d = power of 2) | `r^(d/2) == q−1`; `r==0 → false` |
+| `GeneratePrimitiveRoot(d, q)` | some primitive d-th root | random x, `x^((q−1)/d)`, test, retry ≤ 200 |
+| `MinimalPrimitiveRoot(d, q)` | the **smallest** primitive d-th root | walk r, r³, r⁵, … (d/2 values), keep the min. The `NTT(N, q)` constructor depends on this being deterministic. |
+| `IsPrime(n)` | exact for all 64-bit n | Miller–Rabin, witnesses {2..37} |
+| `GeneratePrimes(k, b, small, N)` | k primes q ≡ 1 (mod 2N) in [2^b, 2^(b+1)) | walk up from 2^b+1 or down from the top in steps of 2N; the order is part of the contract |
+
+Tests: `NumberTheory_*` (exhaustive/random vs a `__int128` oracle, known Carmichael numbers and
+strong pseudoprimes, exact prime lists).
+
+### 3.3 `hexl/eltwise/*`: seven elementwise operations
+
+**Purpose.** Vectorised modular arithmetic on coefficient arrays: everything OpenFHE does on
+polynomials apart from the NTT itself. Each op has three pieces:
+
+```
+src/eltwise/eltwise-<op>.cpp           public entry: HEXL_CHECKs, dispatch      [done]
+                                       + <Op>Native kernel(s)                    [TODO]
+src/eltwise/eltwise-<op>-internal.hpp  kernel declarations                      [done]
+src/eltwise/eltwise-<op>-rvv.cpp       <Op>RVV (or RVV32/RVV64) kernel(s)       [TODO]
+```
+
+Dispatch rule (already written): RVV if compiled with V and `has_rvv`; else native. For
+`MultMod` and `FMAMod` the RVV side splits again: **`…RVV32`** when `q < 2^30` (binfhe's
+~27-bit moduli, computed in 32-bit lanes) and **`…RVV64`** otherwise (BFV's 60-bit primes).
+`kMaxModulusRVV32 = 2^30` lives in `src/util/cpu-features.hpp`.
+
+| Op | Semantics | Native: what to write | RVV: what to write |
+|---|---|---|---|
+| `EltwiseAddMod` (vv, vs) | r = (a + b) mod q, inputs < q < 2^63 | add + conditional subtract | e64/m1 strip loop; `vminu(s, s−q)` does the conditional subtract branch-free |
+| `EltwiseSubMod` (vv, vs) | r = (a − b) mod q | subtract + conditional add | as above (`vmsltu` mask + masked add, or the minu trick on `a−b+q`) |
+| `EltwiseMultMod` | r = a·b mod q, inputs < imf·q (imf ∈ {1,2,4}), output < q | reduce inputs (`ReduceMod<imf>`), Barrett with a precomputed factor (never `% q` on a 128-bit value, which is a libgcc call) | **RVV32**: no fixed multiplier, so Barrett on e32 lanes (`vmul`+`vmulhu` give both halves of the 64-bit product at e32 speed). **RVV64**: `vmul`+`vmulhu` at e64, Barrett |
+| `EltwiseFMAMod` | r = (a·s + c) mod q, `c` may be `nullptr`, imf ∈ {1,2,4,8} | reduce `s` once, Shoup factor once (`MultiplyFactor(s,64,q)`), per element `MultiplyMod(x,s,precon,q)` + `AddUIntMod` | Shoup with scalar broadcast (`.vx` forms); separate loops for `c == nullptr` |
+| `EltwiseReduceMod` | r ≡ a (mod q), r < omf·q; imf ∈ {q ("any 64-bit"), 2, 4}, omf ∈ {1, 2} | three cases: Barrett (`BarrettReduce64<omf>`), `ReduceMod<2>`, `ReduceMod<4>` or one −2q | `vmulhu` Barrett + `vminu` chain; hoist the case switch out of the loop |
+| `EltwiseCmpAdd` | r = cmp(a, bound) ? a + diff : a (plain wrapping add) | switch on `cmp` **outside** the loop | one `vms{eq,ne,ltu,leu,gtu,…}.vx` → mask → masked `vadd.vx` |
+| `EltwiseCmpSubMod` | x = a mod q; r = cmp(**a**, bound) ? (x − diff) mod q : x, for any 64-bit a | compare on the raw value, then reduce, then conditional `SubUIntMod` | mask from the raw values, Barrett reduction, masked `SubMod` |
+
+Tests: `Eltwise_*` sweep 24 sizes (every strip-mining tail at VLEN 128…1024), 16+ moduli
+around the e32/e64 boundary (largest prime < 2^30, smallest > 2^30), every mod factor, in
+place and out of place, plus `Eltwise_OpenFHESwitchModulusPattern`, which replays OpenFHE's
+exact `SwitchModulus` calls.
+
+### 3.4 `hexl/ntt/ntt.hpp`: `class NTT`, the core of the port
+
+**Purpose.** Negacyclic number-theoretic transform over Z_q[X]/(X^N + 1): the operation behind
+every polynomial multiplication, ~44% of a binfhe gate bootstrap on our boards. An `NTT` object
+is built once per (N, q) and holds all twiddle tables. `ComputeForward/Inverse` are stateless
+transforms that read them.
+
+**Semantics (pinned by `Ntt_ForwardMatchesDefinition` against the O(N²) definition):**
+* forward: natural order in, **bit-reversed** out:
+  `out[i] = Σ_j in[j] · w^((2·rev(i)+1)·j) mod q`, w = the object's 2N-th root;
+* inverse: bit-reversed in, natural out, **scaled by N⁻¹**, so `Inverse(Forward(x)) == x`;
+* mod factors: forward accepts input < {1,2,4}·q and returns < {1,4}·q; inverse {1,2}/{1,2}.
+  OpenFHE always uses (1, 1).
+
+**Members:**
+
+| Member | State | What it is |
+|---|---|---|
+| `NTT()`, `~NTT()`, move/copy | done | OpenFHE needs default construction + move-assignment (`unordered_map::operator[]`) |
+| `NTT(N, q, root, alloc)` | done | validates, computes `m_w_inv`, calls `ComputeRootOfUnityPowers()` (**OpenFHE's constructor**) |
+| `NTT(N, q, alloc)` | done | same with `MinimalPrimitiveRoot(2N, q)` |
+| allocator template ctors, `AllocatorAdapter` | done | custom memory pools |
+| `CheckArguments` | done | N power of 2 ≤ 2^20, q < 2^62, q ≡ 1 mod 2N, q prime (debug only) |
+| `ComputeForward`, `ComputeInverse` | done (dispatch) | checks, then RVV32 / RVV64 / native radix-2 |
+| getters (`GetRootOfUnityPowers`, `GetPrecon64…`, …) | done | read-only access to the tables |
+| `GetAVX512…`, `…Precon52…` | kept, **empty** | source compatibility with upstream code only |
+| `GetRVV32RootOfUnityPowers` + 3 more | done (getters) | rvv-hexl addition: `uint32_t` twiddle tables for the e32 kernels |
+| **`ComputeRootOfUnityPowers()`** | **TODO** | fill every table (below) |
+
+**`ComputeRootOfUnityPowers()`: what to fill:**
+
+| Table | Content | Consumer |
+|---|---|---|
+| `m_root_of_unity_powers` | `[rev(i)] = w^i`, i < N | native forward, RVV64 forward, `GetRootOfUnityPowers()` (tested) |
+| `m_precon64_root_of_unity_powers` | `floor(W·2^64/q)` per entry | native / RVV64 Shoup multiply (tested) |
+| `m_precon32_root_of_unity_powers` | `floor(W·2^32/q)` per entry | API compatibility |
+| `m_inv_root_of_unity_powers` | inverse twiddles **in the order your inverse kernel reads them** | native / RVV64 inverse |
+| `m_precon64_inv_…`, `m_precon32_inv_…` | Shoup factors of the above | same |
+| `m_rvv32_*` (4 tables, `uint32_t`) | only if q < 2^30: e32 twiddles + `floor(W·2^32/q)`, **layout of your choice** | RVV32 forward/inverse |
+
+Upstream stores inverse twiddles "stage by stage" (for m = N/2 … 1, push `inv[m+i]`) so the
+Gentleman–Sande loop reads them sequentially. The `m_rvv32_*` layout is the main design lever
+for the final stages (section 5).
+
+**Free-function kernels** (`src/ntt/ntt-internal.hpp`):
+
+| Kernel | File | Role |
+|---|---|---|
+| `ForwardTransformToBitReverseRadix2` | `ntt-radix-2.cpp` | native forward: Cooley–Tukey with Harvey lazy butterflies, values in [0, 4q) between stages |
+| `InverseTransformFromBitReverseRadix2` | `ntt-radix-2.cpp` | native inverse: Gentleman–Sande, N⁻¹ folded into the last stage |
+| `ReferenceForward…` / `ReferenceInverse…` | `ntt-radix-2.cpp` | slow, fully-reduced textbook versions for diffing stage by stage (debug aid, not dispatched) |
+| `ForwardTransformToBitReverseRVV32` / `InverseTransformFromBitReverseRVV32` | `ntt-rvv.cpp` | RVV, q < 2^30, 32-bit lanes: **the binfhe hot path, main deliverable** |
+| `ForwardTransformToBitReverseRVV64` / `InverseTransformFromBitReverseRVV64` | `ntt-rvv.cpp` | RVV, 64-bit lanes: BFV's 49/60-bit primes |
+
+Tests: `Ntt_*`: definition check (N ≤ 512), round trip up to N = 32768 for 11 modulus sizes,
+in place vs out of place, operand untouched, every mod-factor combination, negacyclic
+convolution through `EltwiseMultMod`, the public twiddle-table contract, the OpenFHE map
+pattern, and 8 threads sharing one object.
+
+### 3.5 Internal support (`src/util/`)
+
+| File | Purpose | State |
+|---|---|---|
+| `cpu-features.hpp/.cpp` | `HEXL_HAS_RVV` (compile time: TU built with V), `has_rvv` (runtime: `AT_HWCAP` has V and `HEXL_DISABLE_RVV` unset), `CurrentVLenBits()`, `kMaxModulusRVV32` | done |
+| `rvv-util.hpp` | the RVV vocabulary: `AddMod`, `SubMod`, `ReduceFromTwice`, `MulModShoupLazy`, `MulModBarrett` (e64) and `LoadNarrow`, `StoreWiden`, `AddMod32`, `SubMod32`, `MulModShoupLazy32`, `MulModBarrett32` (e32). Signatures fix LMUL=m1 | **TODO**: write these first, then compose kernels from them. Change the signatures if a better decomposition emerges |
+| `not-implemented.hpp/.cpp` | `HEXL_NOT_IMPLEMENTED()` | done |
+| `util-internal.hpp` | scalar `Compare(CMPINT, a, b)` for the native Cmp kernels | done |
+| `aligned-allocator.cpp` | the global `mallocStrategy` | done |
+
+### 3.6 `hexl/rvv/port-info.hpp`: `GetPortInfo()` (extension)
+
+Reports RVV compiled/available/enabled, VLEN of the current hart, build flags and compiler.
+The test runner prints it and `bench-hexl` writes it into every JSON `context`, so a result
+file always says which code path produced it. (Same idea as the IPCEI suite's "manipulation
+check": a silent scalar fallback must show up in the output.)
+
+### 3.7 Not ported (on purpose)
+
+`hexl/experimental/*` (SEAL key-switch and dyadic multiply, FFT-like, LR mat-vec): used by
+neither OpenFHE's backend nor SEAL's core path. The AVX-512 tables are kept only as empty
+getters.
+
+---
+
+## 4. Suggested order of work
+
+Each milestone ends with a command that must pass.
+
+| # | Work | Done when |
+|---|---|---|
+| M0 | `number-theory.cpp` (11 functions) | `make test` → all `NumberTheory_*` PASS |
+| M1 | the 7 native eltwise kernels | `HEXL_DISABLE_RVV=1 build/rvv-release/bin/hexl-tests Eltwise` all PASS |
+| M2 | `ComputeRootOfUnityPowers` (64-bit tables) + native radix-2 forward/inverse | `make ISA=scalar test` fully green, **0 TODO** |
+| M3 | integration with the native path only | `make ISA=scalar openfhe openfhe-check WITH_RVV_HEXL=ON`: OpenFHE's own tests pass on the port |
+| M4 | `rvv-util.hpp` + RVV eltwise (e64 first, then e32 for Mult/FMA) | `make test` green (both passes) |
+| M5 | RVV32 NTT (+ `m_rvv32_*` tables): the binfhe path | `Ntt_*` green; `bench-hexl --benchmark_filter=NTT.*qbits:27` vs `HEXL_DISABLE_RVV=1` |
+| M6 | RVV64 NTT | green; honest comparison against native for 60-bit q |
+| M7 | full matrix on both K3 clusters | `bench/run.sh` |
+
+Stop after M2/M3 and run the benchmarks once: `ISA=scalar` + native kernels is the fair "base
+RISC-V" point, and `ISA=rvv` + `HEXL_DISABLE_RVV=1` shows what the compiler's auto-vectoriser
+already gets from your native code.
+
+---
+
+## 5. RVV design notes (from the D01 measurements)
+
+Intrinsics reference: `docs/rvv_intrinsics/` (`make rvv-intrinsics-doc`; see the README section
+"RVV intrinsics reference" for where each family is listed).
+
+* **SEW=e32 whenever q < 2^30.** On both K3 clusters the multiplier retires 8× more bits per
+  cycle at e32 than at e64 (the e64 multiplier does one element per cycle). binfhe's moduli are
+  ≤ 28 bits, so the e32 path covers the whole TFHE side.
+* **LMUL=m1** for transfer and compute: larger LMUL adds no throughput. Fractional LMUL only
+  exposes the low part of a register (verified on silicon). **mf2 is the smallest portable
+  one**: X100 returns vl=0 and traps on e32/mf4 and mf8.
+* **64-bit storage, 32-bit compute.** Load `e64,m2` and narrow (`vncvt.x.x.w`) to `e32,m1`;
+  widen (`vzext.vf2`) before the store. In the NTT do this once, in the first and last stage,
+  not as separate passes. `[0, 4q) < 2^32` holds for q < 2^30, so lazy butterflies fit in
+  32-bit lanes.
+* **VLEN-agnostic, always.** X100 VLEN=256, A100 VLEN=1024, same binary. `vsetvl` in every
+  strip, and never cache VLEN in a table built at construction time. The benchmark runner
+  starts A100 processes through `ailaunch` (VLEN changes across clusters, so migration after
+  vector code has run is unsafe).
+* **Final NTT stages (t < VL) decide performance on this silicon, not instruction selection.**
+  D01's microbenchmark: vectorising them across blocks (strided `vlse32` with stride 2t, or
+  `vlseg2e32`/`vlseg4e32` for t = 1, 2, or replicated twiddles in `m_rvv32_*`) almost doubles
+  the X100 gain. On A100, avoid strided access (in-register transposes instead).
+* **Then block in the register file** (radix-4/8: 2–3 stages per memory pass). The transform
+  sits >5× below the roofline balance point, so once lane occupancy is fixed, bandwidth
+  becomes the limit. A100's 4× larger register file gains the most.
+* **Hand instruction selection comes last.** Measured as the least profitable step before the
+  above (marginal on X100, counter-productive on A100).
+* RVA23 guarantees **Zvbb** (`vbrev.v`, `vrev8`, `vwsll`) and Zba/Zbb, useful for
+  bit-reversal and shifts. Detect multi-letter extensions with `riscv_hwprobe` if you need them
+  at runtime.
+
+---
+
+## 6. Testing and benchmarking methodology
+
+**Correctness ladder:** `make rvv-hexl-test` (both dispatch paths against `__int128` oracles, which were
+validated against upstream Intel HEXL in release and `HEXL_DEBUG` builds) → `make BUILD=debug
+rvv-hexl-test` (argument contracts) → `make SANITIZE=address test` → spike at VLEN 256 and 1024 (laptop)
+→ `make openfhe-check WITH_RVV_HEXL=ON` (OpenFHE's own `core_tests`/`pke_tests`/`binfhe_tests` on the port).
+
+**Benchmark matrix** (`bench/run.sh`), with every axis changing exactly one variable:
+
+| Comparison | Isolates |
+|---|---|
+| `n64-rvvhexl` vs **`n64`** | the HEXL backend (same 64-bit word size, same flags, identical bench binaries) |
+| `n64-rvvhexl` vs **`n32`** | the port vs the best stock binfhe configuration (D01's recommended baseline) |
+| `ISA=rvv` vs `ISA=scalar` | the vector unit (scalar `-march` = the rvv one minus V; on the K3 `rva23u64` minus V/Zv*) |
+| `n64-rvvhexl` vs the same + `HEXL_DISABLE_RVV=1` | your RVV kernels vs your native kernels under the same auto-vectoriser |
+| x100 vs a100 | VLEN 256 vs 1024, in-order vs out-of-order |
+| `bench-hexl` on K3 vs `HEXL_IMPL=intel` on AMD/Intel | the cross-architecture table (same source, AVX-512 vs RVV vs AVX2 fallback) |
+
+Never compare an `n64-rvvhexl` result with an `n32` run and call the difference "HEXL": it mixes the
+backend with the word size (same caveat as the x86 HEXL runs in D01).
+
+**Suites:**
+* `bench/hexl`: HEXL's own kernel set at upstream's sizes (n = 1024/4096/16384; 45-bit NTT
+  primes) plus our moduli (27/49/60 bits) and `BM_MemcpyReference`, which gives the
+  bandwidth line each eltwise kernel should be read against.
+* `bench/openfhe`: the IPCEI benches (NTT microbench, BFV OpenMP sweep, TFHE stress/flags/LUT),
+  same arguments as `ZKP+FHE Research/benchmark.sh`, so results line up with
+  `results/benchmarks-k3-*.json`.
+* OpenFHE upstream (`lib-benchmark`, `poly-benchmark-{4k,16k}`, `binfhe-ginx`, `VectorMath`,
+  and on rvv-hexl builds the `*-hexl` variants Intel used to evaluate HEXL in OpenFHE).

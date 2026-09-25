@@ -1,0 +1,16 @@
+# build outputs (every variant lives under build/<ISA>-<BUILD>/, OpenFHE under build/openfhe/)
+/build/
+# third-party sources and local installs fetched by third_party/*.sh
+/third_party/src/
+/third_party/install/
+# RVV intrinsics reference (github.com/riscv-non-isa/rvv-intrinsic-doc, ~160 MB):
+# local copy only, re-create with `make rvv-intrinsics-doc`
+/docs/rvv_intrinsics/
+# benchmark results: machine-specific, collect and archive them separately
+/results/
+# editor / OS
+.DS_Store
+*.swp
+.vscode/
+.idea/
+.cache/

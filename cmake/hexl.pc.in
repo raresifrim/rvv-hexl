@@ -1,0 +1,9 @@
+prefix=@PREFIX@
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: hexl
+Description: rvv-hexl - RISC-V (RVV) port of Intel HEXL (API @HEXL_VERSION@)
+Version: @HEXL_VERSION@
+Libs: -L${libdir} -lhexl
+Cflags: -I${includedir}

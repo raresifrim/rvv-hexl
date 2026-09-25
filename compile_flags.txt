@@ -1,0 +1,7 @@
+-std=c++17
+-Iinclude
+-Isrc
+-Itest
+-Wall
+-Wextra
+-Wno-unused-parameter

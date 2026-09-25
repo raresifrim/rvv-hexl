@@ -1,0 +1,2 @@
+# Same style as upstream Intel HEXL (Google), so diffs against upstream stay readable.
+BasedOnStyle: Google
