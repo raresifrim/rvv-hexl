@@ -212,7 +212,9 @@ GBENCH_LDLIBS   := $(if $(GBENCH_PREFIX),-L$(GBENCH_PREFIX)/lib $(call RPATH,$(G
 #                   OpenFHE on some platforms). Default: the target CPU's word size.
 #   WITH_RVV_HEXL   ON: OpenFHE + openfhe-hexl overlay linked against this library
 #                   (= upstream's -DWITH_INTEL_HEXL=ON -DINTEL_HEXL_PREBUILT=ON).
-#                   Requires NATIVE_SIZE=64. Default OFF (stock OpenFHE).
+#                   Works at NATIVE_SIZE=64 and 32 (the 32-bit build uses
+#                   rvv-hexl's uint32_t API through a patched overlay, see
+#                   third_party/patches/). Default OFF (stock OpenFHE).
 #   OPENFHE_BENCHMARKS / OPENFHE_UNITTESTS  build upstream's benchmark suite /
 #                   unit tests (default ON / ON only together with rvv-hexl).
 # Each combination gets its own directory, so they coexist and can be compared:

@@ -169,6 +169,19 @@ inline std::vector<uint64_t> Random(size_t n, uint64_t bound) {
   return v;
 }
 
+/// Converts an oracle vector (uint64_t) to the storage word under test.
+template <typename Word>
+inline std::vector<Word> As(const std::vector<uint64_t>& v) {
+  return std::vector<Word>(v.begin(), v.end());
+}
+
+/// Exclusive bound for "any value of this word" (Random(n, AnyWord<W>())).
+/// For uint64_t the RNG cannot take 2^64, so 2^64 - 1 is used.
+template <typename Word>
+constexpr uint64_t AnyWord() {
+  return sizeof(Word) == 8 ? ~0ULL : (1ULL << (8 * sizeof(Word)));
+}
+
 /// Sizes that exercise every tail case of a strip-mined RVV loop
 /// (VLMAX is 4/8 for e64/e32 at VLEN=256 and 16/32 at VLEN=1024).
 inline std::vector<size_t> EltwiseSizes() {

@@ -18,10 +18,13 @@
 //     on e32/mf4 and mf8. Never use mf4/mf8.
 //   * Stay VLEN-agnostic (vsetvl every strip): X100 has VLEN=256, A100 1024.
 //
-// Storage is always uint64_t (OpenFHE's HEXL backend requires NATIVE_SIZE=64),
-// so the e32 path narrows on load and widens on store:
-//     vle64 (e64,m2) -> vncvt.x.x.w -> e32,m1   ...compute...   vzext.vf2 -> vse64
-// Alternative worth measuring: e64,m1 -> e32,mf2 (half the elements per op).
+// Storage is uint64_t (OpenFHE NATIVE_SIZE=64) or uint32_t (NATIVE_SIZE=32).
+// The e32 kernels are templates on the storage word and read/write through
+// Load32 / Store32 below, overloaded on the pointer type:
+//   uint64_t: vle64 (e64,m2) -> vncvt.x.x.w -> e32,m1 ... vzext.vf2 -> vse64
+//   uint32_t: vle32 (e32,m1) ...                                    ... vse32
+// so the arithmetic is written once. Alternative worth measuring for uint64_t
+// storage: e64,m1 -> e32,mf2 (half the elements per op).
 
 #pragma once
 
@@ -92,15 +95,25 @@ inline vuint64m1_t MulModBarrett(vuint64m1_t a, vuint64m1_t b, uint64_t q,
 // e32 path (q < 2^30): compute in 32-bit lanes, store in 64-bit words
 // ---------------------------------------------------------------------------
 
-/// @brief Loads vl uint64_t values (each < 2^32) as 32-bit lanes.
-/// Hint: __riscv_vle64_v_u64m2 + __riscv_vncvt_x_x_w_u32m1.
-inline vuint32m1_t LoadNarrow(const uint64_t* p, size_t vl) {
+/// @brief Loads vl values into 32-bit lanes. Overloaded on the storage type so
+/// that one kernel template serves both OpenFHE word sizes:
+///   uint64_t* (NATIVE_SIZE=64): each value < 2^32, narrow on load.
+///     Hint: __riscv_vle64_v_u64m2 + __riscv_vncvt_x_x_w_u32m1.
+///   uint32_t* (NATIVE_SIZE=32): plain __riscv_vle32_v_u32m1.
+inline vuint32m1_t Load32(const uint64_t* p, size_t vl) {
+  HEXL_NOT_IMPLEMENTED();
+}
+inline vuint32m1_t Load32(const uint32_t* p, size_t vl) {
   HEXL_NOT_IMPLEMENTED();
 }
 
-/// @brief Stores vl 32-bit lanes zero-extended into uint64_t words.
-/// Hint: __riscv_vzext_vf2_u64m2 + __riscv_vse64_v_u64m2.
-inline void StoreWiden(uint64_t* p, vuint32m1_t v, size_t vl) {
+/// @brief Stores vl 32-bit lanes into the storage type (see Load32).
+///   uint64_t*: widen, __riscv_vzext_vf2_u64m2 + __riscv_vse64_v_u64m2.
+///   uint32_t*: plain __riscv_vse32_v_u32m1.
+inline void Store32(uint64_t* p, vuint32m1_t v, size_t vl) {
+  HEXL_NOT_IMPLEMENTED();
+}
+inline void Store32(uint32_t* p, vuint32m1_t v, size_t vl) {
   HEXL_NOT_IMPLEMENTED();
 }
 

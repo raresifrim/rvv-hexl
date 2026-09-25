@@ -10,6 +10,7 @@
 #include "hexl/util/check.hpp"
 #include "util/cpu-features.hpp"
 #include "util/not-implemented.hpp"
+#include "util/util-internal.hpp"
 
 namespace intel {
 namespace hexl {
@@ -39,28 +40,64 @@ void EltwiseReduceMod(uint64_t* result, const uint64_t* operand, uint64_t n,
 
 #ifdef HEXL_HAS_RVV
   if (has_rvv) {
-    HEXL_VLOG(3, "Calling EltwiseReduceModRVV");
-    EltwiseReduceModRVV(result, operand, n, modulus, input_mod_factor,
-                        output_mod_factor);
+    HEXL_VLOG(3, "Calling EltwiseReduceModRVV<uint64_t>");
+    EltwiseReduceModRVV<uint64_t>(result, operand, n, modulus, input_mod_factor, output_mod_factor);
     return;
   }
 #endif
 
-  HEXL_VLOG(3, "Calling EltwiseReduceModNative");
-  EltwiseReduceModNative(result, operand, n, modulus, input_mod_factor,
-                         output_mod_factor);
+  HEXL_VLOG(3, "Calling EltwiseReduceModNative<uint64_t>");
+  EltwiseReduceModNative<uint64_t>(result, operand, n, modulus, input_mod_factor, output_mod_factor);
+}
+
+// ---- rvv-hexl extension: 32-bit storage ----------------------------------
+
+void EltwiseReduceMod(uint32_t* result, const uint32_t* operand, uint64_t n,
+                      uint64_t modulus, uint64_t input_mod_factor,
+                      uint64_t output_mod_factor) {
+  HEXL_CHECK(operand != nullptr, "Require operand != nullptr");
+  HEXL_CHECK(result != nullptr, "Require result != nullptr");
+  HEXL_CHECK(n != 0, "Require n != 0");
+  HEXL_CHECK(modulus > 1, "Require modulus > 1");
+  HEXL_CHECK(input_mod_factor == modulus || input_mod_factor == 2 ||
+                 input_mod_factor == 4,
+             "input_mod_factor must be modulus or 2 or 4" << input_mod_factor);
+  HEXL_CHECK(output_mod_factor == 1 || output_mod_factor == 2,
+             "output_mod_factor must be 1 or 2 " << output_mod_factor);
+
+  // Same short-cut as upstream: nothing to reduce, just copy.
+  if (input_mod_factor == output_mod_factor) {
+    if (operand != result) {
+      for (size_t i = 0; i < n; ++i) {
+        result[i] = operand[i];
+      }
+    }
+    return;
+  }
+  HEXL_CHECK(modulus <= (1ULL << 32), "Require modulus <= 2**32");
+  HEXL_CHECK(input_mod_factor == modulus || input_mod_factor * modulus <= (1ULL << 32),
+             "Require input_mod_factor * modulus <= 2**32");
+
+#ifdef HEXL_HAS_RVV
+  if (has_rvv && modulus < kMaxModulusRVV32) {
+    HEXL_VLOG(3, "Calling EltwiseReduceModRVV<uint32_t>");
+    EltwiseReduceModRVV<uint32_t>(result, operand, n, modulus, input_mod_factor, output_mod_factor);
+    return;
+  }
+#endif
+
+  HEXL_VLOG(3, "Calling EltwiseReduceModNative<uint32_t>");
+  EltwiseReduceModNative<uint32_t>(result, operand, n, modulus, input_mod_factor, output_mod_factor);
 }
 
 // ---------------------------------------------------------------------------
 // Native (scalar) kernel.  TODO(port)
 // ---------------------------------------------------------------------------
 
-void EltwiseReduceModNative(uint64_t* result, const uint64_t* operand,
-                            uint64_t n, uint64_t modulus,
-                            uint64_t input_mod_factor,
-                            uint64_t output_mod_factor) {
+template <typename Word>
+void EltwiseReduceModNative(Word* result, const Word* operand, uint64_t n, uint64_t modulus, uint64_t input_mod_factor, uint64_t output_mod_factor) {
   // TODO(port): three cases.
-  //   input_mod_factor == modulus: arbitrary 64-bit x -> Barrett with
+  //   input_mod_factor == modulus: arbitrary Word x -> Barrett with
   //     q_barr = MultiplyFactor(1, 64, q).BarrettFactor();
   //     BarrettReduce64<1> (output [0,q)) or BarrettReduce64<2> ([0,2q)).
   //   input_mod_factor == 2: x in [0,2q) -> ReduceMod<2>.

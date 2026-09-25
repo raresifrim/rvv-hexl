@@ -10,28 +10,40 @@
 
 #include <riscv_vector.h>
 
+#include <type_traits>
+
 #include "util/not-implemented.hpp"
 #include "util/rvv-util.hpp"
 
 namespace intel {
 namespace hexl {
 
-void EltwiseAddModRVV(uint64_t* result, const uint64_t* operand1,
-                       const uint64_t* operand2, uint64_t n, uint64_t modulus) {
-  // TODO(port-rvv): strip-mined loop, e64/m1 (a plain add/sub gains nothing
-  // from narrowing to e32: it is load/store bound, measure before trying):
-  //   for (size_t vl; n > 0; n -= vl, operand1 += vl, operand2 += vl, result += vl) {
-  //     vl = __riscv_vsetvl_e64m1(n);
-  //     ... vle64 x2 -> rvv::AddMod -> vse64 ...
+template <typename Word>
+void EltwiseAddModRVV(Word* result, const Word* operand1, const Word* operand2,
+               uint64_t n, uint64_t modulus) {
+  // TODO(port-rvv): strip-mined loop. The natural lane width follows the
+  // storage (a plain add/sub is load/store bound, so no conversions):
+  //   if constexpr (std::is_same_v<Word, uint64_t>) {
+  //     for (size_t vl; n > 0; n -= vl, operand1 += vl, operand2 += vl, result += vl) {
+  //       vl = __riscv_vsetvl_e64m1(n);   // vle64 x2 -> rvv::AddMod -> vse64
+  //     }
+  //   } else {                              // uint32_t storage, q < 2^30
+  //     ... __riscv_vsetvl_e32m1 / vle32 / rvv::AddMod32 / vse32 ...
   //   }
   HEXL_NOT_IMPLEMENTED();
 }
 
-void EltwiseAddModRVV(uint64_t* result, const uint64_t* operand1,
-                       uint64_t operand2, uint64_t n, uint64_t modulus) {
+template <typename Word>
+void EltwiseAddModRVV(Word* result, const Word* operand1, uint64_t operand2,
+               uint64_t n, uint64_t modulus) {
   // TODO(port-rvv): as above with operand2 broadcast (the .vx instruction forms).
   HEXL_NOT_IMPLEMENTED();
 }
+
+template void EltwiseAddModRVV<uint64_t>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
+template void EltwiseAddModRVV<uint32_t>(uint32_t*, const uint32_t*, const uint32_t*, uint64_t, uint64_t);
+template void EltwiseAddModRVV<uint64_t>(uint64_t*, const uint64_t*, uint64_t, uint64_t, uint64_t);
+template void EltwiseAddModRVV<uint32_t>(uint32_t*, const uint32_t*, uint64_t, uint64_t, uint64_t);
 
 }  // namespace hexl
 }  // namespace intel

@@ -26,6 +26,8 @@
 
 #include <riscv_vector.h>
 
+#include <type_traits>
+
 #include "hexl/number-theory/number-theory.hpp"
 #include "util/not-implemented.hpp"
 #include "util/rvv-util.hpp"
@@ -33,16 +35,24 @@
 namespace intel {
 namespace hexl {
 
-void ForwardTransformToBitReverseRVV32(uint64_t* result,
-                                       const uint64_t* operand, uint64_t n,
+template <typename Word>
+void ForwardTransformToBitReverseRVV32(Word* result,
+                                       const Word* operand, uint64_t n,
                                        uint64_t modulus, const uint32_t* w,
                                        const uint32_t* w_precon,
                                        uint64_t input_mod_factor,
                                        uint64_t output_mod_factor) {
-  // TODO(port-rvv): the binfhe hot path (N = 1024/2048, q ~ 2^27).
-  //   * Narrow the 64-bit input to 32-bit lanes once (in the first stage, not
-  //     a separate pass), keep [0, 4q) < 2^32 lazily through the stages, and
-  //     widen back in the last stage.
+  // TODO(port-rvv): the binfhe hot path (N = 1024/2048, q ~ 2^27), written
+  //   once for both storage types:
+  //   * Read the input through rvv::Load32 in the first stage and write the
+  //     output through rvv::Store32 in the last stage (not as separate
+  //     passes): for Word = uint64_t that is the narrow/widen, for uint32_t a
+  //     plain vle32/vse32. Keep [0, 4q) < 2^32 lazily through the stages.
+  //   * The middle stages work in place on 32-bit data. For Word = uint32_t
+  //     that is result itself; for uint64_t you need a 32-bit working copy
+  //     (thread_local, see below) or do every stage through Load32/Store32:
+  //       if constexpr (std::is_same_v<Word, uint32_t>) { /* in place */ }
+  //       else { /* 32-bit scratch */ }
   //   * No scratch member in the NTT object (concurrent callers). If you need
   //     a 32-bit working buffer use a thread_local AlignedVector64<uint32_t>
   //     sized N, or work directly on result.
@@ -50,8 +60,9 @@ void ForwardTransformToBitReverseRVV32(uint64_t* result,
   HEXL_NOT_IMPLEMENTED();
 }
 
-void InverseTransformFromBitReverseRVV32(uint64_t* result,
-                                         const uint64_t* operand, uint64_t n,
+template <typename Word>
+void InverseTransformFromBitReverseRVV32(Word* result,
+                                         const Word* operand, uint64_t n,
                                          uint64_t modulus, const uint32_t* w_inv,
                                          const uint32_t* w_inv_precon,
                                          uint64_t input_mod_factor,
@@ -81,6 +92,19 @@ void InverseTransformFromBitReverseRVV64(
   // TODO(port-rvv): mirror of the 64-bit forward kernel.
   HEXL_NOT_IMPLEMENTED();
 }
+
+template void ForwardTransformToBitReverseRVV32<uint64_t>(
+    uint64_t*, const uint64_t*, uint64_t, uint64_t, const uint32_t*,
+    const uint32_t*, uint64_t, uint64_t);
+template void ForwardTransformToBitReverseRVV32<uint32_t>(
+    uint32_t*, const uint32_t*, uint64_t, uint64_t, const uint32_t*,
+    const uint32_t*, uint64_t, uint64_t);
+template void InverseTransformFromBitReverseRVV32<uint64_t>(
+    uint64_t*, const uint64_t*, uint64_t, uint64_t, const uint32_t*,
+    const uint32_t*, uint64_t, uint64_t);
+template void InverseTransformFromBitReverseRVV32<uint32_t>(
+    uint32_t*, const uint32_t*, uint64_t, uint64_t, const uint32_t*,
+    const uint32_t*, uint64_t, uint64_t);
 
 }  // namespace hexl
 }  // namespace intel

@@ -2,9 +2,13 @@
 // Copyright (C) 2026 IPCEI-NXP A14 team (RISC-V port)
 // SPDX-License-Identifier: Apache-2.0
 //
-// Internal kernels behind EltwiseAddMod/EltwiseSubMod-style entry points.
-// Native = portable scalar C++ (also the "no RVV" reference path).
-// RVV    = hand-written RVV 1.0 kernels (src/eltwise/eltwise-sub-mod-rvv.cpp).
+// Kernels behind EltwiseSubMod. Native = portable scalar C++ (also the "no RVV"
+// reference path). RVV = RVV 1.0 kernels in eltwise-sub-mod-rvv.cpp.
+// Kernels are templates on the storage word:
+//   Word = uint64_t  OpenFHE NATIVE_SIZE=64 (upstream HEXL API)
+//   Word = uint32_t  OpenFHE NATIVE_SIZE=32 (rvv-hexl extension)
+// Write one body and specialise where it pays with
+//   if constexpr (std::is_same_v<Word, uint32_t>) { ... } else { ... }
 
 #pragma once
 
@@ -15,23 +19,27 @@
 namespace intel {
 namespace hexl {
 
-/// @brief Native vector-vector: result[i] = (operand1[i]  operand2[i]) mod modulus
-void EltwiseSubModNative(uint64_t* result, const uint64_t* operand1,
-                          const uint64_t* operand2, uint64_t n,
-                          uint64_t modulus);
+/// @brief Native vector-vector: result[i] = (operand1[i] - operand2[i]) mod modulus
+template <typename Word>
+void EltwiseSubModNative(Word* result, const Word* operand1, const Word* operand2,
+                  uint64_t n, uint64_t modulus);
 
-/// @brief Native vector-scalar: result[i] = (operand1[i]  operand2) mod modulus
-void EltwiseSubModNative(uint64_t* result, const uint64_t* operand1,
-                          uint64_t operand2, uint64_t n, uint64_t modulus);
+/// @brief Native vector-scalar: result[i] = (operand1[i] - operand2) mod modulus
+template <typename Word>
+void EltwiseSubModNative(Word* result, const Word* operand1, uint64_t operand2,
+                  uint64_t n, uint64_t modulus);
 
 #ifdef HEXL_HAS_RVV
-/// @brief RVV vector-vector variant (same contract as the native one)
-void EltwiseSubModRVV(uint64_t* result, const uint64_t* operand1,
-                       const uint64_t* operand2, uint64_t n, uint64_t modulus);
+/// @brief RVV vector-vector. Word = uint64_t: any modulus < 2^63.
+/// Word = uint32_t: modulus < 2^30 (guaranteed by the dispatcher).
+template <typename Word>
+void EltwiseSubModRVV(Word* result, const Word* operand1, const Word* operand2,
+               uint64_t n, uint64_t modulus);
 
-/// @brief RVV vector-scalar variant (same contract as the native one)
-void EltwiseSubModRVV(uint64_t* result, const uint64_t* operand1,
-                       uint64_t operand2, uint64_t n, uint64_t modulus);
+/// @brief RVV vector-scalar, same constraints.
+template <typename Word>
+void EltwiseSubModRVV(Word* result, const Word* operand1, uint64_t operand2,
+               uint64_t n, uint64_t modulus);
 #endif
 
 }  // namespace hexl

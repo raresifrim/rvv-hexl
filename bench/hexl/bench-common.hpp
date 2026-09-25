@@ -41,6 +41,13 @@ inline Vec Random(size_t n, uint64_t bound) {
   return Vec(v.begin(), v.end());
 }
 
+/// Same, for any storage word (the 32-bit benches use uint32_t).
+template <typename Word>
+inline intel::hexl::AlignedVector64<Word> RandomW(size_t n, uint64_t bound) {
+  auto v = hexltest::oracle::Random(n, bound);
+  return intel::hexl::AlignedVector64<Word>(v.begin(), v.end());
+}
+
 }  // namespace hexlbench
 
 /// Runs `expr` once before timing. If it reaches a port stub (or throws for

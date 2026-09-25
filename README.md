@@ -12,7 +12,7 @@ Every kernel body is a stub that throws `[rvv-hexl TODO] <function>`. `make todo
 them. Read [docs/PORTING_GUIDE.md](docs/PORTING_GUIDE.md) before you start.
 
 ```
-OpenFHE (NATIVE_SIZE=64) ── openfhe-hexl HAL ── intel::hexl API ── rvv-hexl
+OpenFHE (NATIVE_SIZE 64|32) ── openfhe-hexl HAL ── intel::hexl API ── rvv-hexl
                                                   (this repo)       ├─ dispatch (done)
                                                                     ├─ native C++ kernels (TODO)
                                                                     └─ RVV kernels (TODO)
@@ -36,8 +36,9 @@ Then, once kernels are implemented:
 make openfhe                          # stock OpenFHE, NATIVE_SIZE = CPU word size (64)
 make openfhe NATIVE_SIZE=32           # stock, 32-bit words (best stock binfhe config)
 make openfhe WITH_RVV_HEXL=ON         # OpenFHE + openfhe-hexl on top of rvv-hexl
+make openfhe NATIVE_SIZE=32 WITH_RVV_HEXL=ON   # same with 32-bit words (binfhe)
 make openfhe-check WITH_RVV_HEXL=ON   # OpenFHE's own unit tests on the port
-make ISA=scalar openfhe-all           # the three above, built without V (no-RVV baseline)
+make ISA=scalar openfhe-all           # the four above, built without V (no-RVV baseline)
 make bench && make ISA=scalar bench
 bench/run.sh                          # full matrix, both K3 clusters -> results/<host>-<date>/
 ```
@@ -79,7 +80,7 @@ selected by `NATIVE_SIZE` / `WITH_RVV_HEXL` (and `ISA`).
 | `make openfhe` | configure + build + install OpenFHE v1.5.1 into `build/openfhe/<ISA>/n<NATIVE_SIZE>[-rvvhexl]/` |
 | `make openfhe-check` | OpenFHE's `core_tests`, `pke_tests`, `binfhe_tests` for that build |
 | `make openfhe-bench` | the IPCEI benches against that build |
-| `make openfhe-all` | the comparison set: `n64`, `n32`, `n64-rvvhexl` |
+| `make openfhe-all` | the comparison set: `n64`, `n32`, `n64-rvvhexl`, `n32-rvvhexl` |
 | `make openfhe-list` | what exists for this ISA (read from each install's `config_core.h`) |
 
 | Everything | |
@@ -97,7 +98,7 @@ selected by `NATIVE_SIZE` / `WITH_RVV_HEXL` (and `ISA`).
 | `HEXL_SHARED_LIB` | `ON`, `OFF` | also build `libhexl.so` |
 | `HEXL_TESTING` / `HEXL_BENCHMARK` | `OFF`, `ON` | `make rvv-hexl` also builds the test / bench binary |
 | `NATIVE_SIZE` | CPU word size (64), `32` | OpenFHE's native integer width |
-| `WITH_RVV_HEXL` | `OFF`, `ON` | build OpenFHE with the HEXL backend on top of rvv-hexl (installs rvv-hexl of the same `ISA`/`BUILD` first; requires `NATIVE_SIZE=64`) |
+| `WITH_RVV_HEXL` | `OFF`, `ON` | build OpenFHE with the HEXL backend on top of rvv-hexl (installs rvv-hexl of the same `ISA`/`BUILD` first; `NATIVE_SIZE` 64 or 32) |
 | `OPENFHE_BENCHMARKS` / `OPENFHE_UNITTESTS` | `ON` / follows `WITH_RVV_HEXL` | build upstream OpenFHE's benchmark suite / unit tests |
 | `RISCV_MARCH` / `RISCV_SCALAR_MARCH` | auto-detected | force the `-march` for `ISA=rvv` / `ISA=scalar` (the toolchain checks still run) |
 | `HEXL_IMPL` | `rvv`, `intel` | build the same tests/benches against upstream Intel HEXL (`INTEL_HEXL_PREFIX=`) |
@@ -237,6 +238,8 @@ prebuilt route, with `INTEL_HEXL_HINT_DIR` pointing at the rvv-hexl install.
 ## Notes
 
 * The repository path must not contain spaces (GNU make limitation).
-* OpenFHE's HEXL backend needs `NATIVE_SIZE=64`: it casts coefficient vectors to `uint64_t*`.
-  The 32-bit (e32) RVV path is internal to this library. See the porting guide.
+* Upstream's HEXL backend only works at `NATIVE_SIZE=64`: it casts coefficient vectors to
+  `uint64_t*`. rvv-hexl adds a `uint32_t` API (`HEXL_RVV_HAS_32BIT_API`), and
+  `third_party/patches/openfhe-hexl-wordsize.py` makes the overlay use OpenFHE's own word type,
+  so `WITH_RVV_HEXL=ON` also works at `NATIVE_SIZE=32`. See the porting guide, section 1.
 * License: Apache-2.0, as upstream Intel HEXL (the public headers derive from it).

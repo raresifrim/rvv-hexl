@@ -31,5 +31,16 @@ void EltwiseCmpSubMod(uint64_t* result, const uint64_t* operand1, uint64_t n,
                       uint64_t modulus, CMPINT cmp, uint64_t bound,
                       uint64_t diff);
 
+
+// ---- rvv-hexl extension: 32-bit storage (OpenFHE NATIVE_SIZE=32) -----------
+// Same contract as above with uint32_t data; scalars stay uint64_t. All values
+// (inputs and outputs, including the "lazy" ranges) must fit in 32 bits.
+// q < 2^30 runs the RVV e32 kernels without any 64<->32 conversion; larger q
+// falls back to the native kernels. Not part of upstream Intel HEXL: guard uses
+// with #ifdef HEXL_RVV_HAS_32BIT_API.
+void EltwiseCmpSubMod(uint32_t* result, const uint32_t* operand1, uint64_t n,
+                      uint64_t modulus, CMPINT cmp, uint64_t bound,
+                      uint64_t diff);
+
 }  // namespace hexl
 }  // namespace intel

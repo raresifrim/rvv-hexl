@@ -25,8 +25,11 @@
 #   * Shared libraries only, for every configuration: the benches are byte-identical
 #     across configurations and only RPATH / LD_LIBRARY_PATH decides which OpenFHE
 #     they load.
-#   * NATIVE_SIZE=64 is mandatory with rvv-hexl: OpenFHE's HEXL HAL reinterpret_casts
-#     coefficient vectors to uint64_t*, so a 32-bit HEXL build compiles and is WRONG.
+#   * rvv-hexl builds work at NATIVE_SIZE=64 and 32. Upstream's HEXL HAL casts every
+#     coefficient vector to uint64_t* (a 32-bit build would compile and be WRONG), so
+#     after staging, patches/openfhe-hexl-wordsize.py rewrites those casts to OpenFHE's
+#     BasicInteger (identical code at 64; rvv-hexl's uint32_t API at 32) and fixes the
+#     overlay's riscv64 MultD branch, which does not compile at NATIVE_SIZE=32.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -123,6 +126,8 @@ stage_rvvhexl() {
       || { echo "ERROR: staged CMakeLists.txt has no WITH_INTEL_HEXL" >&2; exit 1; }
     touch "$RVVHEXL_SRC/.staged"
   fi
+  # idempotent: safe on an already staged (and patched) tree
+  python3 "$HERE/patches/openfhe-hexl-wordsize.py" "$RVVHEXL_SRC"
 }
 
 # build_openfhe <src> <label> [extra cmake args...]
@@ -174,7 +179,7 @@ build_openfhe() {
 case "${1:-}" in
   build)
     if [ "$WITH_RVV_HEXL" = ON ]; then
-      [ "$NATIVE_SIZE" = 64 ] || { echo "ERROR: WITH_RVV_HEXL=ON requires NATIVE_SIZE=64" >&2; exit 1; }
+      case "$NATIVE_SIZE" in 64|32) ;; *) echo "ERROR: WITH_RVV_HEXL=ON supports NATIVE_SIZE=64 or 32" >&2; exit 1 ;; esac
       HEXL_PREFIX="${HEXL_PREFIX:?HEXL_PREFIX must point at an rvv-hexl install}"
       [ -f "$HEXL_PREFIX/lib/cmake/hexl-1.2.6/HEXLConfig.cmake" ] \
         || { echo "ERROR: no HEXLConfig.cmake under $HEXL_PREFIX (make rvv-hexl-install)" >&2; exit 1; }

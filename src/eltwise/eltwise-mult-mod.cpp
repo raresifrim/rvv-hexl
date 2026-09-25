@@ -35,11 +35,11 @@ void EltwiseMultMod(uint64_t* result, const uint64_t* operand1,
 #ifdef HEXL_HAS_RVV
   if (has_rvv) {
     if (modulus < kMaxModulusRVV32) {
-      HEXL_VLOG(3, "Calling EltwiseMultModRVV32");
+      HEXL_VLOG(3, "Calling EltwiseMultModRVV32<uint64_t>");
       switch (input_mod_factor) {
-        case 1: EltwiseMultModRVV32<1>(result, operand1, operand2, n, modulus); break;
-        case 2: EltwiseMultModRVV32<2>(result, operand1, operand2, n, modulus); break;
-        case 4: EltwiseMultModRVV32<4>(result, operand1, operand2, n, modulus); break;
+        case 1: EltwiseMultModRVV32<uint64_t, 1>(result, operand1, operand2, n, modulus); break;
+        case 2: EltwiseMultModRVV32<uint64_t, 2>(result, operand1, operand2, n, modulus); break;
+        case 4: EltwiseMultModRVV32<uint64_t, 4>(result, operand1, operand2, n, modulus); break;
       }
     } else {
       HEXL_VLOG(3, "Calling EltwiseMultModRVV64");
@@ -53,11 +53,51 @@ void EltwiseMultMod(uint64_t* result, const uint64_t* operand1,
   }
 #endif
 
-  HEXL_VLOG(3, "Calling EltwiseMultModNative");
+  HEXL_VLOG(3, "Calling EltwiseMultModNative<uint64_t>");
   switch (input_mod_factor) {
-    case 1: EltwiseMultModNative<1>(result, operand1, operand2, n, modulus); break;
-    case 2: EltwiseMultModNative<2>(result, operand1, operand2, n, modulus); break;
-    case 4: EltwiseMultModNative<4>(result, operand1, operand2, n, modulus); break;
+    case 1: EltwiseMultModNative<uint64_t, 1>(result, operand1, operand2, n, modulus); break;
+    case 2: EltwiseMultModNative<uint64_t, 2>(result, operand1, operand2, n, modulus); break;
+    case 4: EltwiseMultModNative<uint64_t, 4>(result, operand1, operand2, n, modulus); break;
+  }
+}
+
+// ---- rvv-hexl extension: 32-bit storage ----------------------------------
+
+void EltwiseMultMod(uint32_t* result, const uint32_t* operand1,
+                    const uint32_t* operand2, uint64_t n, uint64_t modulus,
+                    uint64_t input_mod_factor) {
+  HEXL_CHECK(result != nullptr, "Require result != nullptr");
+  HEXL_CHECK(operand1 != nullptr, "Require operand1 != nullptr");
+  HEXL_CHECK(operand2 != nullptr, "Require operand2 != nullptr");
+  HEXL_CHECK(n != 0, "Require n != 0");
+  HEXL_CHECK(modulus > 1, "Require modulus > 1");
+  HEXL_CHECK(
+      input_mod_factor == 1 || input_mod_factor == 2 || input_mod_factor == 4,
+      "Require input_mod_factor = 1, 2, or 4")
+  HEXL_CHECK(input_mod_factor * modulus <= (1ULL << 32),
+             "Require input_mod_factor * modulus <= 2**32");
+  HEXL_CHECK_BOUNDS(operand1, n, input_mod_factor * modulus,
+                    "operand1 exceeds bound " << (input_mod_factor * modulus))
+  HEXL_CHECK_BOUNDS(operand2, n, input_mod_factor * modulus,
+                    "operand2 exceeds bound " << (input_mod_factor * modulus))
+
+#ifdef HEXL_HAS_RVV
+  if (has_rvv && modulus < kMaxModulusRVV32) {
+    HEXL_VLOG(3, "Calling EltwiseMultModRVV32<uint32_t>");
+    switch (input_mod_factor) {
+      case 1: EltwiseMultModRVV32<uint32_t, 1>(result, operand1, operand2, n, modulus); break;
+      case 2: EltwiseMultModRVV32<uint32_t, 2>(result, operand1, operand2, n, modulus); break;
+      case 4: EltwiseMultModRVV32<uint32_t, 4>(result, operand1, operand2, n, modulus); break;
+    }
+    return;
+  }
+#endif
+
+  HEXL_VLOG(3, "Calling EltwiseMultModNative<uint32_t>");
+  switch (input_mod_factor) {
+    case 1: EltwiseMultModNative<uint32_t, 1>(result, operand1, operand2, n, modulus); break;
+    case 2: EltwiseMultModNative<uint32_t, 2>(result, operand1, operand2, n, modulus); break;
+    case 4: EltwiseMultModNative<uint32_t, 4>(result, operand1, operand2, n, modulus); break;
   }
 }
 
@@ -65,10 +105,8 @@ void EltwiseMultMod(uint64_t* result, const uint64_t* operand1,
 // Native (scalar) kernel.  TODO(port)
 // ---------------------------------------------------------------------------
 
-template <int InputModFactor>
-void EltwiseMultModNative(uint64_t* result, const uint64_t* operand1,
-                          const uint64_t* operand2, uint64_t n,
-                          uint64_t modulus) {
+template <typename Word, int InputModFactor>
+void EltwiseMultModNative(Word* result, const Word* operand1, const Word* operand2, uint64_t n, uint64_t modulus) {
   // TODO(port): result[i] = (operand1[i] * operand2[i]) mod modulus, in [0, q).
   //   Inputs are NOT reduced: first bring each into [0, q) with
   //   ReduceMod<InputModFactor>(x, q, &twice_q) (number-theory.hpp), or fold
@@ -76,13 +114,11 @@ void EltwiseMultModNative(uint64_t* result, const uint64_t* operand1,
   //   Barrett with a precomputed floor(2^(2k)/q) (k = bit length of the
   //   largest input) avoids the 128-bit division of a naive (a*b) % q, which
   //   on RV64 is a libgcc __umodti3 call: ~100x slower than mul+mulhu.
+  //   Word = uint32_t: the product fits in uint64_t, so a 64-bit Barrett (or
+  //   even a single 64-bit % for a first version) is enough.
   //   Upstream's EltwiseMultModNative is the reference algorithm.
   HEXL_NOT_IMPLEMENTED();
 }
-
-template void EltwiseMultModNative<1>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
-template void EltwiseMultModNative<2>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
-template void EltwiseMultModNative<4>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
 
 }  // namespace hexl
 }  // namespace intel

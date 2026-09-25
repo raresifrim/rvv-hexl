@@ -60,3 +60,32 @@ TEST(Api_SignaturesMatchUpstream) {
 
   CHECK(true);
 }
+
+#ifdef HEXL_RVV_HAS_32BIT_API
+// rvv-hexl extension for OpenFHE NATIVE_SIZE=32: the same functions on uint32_t
+// data (only the data pointers change; scalars stay uint64_t). The patched
+// openfhe-hexl overlay reaches exactly these through BasicInteger* casts.
+TEST(Api_32BitExtension) {
+  using VV = void (*)(uint32_t*, const uint32_t*, const uint32_t*, uint64_t, uint64_t);
+  using VS = void (*)(uint32_t*, const uint32_t*, uint64_t, uint64_t, uint64_t);
+  (void)static_cast<VV>(&EltwiseAddMod);
+  (void)static_cast<VS>(&EltwiseAddMod);
+  (void)static_cast<VV>(&EltwiseSubMod);
+  (void)static_cast<VS>(&EltwiseSubMod);
+  (void)static_cast<void (*)(uint32_t*, const uint32_t*, const uint32_t*, uint64_t,
+                             uint64_t, uint64_t)>(&EltwiseMultMod);
+  (void)static_cast<void (*)(uint32_t*, const uint32_t*, uint64_t, const uint32_t*,
+                             uint64_t, uint64_t, uint64_t)>(&EltwiseFMAMod);
+  (void)static_cast<void (*)(uint32_t*, const uint32_t*, uint64_t, uint64_t,
+                             uint64_t, uint64_t)>(&EltwiseReduceMod);
+  (void)static_cast<void (*)(uint32_t*, const uint32_t*, uint64_t, CMPINT, uint64_t,
+                             uint64_t)>(&EltwiseCmpAdd);
+  (void)static_cast<void (*)(uint32_t*, const uint32_t*, uint64_t, uint64_t, CMPINT,
+                             uint64_t, uint64_t)>(&EltwiseCmpSubMod);
+  (void)static_cast<void (NTT::*)(uint32_t*, const uint32_t*, uint64_t, uint64_t)>(
+      &NTT::ComputeForward);
+  (void)static_cast<void (NTT::*)(uint32_t*, const uint32_t*, uint64_t, uint64_t)>(
+      &NTT::ComputeInverse);
+  CHECK(true);
+}
+#endif

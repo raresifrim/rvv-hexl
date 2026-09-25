@@ -169,3 +169,40 @@ static void BM_EltwiseCmpSubMod(benchmark::State& state) {
   SetBytes(state, n, 2);
 }
 BENCHMARK(BM_EltwiseCmpSubMod)->Apply(EltArgs);
+
+#ifdef HEXL_RVV_HAS_32BIT_API
+// ---- rvv-hexl 32-bit storage (OpenFHE NATIVE_SIZE=32) ----------------------
+// The two eltwise ops OpenFHE's binfhe path uses most, on uint32_t data, at
+// the same q as the 64-bit qbits:27 cases above: the difference is the
+// storage cost (bytes per element halve, no narrow/widen).
+static void BM_EltwiseMultMod32(benchmark::State& state) {
+  const uint64_t n = state.range(0), q = Prime(state.range(1), 1);
+  auto a = RandomW<uint32_t>(n, q), b = RandomW<uint32_t>(n, q), r = RandomW<uint32_t>(n, q);
+  HEXL_BENCH_PROBE(state, EltwiseMultMod(r.data(), a.data(), b.data(), n, q, 1));
+  for (auto _ : state) {
+    EltwiseMultMod(r.data(), a.data(), b.data(), n, q, 1);
+    benchmark::ClobberMemory();
+  }
+  state.SetBytesProcessed(static_cast<int64_t>(state.iterations() * n * 4 * 3));
+  state.SetItemsProcessed(static_cast<int64_t>(state.iterations() * n));
+}
+BENCHMARK(BM_EltwiseMultMod32)
+    ->ArgsProduct({{1024, 4096, 16384}, {27}})->ArgNames({"n", "qbits"});
+
+static void BM_EltwiseFMAMod32(benchmark::State& state) {
+  const uint64_t n = state.range(0), q = Prime(state.range(1), 1);
+  const bool add = state.range(2) != 0;
+  auto a = RandomW<uint32_t>(n, q), c = RandomW<uint32_t>(n, q), r = RandomW<uint32_t>(n, q);
+  const uint64_t s = q / 3;
+  const uint32_t* c_ptr = add ? c.data() : nullptr;
+  HEXL_BENCH_PROBE(state, EltwiseFMAMod(r.data(), a.data(), s, c_ptr, n, q, 1));
+  for (auto _ : state) {
+    EltwiseFMAMod(r.data(), a.data(), s, c_ptr, n, q, 1);
+    benchmark::ClobberMemory();
+  }
+  state.SetBytesProcessed(static_cast<int64_t>(state.iterations() * n * 4 * (add ? 3 : 2)));
+  state.SetItemsProcessed(static_cast<int64_t>(state.iterations() * n));
+}
+BENCHMARK(BM_EltwiseFMAMod32)
+    ->ArgsProduct({{1024, 4096, 16384}, {27}, {0, 1}})->ArgNames({"n", "qbits", "add"});
+#endif

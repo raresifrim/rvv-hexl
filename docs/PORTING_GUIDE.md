@@ -29,22 +29,23 @@ headers, same namespace, same signatures and same semantics** is a drop-in repla
 
 ### What OpenFHE actually calls
 
-Measured by grepping openfhe-hexl v1.5.1.0. These nine entry points are the whole surface
-that matters for the protocol benchmarks:
+Measured by grepping openfhe-hexl v1.5.1.0, **including** its compile-time switches in
+`math/math-hal.h`: `HEXL_MUL_ENABLE 1`, `HEXL_ADD_ENABLE 0`. So every HEXL call guarded by the
+add switch is compiled out, and OpenFHE never reaches `EltwiseAddMod`. What is live:
 
 | HEXL API | OpenFHE call site | Weight in our workloads |
 |---|---|---|
 | `NTT(N, q, root)`, `ComputeForward(d, d, 1, 1)`, `ComputeInverse(d, d, 1, 1)` | `transformnathexl-impl.h`: every forward/inverse transform | **~44% of a binfhe bootstrap, ~80% (with modmul) of the central node** (D01) |
 | `EltwiseMultMod(r, a, b, n, q, 1)` | `NativeVector::ModMul`, `DCRTPoly::operator*` | #2 hotspot (NTT-domain products) |
 | `EltwiseFMAMod(r, a, s, c\|nullptr, n, q, 1)` | scalar `ModMul`, RNS basis switching (`hexldcrtpoly-impl.h`) | BFV rescale / key switching |
-| `EltwiseAddMod` (vector + scalar forms) | `ModAdd`, `DCRTPoly::operator+` | frequent, memory-bound |
 | `EltwiseCmpAdd`, `EltwiseCmpSubMod` | `NativeVector::SwitchModulus` | modulus switching (binfhe, BFV) |
 | `EltwiseReduceMod(r, a, n, q, 1, 1)` | `NativeVector::Mod` | occasional |
 | `AlignedVector64<T>` | storage of **every** `NativeVector` | type only |
 | `CMPINT` | argument of the two Cmp* calls | type only |
 
-`EltwiseSubMod` is not called by OpenFHE's backend, but it is part of the API (SEAL uses it).
-Keep it: cheap to write, and it makes the port a complete HEXL 1.2.6.
+`EltwiseAddMod` (disabled by `HEXL_ADD_ENABLE 0`) and `EltwiseSubMod` (never called) are not
+reached by OpenFHE's backend, but they are part of the API (SEAL uses them). Keep them: cheap
+to write, and they make the port a complete HEXL 1.2.6.
 
 ### Three invariants OpenFHE imposes
 
@@ -53,10 +54,14 @@ Keep it: cheap to write, and it makes the port a complete HEXL 1.2.6.
 2. **Concurrency.** OpenFHE caches one `NTT` per (N, q) in a static map and calls
    `ComputeForward` on the *same object* from many OpenMP threads. Never keep mutable scratch
    in the object. Use `thread_local` or the stack. `Ntt_ConcurrentUse` checks this.
-3. **64-bit storage.** OpenFHE's HEXL HAL `reinterpret_cast`s coefficient vectors to
-   `uint64_t*`, so OpenFHE must be built with `NATIVE_SIZE=64` (the script enforces it). The
-   K3 measurements say compute should happen at **SEW=e32**, so the RVV kernels narrow on load
-   and widen on store internally when `q < 2^30` (see section 5).
+3. **Two storage widths.** Upstream's HEXL HAL `reinterpret_cast`s every coefficient vector
+   to `uint64_t*`, which only works at `NATIVE_SIZE=64`. rvv-hexl adds a `uint32_t` overload
+   of every function it needs (`HEXL_RVV_HAS_32BIT_API`), and
+   `third_party/patches/openfhe-hexl-wordsize.py` rewrites those 60 casts to OpenFHE's own
+   `BasicInteger` (identical code at 64, the `uint32_t` API at 32). So `make openfhe
+   WITH_RVV_HEXL=ON` works at `NATIVE_SIZE=64` **and** 32. At 32 OpenFHE caps moduli at 28
+   bits, so everything takes the e32 RVV path with no 64↔32 conversion. At 64 the e32 kernels
+   narrow on load and widen on store when `q < 2^30` (see section 5).
 
 ---
 
@@ -140,10 +145,36 @@ src/eltwise/eltwise-<op>-internal.hpp  kernel declarations                      
 src/eltwise/eltwise-<op>-rvv.cpp       <Op>RVV (or RVV32/RVV64) kernel(s)       [TODO]
 ```
 
-Dispatch rule (already written): RVV if compiled with V and `has_rvv`; else native. For
-`MultMod` and `FMAMod` the RVV side splits again: **`…RVV32`** when `q < 2^30` (binfhe's
-~27-bit moduli, computed in 32-bit lanes) and **`…RVV64`** otherwise (BFV's 60-bit primes).
-`kMaxModulusRVV32 = 2^30` lives in `src/util/cpu-features.hpp`.
+Every kernel is a **template on the storage word** (`Word = uint64_t` for the upstream API,
+`uint32_t` for the 32-bit extension). You write one body; where the two widths want different
+code, branch at compile time:
+
+```cpp
+template <typename Word>
+void EltwiseAddModRVV(Word* result, const Word* a, const Word* b, uint64_t n, uint64_t q) {
+  if constexpr (std::is_same_v<Word, uint64_t>) {
+    // e64/m1 loop
+  } else {
+    // e32/m1 loop (q < 2^30 here)
+  }
+}
+```
+
+The branch not taken is never instantiated, so it can even use intrinsics that don't make
+sense for the other type. (A full specialisation, `template <> void EltwiseAddModRVV<uint32_t>(...)`,
+also works when the two versions share nothing.)
+
+Dispatch rule (already written):
+* **64-bit entry points:** RVV if compiled with V and `has_rvv`, else native. For `MultMod` and
+  `FMAMod` the RVV side splits again: **`…RVV32<uint64_t>`** when `q < 2^30` (binfhe's ~27-bit
+  moduli, computed in 32-bit lanes) and **`…RVV64`** otherwise (BFV's 60-bit primes).
+* **32-bit entry points:** RVV (`…RVV<uint32_t>` / `…RVV32<uint32_t>`) when `q < 2^30`, else
+  native `<uint32_t>`. `CmpAdd` has no modulus, so it always takes RVV. There is no RVV64 at
+  32-bit storage.
+
+`kMaxModulusRVV32 = 2^30` lives in `src/util/cpu-features.hpp`. For `Word = uint32_t` the
+native kernels must still do their arithmetic in 64-bit: q can be up to 2^32 there, so sums
+and lazy `[0, 4q)` values do not fit in 32 bits.
 
 | Op | Semantics | Native: what to write | RVV: what to write |
 |---|---|---|---|
@@ -224,7 +255,7 @@ pattern, and 8 threads sharing one object.
 | File | Purpose | State |
 |---|---|---|
 | `cpu-features.hpp/.cpp` | `HEXL_HAS_RVV` (compile time: TU built with V), `has_rvv` (runtime: `AT_HWCAP` has V and `HEXL_DISABLE_RVV` unset), `CurrentVLenBits()`, `kMaxModulusRVV32` | done |
-| `rvv-util.hpp` | the RVV vocabulary: `AddMod`, `SubMod`, `ReduceFromTwice`, `MulModShoupLazy`, `MulModBarrett` (e64) and `LoadNarrow`, `StoreWiden`, `AddMod32`, `SubMod32`, `MulModShoupLazy32`, `MulModBarrett32` (e32). Signatures fix LMUL=m1 | **TODO**: write these first, then compose kernels from them. Change the signatures if a better decomposition emerges |
+| `rvv-util.hpp` | the RVV vocabulary: `AddMod`, `SubMod`, `ReduceFromTwice`, `MulModShoupLazy`, `MulModBarrett` (e64) and `Load32`, `Store32` (overloaded on `uint64_t*` = narrow/widen and `uint32_t*` = plain vle32/vse32, which is what lets one e32 kernel serve both storage widths), `AddMod32`, `SubMod32`, `MulModShoupLazy32`, `MulModBarrett32` (e32). Signatures fix LMUL=m1 | **TODO**: write these first, then compose kernels from them. Change the signatures if a better decomposition emerges |
 | `not-implemented.hpp/.cpp` | `HEXL_NOT_IMPLEMENTED()` | done |
 | `util-internal.hpp` | scalar `Compare(CMPINT, a, b)` for the native Cmp kernels | done |
 | `aligned-allocator.cpp` | the global `mallocStrategy` | done |
@@ -276,10 +307,11 @@ Intrinsics reference: `docs/rvv_intrinsics/` (`make rvv-intrinsics-doc`; see the
 * **LMUL=m1** for transfer and compute: larger LMUL adds no throughput. Fractional LMUL only
   exposes the low part of a register (verified on silicon). **mf2 is the smallest portable
   one**: X100 returns vl=0 and traps on e32/mf4 and mf8.
-* **64-bit storage, 32-bit compute.** Load `e64,m2` and narrow (`vncvt.x.x.w`) to `e32,m1`;
-  widen (`vzext.vf2`) before the store. In the NTT do this once, in the first and last stage,
-  not as separate passes. `[0, 4q) < 2^32` holds for q < 2^30, so lazy butterflies fit in
-  32-bit lanes.
+* **32-bit compute, either storage.** With 64-bit storage (`n64-rvvhexl`), load `e64,m2` and
+  narrow (`vncvt.x.x.w`) to `e32,m1`, and widen (`vzext.vf2`) before the store. In the NTT do
+  this once, in the first and last stage, not as separate passes. With 32-bit storage
+  (`n32-rvvhexl`) the same kernel reads and writes directly. `rvv::Load32`/`Store32` hide the
+  difference. `[0, 4q) < 2^32` holds for q < 2^30, so lazy butterflies fit in 32-bit lanes.
 * **VLEN-agnostic, always.** X100 VLEN=256, A100 VLEN=1024, same binary. `vsetvl` in every
   strip, and never cache VLEN in a table built at construction time. The benchmark runner
   starts A100 processes through `ailaunch` (VLEN changes across clusters, so migration after
@@ -310,15 +342,16 @@ rvv-hexl-test` (argument contracts) → `make SANITIZE=address test` → spike a
 
 | Comparison | Isolates |
 |---|---|
-| `n64-rvvhexl` vs **`n64`** | the HEXL backend (same 64-bit word size, same flags, identical bench binaries) |
-| `n64-rvvhexl` vs **`n32`** | the port vs the best stock binfhe configuration (D01's recommended baseline) |
+| `n64-rvvhexl` vs **`n64`** | the HEXL backend at 64-bit words (same flags, identical bench binaries) |
+| `n32-rvvhexl` vs **`n32`** | the HEXL backend at 32-bit words: the port vs the best stock binfhe configuration (D01's recommended baseline) |
+| `n32-rvvhexl` vs `n64-rvvhexl` | the storage width alone (same e32 kernels; also `BM_NTTForward32` vs `BM_NTTForward/qbits:27` in bench-hexl) |
 | `ISA=rvv` vs `ISA=scalar` | the vector unit (scalar `-march` = the rvv one minus V; on the K3 `rva23u64` minus V/Zv*) |
-| `n64-rvvhexl` vs the same + `HEXL_DISABLE_RVV=1` | your RVV kernels vs your native kernels under the same auto-vectoriser |
+| `n{64,32}-rvvhexl` vs the same + `HEXL_DISABLE_RVV=1` | your RVV kernels vs your native kernels under the same auto-vectoriser |
 | x100 vs a100 | VLEN 256 vs 1024, in-order vs out-of-order |
 | `bench-hexl` on K3 vs `HEXL_IMPL=intel` on AMD/Intel | the cross-architecture table (same source, AVX-512 vs RVV vs AVX2 fallback) |
 
 Never compare an `n64-rvvhexl` result with an `n32` run and call the difference "HEXL": it mixes the
-backend with the word size (same caveat as the x86 HEXL runs in D01).
+backend with the word size (same caveat as the x86 HEXL runs in D01). Compare at equal word size.
 
 **Suites:**
 * `bench/hexl`: HEXL's own kernel set at upstream's sizes (n = 1024/4096/16384; 45-bit NTT

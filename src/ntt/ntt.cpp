@@ -130,7 +130,7 @@ void NTT::ComputeForward(uint64_t* result, const uint64_t* operand,
   if (has_rvv) {
     if (m_q < s_max_fwd_32_modulus) {
       HEXL_VLOG(3, "Calling ForwardTransformToBitReverseRVV32");
-      ForwardTransformToBitReverseRVV32(
+      ForwardTransformToBitReverseRVV32<uint64_t>(
           result, operand, m_degree, m_q, m_rvv32_root_of_unity_powers.data(),
           m_rvv32_precon_root_of_unity_powers.data(), input_mod_factor,
           output_mod_factor);
@@ -146,7 +146,7 @@ void NTT::ComputeForward(uint64_t* result, const uint64_t* operand,
 #endif
 
   HEXL_VLOG(3, "Calling ForwardTransformToBitReverseRadix2");
-  ForwardTransformToBitReverseRadix2(
+  ForwardTransformToBitReverseRadix2<uint64_t>(
       result, operand, m_degree, m_q, m_root_of_unity_powers.data(),
       m_precon64_root_of_unity_powers.data(), input_mod_factor,
       output_mod_factor);
@@ -168,7 +168,7 @@ void NTT::ComputeInverse(uint64_t* result, const uint64_t* operand,
   if (has_rvv) {
     if (m_q < s_max_inv_32_modulus) {
       HEXL_VLOG(3, "Calling InverseTransformFromBitReverseRVV32");
-      InverseTransformFromBitReverseRVV32(
+      InverseTransformFromBitReverseRVV32<uint64_t>(
           result, operand, m_degree, m_q,
           m_rvv32_inv_root_of_unity_powers.data(),
           m_rvv32_precon_inv_root_of_unity_powers.data(), input_mod_factor,
@@ -185,7 +185,78 @@ void NTT::ComputeInverse(uint64_t* result, const uint64_t* operand,
 #endif
 
   HEXL_VLOG(3, "Calling InverseTransformFromBitReverseRadix2");
-  InverseTransformFromBitReverseRadix2(
+  InverseTransformFromBitReverseRadix2<uint64_t>(
+      result, operand, m_degree, m_q, m_inv_root_of_unity_powers.data(),
+      m_precon64_inv_root_of_unity_powers.data(), input_mod_factor,
+      output_mod_factor);
+}
+
+// ---- rvv-hexl extension: 32-bit storage (OpenFHE NATIVE_SIZE=32) ---------
+
+void NTT::ComputeForward(uint32_t* result, const uint32_t* operand,
+                         uint64_t input_mod_factor,
+                         uint64_t output_mod_factor) {
+  HEXL_CHECK(result != nullptr, "result == nullptr");
+  HEXL_CHECK(operand != nullptr, "operand == nullptr");
+  HEXL_CHECK(
+      input_mod_factor == 1 || input_mod_factor == 2 || input_mod_factor == 4,
+      "input_mod_factor must be 1, 2 or 4; got " << input_mod_factor);
+  HEXL_CHECK(output_mod_factor == 1 || output_mod_factor == 4,
+             "output_mod_factor must be 1 or 4; got " << output_mod_factor);
+  HEXL_CHECK(input_mod_factor * m_q <= (1ULL << 32) &&
+                 output_mod_factor * m_q <= (1ULL << 32),
+             "32-bit storage needs mod_factor * q <= 2^32, q = " << m_q);
+  HEXL_CHECK_BOUNDS(
+      operand, m_degree, m_q * input_mod_factor,
+      "value in operand exceeds bound " << m_q * input_mod_factor);
+
+#ifdef HEXL_HAS_RVV
+  if (has_rvv && m_q < s_max_fwd_32_modulus) {
+    HEXL_VLOG(3, "Calling ForwardTransformToBitReverseRVV32<uint32_t>");
+    ForwardTransformToBitReverseRVV32<uint32_t>(
+        result, operand, m_degree, m_q, m_rvv32_root_of_unity_powers.data(),
+        m_rvv32_precon_root_of_unity_powers.data(), input_mod_factor,
+        output_mod_factor);
+    return;
+  }
+#endif
+
+  HEXL_VLOG(3, "Calling ForwardTransformToBitReverseRadix2<uint32_t>");
+  ForwardTransformToBitReverseRadix2<uint32_t>(
+      result, operand, m_degree, m_q, m_root_of_unity_powers.data(),
+      m_precon64_root_of_unity_powers.data(), input_mod_factor,
+      output_mod_factor);
+}
+
+void NTT::ComputeInverse(uint32_t* result, const uint32_t* operand,
+                         uint64_t input_mod_factor,
+                         uint64_t output_mod_factor) {
+  HEXL_CHECK(result != nullptr, "result == nullptr");
+  HEXL_CHECK(operand != nullptr, "operand == nullptr");
+  HEXL_CHECK(input_mod_factor == 1 || input_mod_factor == 2,
+             "input_mod_factor must be 1 or 2; got " << input_mod_factor);
+  HEXL_CHECK(output_mod_factor == 1 || output_mod_factor == 2,
+             "output_mod_factor must be 1 or 2; got " << output_mod_factor);
+  HEXL_CHECK(input_mod_factor * m_q <= (1ULL << 32) &&
+                 output_mod_factor * m_q <= (1ULL << 32),
+             "32-bit storage needs mod_factor * q <= 2^32, q = " << m_q);
+  HEXL_CHECK_BOUNDS(operand, m_degree, m_q * input_mod_factor,
+                    "operand exceeds bound " << m_q * input_mod_factor);
+
+#ifdef HEXL_HAS_RVV
+  if (has_rvv && m_q < s_max_inv_32_modulus) {
+    HEXL_VLOG(3, "Calling InverseTransformFromBitReverseRVV32<uint32_t>");
+    InverseTransformFromBitReverseRVV32<uint32_t>(
+        result, operand, m_degree, m_q,
+        m_rvv32_inv_root_of_unity_powers.data(),
+        m_rvv32_precon_inv_root_of_unity_powers.data(), input_mod_factor,
+        output_mod_factor);
+    return;
+  }
+#endif
+
+  HEXL_VLOG(3, "Calling InverseTransformFromBitReverseRadix2<uint32_t>");
+  InverseTransformFromBitReverseRadix2<uint32_t>(
       result, operand, m_degree, m_q, m_inv_root_of_unity_powers.data(),
       m_precon64_inv_root_of_unity_powers.data(), input_mod_factor,
       output_mod_factor);

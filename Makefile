@@ -13,10 +13,10 @@
 #   make openfhe              build OpenFHE v1.5.1
 #       NATIVE_SIZE=64|32     default: the CPU word size (64 on riscv64)
 #       WITH_RVV_HEXL=OFF|ON  ON = openfhe-hexl backend linked against rvv-hexl
-#                             (builds + installs rvv-hexl first; needs NATIVE_SIZE=64)
+#                             (builds + installs rvv-hexl first; NATIVE_SIZE 64 or 32)
 #   make openfhe-check        OpenFHE's own unit tests for the selected build
 #   make openfhe-bench        IPCEI benches against the selected build
-#   make openfhe-all          the comparison set: n64, n32, n64 + rvv-hexl
+#   make openfhe-all          the comparison set: n64, n32, n64 + rvv-hexl, n32 + rvv-hexl
 #   make openfhe-list         what is built for this ISA
 #
 # ---- everything ---------------------------------------------------------------
@@ -179,8 +179,8 @@ OFHE_ENV = CXX="$(CXX)" CC="$(CC)" JOBS=$(JOBS) ISA_FLAGS="$(ISA_FLAGS)" \
 
 ifneq ($(filter openfhe,$(MAKECMDGOALS)),)
   ifeq ($(WITH_RVV_HEXL),ON)
-    ifneq ($(NATIVE_SIZE),64)
-      $(error WITH_RVV_HEXL=ON needs NATIVE_SIZE=64: OpenFHE's HEXL backend casts coefficient vectors to uint64_t*; the e32 path lives inside rvv-hexl)
+    ifeq ($(filter 64 32,$(NATIVE_SIZE)),)
+      $(error WITH_RVV_HEXL=ON supports NATIVE_SIZE=64 or 32, not $(NATIVE_SIZE))
     endif
   endif
 endif
@@ -201,6 +201,7 @@ openfhe-all:
 	$(MAKE) --no-print-directory openfhe NATIVE_SIZE=64 WITH_RVV_HEXL=OFF
 	$(MAKE) --no-print-directory openfhe NATIVE_SIZE=32 WITH_RVV_HEXL=OFF
 	$(MAKE) --no-print-directory openfhe NATIVE_SIZE=64 WITH_RVV_HEXL=ON
+	$(MAKE) --no-print-directory openfhe NATIVE_SIZE=32 WITH_RVV_HEXL=ON
 
 openfhe-list:
 	@for d in $(OPENFHE_ROOT)/*/install; do \

@@ -24,6 +24,7 @@
 #include <stdint.h>
 
 #include <memory>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -83,7 +84,14 @@ class NTT {
   NTT(uint64_t degree, uint64_t q,
       std::shared_ptr<AllocatorBase> alloc_ptr = {});
 
-  template <class Allocator, class... AllocatorArgs>
+  // rvv-hexl: the allocator templates are constrained to non-integral types.
+  // Upstream's unconstrained forwarding reference beats the uint64_t root
+  // parameter for any other integer type, so OpenFHE's NTT(N, q, root) with
+  // uint32_t arguments (NATIVE_SIZE=32) would otherwise pick this overload and
+  // try to use the root of unity as an allocator.
+  template <class Allocator, class... AllocatorArgs,
+            typename = typename std::enable_if<
+                !std::is_integral<typename std::decay<Allocator>::type>::value>::type>
   NTT(uint64_t degree, uint64_t q, Allocator&& a, AllocatorArgs&&... args)
       : NTT(degree, q,
             std::static_pointer_cast<AllocatorBase>(
@@ -104,7 +112,9 @@ class NTT {
   NTT(uint64_t degree, uint64_t q, uint64_t root_of_unity,
       std::shared_ptr<AllocatorBase> alloc_ptr = {});
 
-  template <class Allocator, class... AllocatorArgs>
+  template <class Allocator, class... AllocatorArgs,
+            typename = typename std::enable_if<
+                !std::is_integral<typename std::decay<Allocator>::type>::value>::type>
   NTT(uint64_t degree, uint64_t q, uint64_t root_of_unity, Allocator&& a,
       AllocatorArgs&&... args)
       : NTT(degree, q, root_of_unity,
@@ -139,6 +149,18 @@ class NTT {
   /// @param[in] output_mod_factor Returns output \p result in [0,
   /// output_mod_factor * q). Must be 1 or 2.
   void ComputeInverse(uint64_t* result, const uint64_t* operand,
+                      uint64_t input_mod_factor, uint64_t output_mod_factor);
+
+  // ---- rvv-hexl extension: 32-bit storage (OpenFHE NATIVE_SIZE=32) ---------
+  /// Same transforms on uint32_t data. Every value, including the lazy ranges,
+  /// must fit in 32 bits: input_mod_factor * q <= 2^32, output_mod_factor * q
+  /// <= 2^32. q < s_max_fwd_32_modulus (2^30) runs the RVV e32 kernels directly
+  /// on the data, larger q the native kernels. OpenFHE's NATIVE_SIZE=32 moduli
+  /// are <= 28 bits, so from OpenFHE this is always the RVV path.
+  /// Not in upstream Intel HEXL: guard uses with #ifdef HEXL_RVV_HAS_32BIT_API.
+  void ComputeForward(uint32_t* result, const uint32_t* operand,
+                      uint64_t input_mod_factor, uint64_t output_mod_factor);
+  void ComputeInverse(uint32_t* result, const uint32_t* operand,
                       uint64_t input_mod_factor, uint64_t output_mod_factor);
 
   /// @brief Returns the minimal 2N'th root of unity

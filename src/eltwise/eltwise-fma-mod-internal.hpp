@@ -1,6 +1,13 @@
 // Copyright (C) 2020 Intel Corporation
 // Copyright (C) 2026 IPCEI-NXP A14 team (RISC-V port)
 // SPDX-License-Identifier: Apache-2.0
+//
+// Kernels behind EltwiseFMAMod.
+// Kernels are templates on the storage word:
+//   Word = uint64_t  OpenFHE NATIVE_SIZE=64 (upstream HEXL API)
+//   Word = uint32_t  OpenFHE NATIVE_SIZE=32 (rvv-hexl extension)
+// Write one body and specialise where it pays with
+//   if constexpr (std::is_same_v<Word, uint32_t>) { ... } else { ... }
 
 #pragma once
 
@@ -14,18 +21,16 @@ namespace hexl {
 /// @brief Native: result[i] = (arg1[i] * arg2 + arg3[i]) mod modulus
 /// (arg3 == nullptr: no addition). All inputs in [0, InputModFactor * q),
 /// output in [0, q). InputModFactor is 1, 2, 4 or 8.
-template <int InputModFactor>
-void EltwiseFMAModNative(uint64_t* result, const uint64_t* arg1, uint64_t arg2,
-                         const uint64_t* arg3, uint64_t n, uint64_t modulus);
+template <typename Word, int InputModFactor>
+void EltwiseFMAModNative(Word* result, const Word* arg1, uint64_t arg2, const Word* arg3, uint64_t n, uint64_t modulus);
 
 #ifdef HEXL_HAS_RVV
-/// @brief RVV, 32-bit lanes (InputModFactor * modulus < 2^32 and
-/// modulus < kMaxModulusRVV32).
-template <int InputModFactor>
-void EltwiseFMAModRVV32(uint64_t* result, const uint64_t* arg1, uint64_t arg2,
-                        const uint64_t* arg3, uint64_t n, uint64_t modulus);
+/// @brief RVV, 32-bit lanes: modulus < kMaxModulusRVV32 and every input fits
+/// in 32 bits. Word = uint64_t or uint32_t storage (rvv::Load32 / Store32).
+template <typename Word, int InputModFactor>
+void EltwiseFMAModRVV32(Word* result, const Word* arg1, uint64_t arg2, const Word* arg3, uint64_t n, uint64_t modulus);
 
-/// @brief RVV, 64-bit lanes.
+/// @brief RVV, 64-bit lanes, 64-bit storage only.
 template <int InputModFactor>
 void EltwiseFMAModRVV64(uint64_t* result, const uint64_t* arg1, uint64_t arg2,
                         const uint64_t* arg3, uint64_t n, uint64_t modulus);
