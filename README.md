@@ -54,6 +54,7 @@ src/ntt/             NTT class (ntt.cpp), native radix-2, RVV kernels          T
 src/util/            CPU detection, RVV helpers (rvv-util.hpp, TODO), stub marker
 test/                self-contained tests with independent __int128 oracles
 bench/hexl/          HEXL-standard microbenchmarks (Google Benchmark)
+bench/uarch/         vector-unit microbenchmarks: cycles/insn, bandwidth, thread scaling (K3 tuning)
 bench/openfhe/       IPCEI OpenFHE benches (verbatim from ZKP+FHE Research @37a6844)
 bench/run.sh         benchmark matrix runner (ISA x OpenFHE variant x RVV on/off x cluster)
 third_party/         OpenFHE / openfhe-hexl / Google Benchmark build scripts
@@ -73,6 +74,7 @@ selected by `NATIVE_SIZE` / `WITH_RVV_HEXL` (and `ISA`).
 | `make rvv-hexl` (default goal) | `libhexl.a` + `libhexl.so` in `build/<ISA>-<BUILD>/lib` |
 | `make rvv-hexl-test` (`test`) | build + run the tests; an RVV build runs them twice (RVV path, then native path) |
 | `make rvv-hexl-bench` | `bench-hexl` (Google Benchmark; `make gbench` builds it locally if there's no system package) |
+| `make uarch-bench` | `bench-uarch`: cycles per RVV instruction, load/store bandwidth and thread scaling on the current cluster (`ISA=rvv`; see [bench/uarch/README.md](bench/uarch/README.md)) |
 | `make rvv-hexl-install` (`install`) | headers, libs, `lib/cmake/hexl-1.2.6/HEXLConfig.cmake`, `hexl.pc` into `PREFIX` |
 
 | OpenFHE | What it does |
@@ -85,7 +87,7 @@ selected by `NATIVE_SIZE` / `WITH_RVV_HEXL` (and `ISA`).
 
 | Everything | |
 |---|---|
-| `make bench` | `rvv-hexl-bench` + IPCEI benches for every OpenFHE build + `ailaunch` |
+| `make bench` | `rvv-hexl-bench` + `uarch-bench` (rvv) + IPCEI benches for every OpenFHE build + `ailaunch` |
 | `make run-bench` | `bench/run.sh` |
 | `make rvv-intrinsics-doc` | all RVA23 RVV intrinsics + `INDEX.md` + grep-able `rva23-intrinsics.tsv` in `docs/rvv_intrinsics/` (git-ignored) |
 | `make reconfigure` | forget the cached board/toolchain checks (after a compiler upgrade, or on another board) |

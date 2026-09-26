@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # bench/run.sh — run the benchmark matrix and collect every result in one folder.
 #
-#   bench/run.sh [--isa rvv,scalar] [--cluster x100,a100|none] [--suite hexl,ipcei,upstream]
+#   bench/run.sh [--isa rvv,scalar] [--cluster x100,a100|none] [--suite hexl,ipcei,upstream,uarch]
 #                [--quick] [-o DIR]
 #
 # Matrix (each axis skips what has not been built):
@@ -22,13 +22,15 @@
 #   ipcei     the IPCEI OpenFHE benches, same arguments as ZKP+FHE Research/benchmark.sh
 #   upstream  OpenFHE's own Google-Benchmark suite (lib-benchmark, poly-benchmark-*,
 #             binfhe-ginx, VectorMath; + the *-hexl ones on rvv-hexl builds)
+#   uarch     bench-uarch (rvv only): vector-unit cycles/instruction, load/store
+#             bandwidth vs working set, thread scaling (bench/uarch/README.md)
 #
 # Before a real run on the K3: performance governor on all cores, idle machine
 #   for c in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo performance | sudo tee $c; done
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ISAS="" CLUSTERS="" SUITES="hexl,ipcei,upstream" QUICK=0 OUT=""
+ISAS="" CLUSTERS="" SUITES="hexl,ipcei,upstream,uarch" QUICK=0 OUT=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --isa) ISAS="$2"; shift ;;
@@ -36,7 +38,7 @@ while [ $# -gt 0 ]; do
     --suite) SUITES="$2"; shift ;;
     --quick) QUICK=1 ;;
     -o) OUT="$2"; shift ;;
-    -h|--help) sed -n '2,27p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,29p' "$0"; exit 0 ;;
     *) echo "unknown option $1" >&2; exit 1 ;;
   esac
   shift
@@ -119,6 +121,18 @@ for cl in ${CLUSTERS//,/ }; do
         fi
       else
         echo "skip hexl ($isa): $bin not built (make ISA=$isa bench-hexl)"
+      fi
+    fi
+
+    # ---- vector-unit microbenchmarks --------------------------------------
+    if has "$SUITES" uarch && [ "$isa" = rvv ]; then
+      bin="$ROOT/build/rvv-release/bin/bench-uarch"
+      if [ -x "$bin" ]; then
+        ua=(--csv "$OUT/uarch-$tag.csv" --scaling)
+        [ $QUICK = 1 ] && ua+=(--quick --stream-kib 16,1024,65536)
+        run "$cl" "bench-uarch" "$OUT/uarch-$tag.log" env BENCH_CLUSTER="$cl" "$bin" "${ua[@]}"
+      else
+        echo "skip uarch: $bin not built (make uarch-bench)"
       fi
     fi
 
