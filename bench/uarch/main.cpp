@@ -610,9 +610,8 @@ int main(int argc, char** argv) {
     const Kernel* k = Find("alu", "vadd.vv", 64, 8, "tp");
     void* b = AllocBuf(kBufBytes);
     const Sample s = Measure(k->fn, Calibrate(k->fn, b, 0, 10), b, 0);
-    printf("effective clock %.3f GHz (perf cycles / wall time; expect ~2.4 X100, ~2.0 A100 under "
-           "the performance governor)\n",
-           s.cycles / s.ns);
+    printf("effective clock %.3f GHz (perf cycles / wall time; cpufreq reports %.3f GHz)\n",
+           s.cycles / s.ns, CpufreqGhz(CurrentCpu()));
     free(b);
   }
 #endif

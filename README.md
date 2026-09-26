@@ -161,8 +161,9 @@ for `ISA=rvv`) when it can't. `make info` shows the outcome.
    * RVV 1.0 but not RVA23 (e.g. SpacemiT K1): the board's own extensions, V included
    * no V, or only T-Head's pre-1.0 `xtheadvector` (e.g. JH7110, TH1520): scalar
 2. **Toolchain**: the compiler must accept that `-march` and compile the RVV C intrinsics
-   **v1.0** API the port uses (`__riscv_v_intrinsic >= 1000000`, policy variants, tuple segment
-   loads…): GCC >= 14 or LLVM >= 17.
+   **v1.0** API the port uses (policy variants, tuple segment loads…): GCC >= 14 or LLVM >= 17.
+   `__riscv_v_intrinsic` must be at least `12000` (v0.12, the API v1.0 froze): distribution GCC
+   14/15 report `12000`, upstream GCC 16 reports `1000000`.
 
 The scalar `-march` is always the rvv one minus V (on the K3: `rva23u64` without V/Zv*), so
 `ISA=rvv` vs `ISA=scalar` isolates the vector unit and nothing else. Results are cached in

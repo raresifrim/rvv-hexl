@@ -23,8 +23,10 @@
 #      e.g. only X100 has H), because GCC may emit any -march extension anywhere,
 #      including in the scalar code. A too-wide -march is a SIGILL, not a slow path.
 #   2. toolchain: the compiler accepts the -march and compiles a probe that uses the
-#      RVV C intrinsics v1.0 API the port relies on (__riscv_v_intrinsic >= 1000000,
-#      policy suffixes, tuple segment loads, narrowing/widening, vmulhu, ...).
+#      RVV C intrinsics API the port relies on (__riscv_v_intrinsic >= 12000, i.e. v0.12,
+#      the API v1.0 froze; policy suffixes, tuple segment loads, narrowing/widening,
+#      vmulhu, ...). Distribution GCC 14/15 report 12000 (Ubuntu's 15.2 on the K3),
+#      upstream GCC 16 and LLVM 19+ report 1000000: both compile the same code.
 #   Any failure with ISA_REQUEST != scalar falls back to scalar, with a note.
 set -uo pipefail
 
@@ -52,8 +54,8 @@ intrinsics_ok() {  # intrinsics_ok <march>
 #include <riscv_vector.h>
 #include <stddef.h>
 #include <stdint.h>
-#if !defined(__riscv_v_intrinsic) || __riscv_v_intrinsic < 1000000
-#error "RVV C intrinsics v1.0 required"
+#if !defined(__riscv_v_intrinsic) || __riscv_v_intrinsic < 12000
+#error "RVV C intrinsics v0.12/v1.0 required"
 #endif
 void rvv_probe(uint64_t* p, uint32_t* q, size_t n) {
   size_t vl = __riscv_vsetvl_e64m1(n);
