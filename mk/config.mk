@@ -235,6 +235,22 @@ OPENFHE_ROOT       := $(ROOT)/build/openfhe/$(ISA)
 OPENFHE_NAME       ?= n$(NATIVE_SIZE)$(if $(filter ON,$(WITH_RVV_HEXL)),-rvvhexl$(if $(filter debug,$(BUILD)),-debug))
 OPENFHE_DIR        := $(OPENFHE_ROOT)/$(OPENFHE_NAME)
 OPENFHE_PREFIX     ?= $(OPENFHE_DIR)/install
-# The rvv-hexl install an rvvhexl OpenFHE links against: same ISA and BUILD.
+# The rvv-hexl install an rvvhexl OpenFHE (or SEAL) links against: same ISA and BUILD.
 RVV_HEXL_PREFIX    := $(ROOT)/build/$(ISA)-$(BUILD)/install
 JOBS ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+
+# ---------------------------------------------------------------------------
+# Microsoft SEAL options  (make seal WITH_RVV_HEXL=..)
+# ---------------------------------------------------------------------------
+#   WITH_RVV_HEXL   shared with OpenFHE. ON: SEAL with -DSEAL_USE_INTEL_HEXL=ON
+#                   linked against this library. SEAL always uses 64-bit words,
+#                   so there is no NATIVE_SIZE axis. Default OFF (stock SEAL).
+#   SEAL_TESTS      also build SEAL's own sealtest (needs libgtest-dev). Default OFF.
+# Both configurations coexist:
+#   build/seal/<ISA>/{stock,rvvhexl[-debug]}/{build,install}
+SEAL_TAG    ?= v4.1.2
+SEAL_TESTS  ?= OFF
+SEAL_ROOT   := $(ROOT)/build/seal/$(ISA)
+SEAL_NAME   ?= $(if $(filter ON,$(WITH_RVV_HEXL)),rvvhexl$(if $(filter debug,$(BUILD)),-debug),stock)
+SEAL_DIR    := $(SEAL_ROOT)/$(SEAL_NAME)
+SEAL_PREFIX ?= $(SEAL_DIR)/install

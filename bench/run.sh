@@ -13,13 +13,15 @@
 #   OpenFHE  every build under build/openfhe/<ISA>/ (make openfhe NATIVE_SIZE=.. WITH_RVV_HEXL=..,
 #            or make openfhe-all for n64, n32, n64-rvvhexl); word size and backend
 #            are read from each install's config_core.h
+#   SEAL     every build under build/seal/<ISA>/ (make seal-all: stock, rvvhexl); backend
+#            read from each install's seal/util/config.h
 #   cluster  SpaceMiT K3: x100 (cpus 0-7, VLEN=256) and a100 (cpus 8-15, VLEN=1024,
 #            entered through build/tools/ailaunch). Elsewhere: none.
 #
 # Suites:
 #   hexl      bench-hexl: HEXL-standard kernels (Google Benchmark JSON). Builds
 #             unchanged against upstream Intel HEXL on x86 for the same table.
-#   ipcei     the IPCEI OpenFHE benches, same arguments as ZKP+FHE Research/benchmark.sh
+#   ipcei     the IPCEI OpenFHE and SEAL benches, same arguments as ZKP+FHE Research/benchmark.sh
 #   upstream  OpenFHE's own Google-Benchmark suite (lib-benchmark, poly-benchmark-*,
 #             binfhe-ginx, VectorMath; + the *-hexl ones on rvv-hexl builds)
 #   uarch     bench-uarch (rvv only): vector-unit cycles/instruction, load/store
@@ -38,7 +40,7 @@ while [ $# -gt 0 ]; do
     --suite) SUITES="$2"; shift ;;
     --quick) QUICK=1 ;;
     -o) OUT="$2"; shift ;;
-    -h|--help) sed -n '2,29p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,31p' "$0"; exit 0 ;;
     *) echo "unknown option $1" >&2; exit 1 ;;
   esac
   shift
@@ -192,6 +194,30 @@ for cl in ${CLUSTERS//,/ }; do
         fi
       done
     done
+
+    # ---- IPCEI SEAL benches (bfv_seal_deployable, bfv_seal_pinned_60bit, ntt_seal) ----
+    if has "$SUITES" ipcei; then
+      for sd in "$ROOT/build/seal/$isa"/*/; do
+        sd="${sd%/}"; sv="$(basename "$sd")"
+        cfg="$(ls "$sd"/install/include/SEAL-*/seal/util/config.h 2>/dev/null | head -1)"
+        [ -f "$cfg" ] || continue
+        b="$ROOT/build/bench-seal/$isa/$sv"
+        [ -x "$b/seal_ntt_bench" ] || { echo "skip seal ($isa/$sv): make ISA=$isa bench"; continue; }
+        smodes=("")
+        grep -q '^#define SEAL_USE_INTEL_HEXL' "$cfg" && [ "$isa" = rvv ] && smodes+=("HEXL_DISABLE_RVV=1")
+        if [ $QUICK = 1 ]; then SR=1; else SR=8; fi
+        for mode in "${smodes[@]}"; do
+          sfx="seal-$sv${mode:+-norvv}"
+          envs=(${mode:+"$mode"})
+          run "$cl" "seal ntt $sfx" "$OUT/ipcei-sealntt-$tag-$sfx.txt" \
+            env ${envs[@]+"${envs[@]}"} "$b/seal_ntt_bench" 49 4096 8192 16384 32768
+          run "$cl" "seal bfv deployable $sfx" "$OUT/ipcei-sealbfv-$tag-$sfx.txt" \
+            env ${envs[@]+"${envs[@]}"} "$b/direction_a_lwe_bench" --rounds $SR --pbits 32 --qprimes 5
+          run "$cl" "seal bfv 60-bit $sfx" "$OUT/ipcei-sealbfv60-$tag-$sfx.txt" \
+            env ${envs[@]+"${envs[@]}"} "$b/direction_a_lwe_bench_30bit" --rounds $SR --pbits 32 --qprimes 5 --limbbits 60
+        done
+      done
+    fi
   done
 done
 

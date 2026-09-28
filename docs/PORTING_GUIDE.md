@@ -2,7 +2,8 @@
 
 What every class and interface is for, what is already done, and what you have to write.
 Read sections 1 and 2 first. Section 3 is the reference, section 4 the suggested order of
-work, and sections 5 and 6 cover RVV design and methodology.
+work, and sections 5 and 6 cover RVV design and methodology. Section 7 covers the second
+consumer, Microsoft SEAL, which uses the same library unchanged.
 
 ---
 
@@ -44,8 +45,9 @@ add switch is compiled out, and OpenFHE never reaches `EltwiseAddMod`. What is l
 | `CMPINT` | argument of the two Cmp* calls | type only |
 
 `EltwiseAddMod` (disabled by `HEXL_ADD_ENABLE 0`) and `EltwiseSubMod` (never called) are not
-reached by OpenFHE's backend, but they are part of the API (SEAL uses them). Keep them: cheap
-to write, and they make the port a complete HEXL 1.2.6.
+reached by OpenFHE's backend, but they are part of the API and **SEAL calls both, in both the
+vector and the scalar form** (section 7). They are cheap to write and make the port a complete
+HEXL 1.2.6.
 
 ### Three invariants OpenFHE imposes
 
@@ -284,7 +286,7 @@ Each milestone ends with a command that must pass.
 | M0 | `number-theory.cpp` (11 functions) | `make test` → all `NumberTheory_*` PASS |
 | M1 | the 7 native eltwise kernels | `HEXL_DISABLE_RVV=1 build/rvv-release/bin/hexl-tests Eltwise` all PASS |
 | M2 | `ComputeRootOfUnityPowers` (64-bit tables) + native radix-2 forward/inverse | `make ISA=scalar test` fully green, **0 TODO** |
-| M3 | integration with the native path only | `make ISA=scalar openfhe openfhe-check WITH_RVV_HEXL=ON`: OpenFHE's own tests pass on the port |
+| M3 | integration with the native path only | `make ISA=scalar openfhe openfhe-check WITH_RVV_HEXL=ON`: OpenFHE's own tests pass on the port. Same for SEAL: `make ISA=scalar seal seal-check WITH_RVV_HEXL=ON` (section 7) |
 | M4 | `rvv-util.hpp` + RVV eltwise (e64 first, then e32 for Mult/FMA) | `make test` green (both passes) |
 | M5 | RVV32 NTT (+ `m_rvv32_*` tables): the binfhe path | `Ntt_*` green; `bench-hexl --benchmark_filter=NTT.*qbits:27` vs `HEXL_DISABLE_RVV=1` |
 | M6 | RVV64 NTT | green; honest comparison against native for 60-bit q |
@@ -336,7 +338,9 @@ Intrinsics reference: `docs/rvv_intrinsics/` (`make rvv-intrinsics-doc`; see the
 **Correctness ladder:** `make rvv-hexl-test` (both dispatch paths against `__int128` oracles, which were
 validated against upstream Intel HEXL in release and `HEXL_DEBUG` builds) → `make BUILD=debug
 rvv-hexl-test` (argument contracts) → `make SANITIZE=address test` → spike at VLEN 256 and 1024 (laptop)
-→ `make openfhe-check WITH_RVV_HEXL=ON` (OpenFHE's own `core_tests`/`pke_tests`/`binfhe_tests` on the port).
+→ `make openfhe-check WITH_RVV_HEXL=ON` (OpenFHE's own `core_tests`/`pke_tests`/`binfhe_tests` on the port)
+→ `make seal-check WITH_RVV_HEXL=ON` (BFV + CKKS round trips through every HEXL call SEAL makes;
+with `SEAL_TESTS=ON`, also SEAL's own `sealtest`).
 
 **Benchmark matrix** (`bench/run.sh`), with every axis changing exactly one variable:
 
@@ -347,6 +351,7 @@ rvv-hexl-test` (argument contracts) → `make SANITIZE=address test` → spike a
 | `n32-rvvhexl` vs `n64-rvvhexl` | the storage width alone (same e32 kernels; also `BM_NTTForward32` vs `BM_NTTForward/qbits:27` in bench-hexl) |
 | `ISA=rvv` vs `ISA=scalar` | the vector unit (scalar `-march` = the rvv one minus V; on the K3 `rva23u64` minus V/Zv*) |
 | `n{64,32}-rvvhexl` vs the same + `HEXL_DISABLE_RVV=1` | your RVV kernels vs your native kernels under the same auto-vectoriser |
+| SEAL `rvvhexl` vs **`stock`** | the HEXL backend under SEAL (same flags, identical bench binaries). **`stock` SEAL's NTT is already partly auto-vectorised by GCC**, so it is a harder baseline than OpenFHE's scalar NTT |
 | x100 vs a100 | VLEN 256 vs 1024, in-order vs out-of-order |
 | `bench-hexl` on K3 vs `HEXL_IMPL=intel` on AMD/Intel | the cross-architecture table (same source, AVX-512 vs RVV vs AVX2 fallback) |
 
@@ -362,3 +367,109 @@ backend with the word size (same caveat as the x86 HEXL runs in D01). Compare at
   `results/benchmarks-k3-*.json`.
 * OpenFHE upstream (`lib-benchmark`, `poly-benchmark-{4k,16k}`, `binfhe-ginx`, `VectorMath`,
   and on rvv-hexl builds the `*-hexl` variants Intel used to evaluate HEXL in OpenFHE).
+* `bench/seal`: the IPCEI SEAL benches (`seal_ntt_bench`, BFV deployable and 60-bit), same
+  arguments as `ZKP+FHE Research/benchmark.sh`; part of the `ipcei` suite of `bench/run.sh`.
+
+---
+
+## 7. Using the port with Microsoft SEAL
+
+Microsoft SEAL has its own Intel HEXL backend, and rvv-hexl is a drop-in for it too, with **no
+changes to SEAL** and none to rvv-hexl. Verified on the K3 (2026-09-28, SEAL 4.1.2, GCC 16.2,
+`-march=rva23u64`): SEAL configures against rvv-hexl, compiles and links cleanly (all 11
+`intel::hexl` symbols it references resolve to this library), and at runtime its calls reach
+rvv-hexl (the first one hits a stub until M0/M2 are done).
+
+```
+                  Microsoft SEAL v4.1.2   (make seal WITH_RVV_HEXL=ON)
+                   │   -DSEAL_USE_INTEL_HEXL=ON
+                   │   find_package(HEXL 1.2.4)  ← satisfied by our 1.2.6 HEXLConfig (same major)
+                   │   #include "hexl/hexl.hpp", links HEXL::hexl
+                   ▼
+   seal/util/ntt.cpp               NTT (forward + inverse, per (N, q) cache)
+   seal/util/polyarithsmallmod.cpp five Eltwise* functions
+```
+
+### How it is wired
+
+SEAL's switch is a plain CMake option, `-DSEAL_USE_INTEL_HEXL=ON`. `make seal WITH_RVV_HEXL=ON`
+(re)installs rvv-hexl for the current ISA/BUILD and builds SEAL against it into
+`build/seal/<ISA>/rvvhexl/`; `make seal` builds the stock reference into `build/seal/<ISA>/stock/`
+with identical options (`third_party/seal.sh`). One constraint matters:
+
+* **`SEAL_BUILD_DEPS` must be `OFF`.** With `ON`, SEAL downloads upstream Intel HEXL 1.2.5 (x86
+  only) instead of looking for an installed HEXL. As a consequence SEAL's optional dependencies
+  are disabled in both builds: Microsoft GSL (API sugar), zlib and Zstandard (compressed
+  serialisation, which the IPCEI suite also turns off). If you need them, install them
+  (`libmsgsl-dev`, `zlib1g-dev`, `libzstd-dev`) and turn them back on in `third_party/seal.sh`.
+* `libseal` is static and does not embed HEXL: whoever links SEAL also links `libhexl` (SEAL's
+  installed `SEALConfig.cmake` does this for CMake consumers; `mk/seal-bench.mk` and
+  `make seal-check` do it for ours).
+
+### What SEAL calls, and with which arguments
+
+Every HEXL call site in SEAL 4.1.2 (there are no others):
+
+| HEXL API | SEAL call site | Arguments SEAL uses |
+|---|---|---|
+| `NTT(N, q, root, MemoryPoolHandle, SimpleThreadSafePolicy)` | `ntt.cpp` `get_ntt()`: one object per (N, q), cached in a static map | the **allocator template constructor** |
+| `NTT::ComputeForward(d, d, imf, omf)` | `ntt_negacyclic_harvey{_lazy}` | in place; **(4, 4)** lazy and **(4, 1)** |
+| `NTT::ComputeInverse(d, d, imf, omf)` | `inverse_ntt_negacyclic_harvey{_lazy}` | in place; **(2, 2)** lazy and **(2, 1)** |
+| `EltwiseAddMod` | `add_poly_coeffmod`, `add_poly_scalar_coeffmod` | **vector+vector and vector+scalar** |
+| `EltwiseSubMod` | `sub_poly_coeffmod`, `sub_poly_scalar_coeffmod` | **vector+vector and vector+scalar** |
+| `EltwiseMultMod(r, a, b, n, q, 4)` | `dyadic_product_coeffmod` | input factor **4** |
+| `EltwiseFMAMod(r, a, s, nullptr, n, q, 8)` | `multiply_poly_scalar_coeffmod` | **no addend**, input factor **8** |
+| `EltwiseReduceMod(r, a, n, q, q, 1)` | `modulo_poly_coeffs` | input factor **= q** (arbitrary 64-bit input), output < q |
+
+Compared with OpenFHE (section 1), what this adds to your work:
+
+1. **No per-call fallback.** With `SEAL_USE_INTEL_HEXL`, every one of these always goes to
+   rvv-hexl. All of them must be correct; a slow one just stays on its native path at first.
+2. **The whole HEXL argument space is exercised.** OpenFHE uses factors (1, 1) everywhere. SEAL
+   uses the lazy NTT factors, `MultMod` with inputs < 4q, `FMAMod` with inputs < 8q and
+   `ReduceMod` from arbitrary 64-bit values. These are all upstream semantics already covered
+   by the `Ntt_*` / `Eltwise_*` tests (every mod-factor combination), so passing `make test`
+   means passing SEAL's usage.
+3. **The allocator internals are part of the contract.** SEAL specialises
+   `intel::hexl::NTT::AllocatorAdapter<seal::MemoryPoolHandle>` and
+   `AllocatorAdapter<seal::MemoryPoolHandle, SimpleThreadSafePolicy>`, both derived from
+   `AllocatorInterface<...>` (`hexl/util/allocator.hpp`). Keep `NTT::AllocatorAdapter` a nested
+   `template <class Adaptee, class... Args> struct` with the upstream constructor shapes, and the
+   allocator template constructors, or SEAL stops compiling.
+4. **Concurrency:** same invariant as OpenFHE: SEAL shares one cached `NTT` per (N, q) across
+   threads, so `ComputeForward/Inverse` must not keep mutable state in the object.
+
+### Performance expectations
+
+* **SEAL is mostly an e64 workload.** Its moduli are typically 36-60 bits
+  (`CoeffModulus::BFVDefault`: 36-37 bits at N = 4096, 43-44 at 8192, larger N up to 60), so it
+  exercises the `RVV64` kernels (M6) far more than the e32 path. On the K3 the e64 multiplier
+  does one element per cycle (section 5), so expect a smaller gain than on binfhe.
+* **The baseline is SEAL's own NTT, which is already partly auto-vectorised by GCC** (~25% of
+  its instructions are RVV). Measured 2026-09-27 with GCC 16.2 `rva23u64`, N = 16384, 49-bit q:
+  **53.8 ns/element on the X100, 148.5 on the A100** (`seal_ntt_bench`). For comparison, stock
+  OpenFHE's scalar NTT is 34.7 / 125.3 ns/element on the same build. That is the number the
+  `RVV64` NTT has to beat under SEAL.
+* The stock SEAL that `make seal` builds is a faithful baseline: on the X100 it reproduces the
+  IPCEI suite's own SEAL build (53.5 vs 53.8 ns/element for the NTT, 26.0 vs 25.9 s for BFV
+  deployable, 17.2 vs 17.2 s for BFV 60-bit), so disabling GSL/zlib/zstd costs nothing.
+
+### Workflow
+
+```sh
+make seal-all                          # stock + rvvhexl (installs rvv-hexl first)
+make seal-check                        # stock: must pass (sanity of the build itself)
+make seal-check WITH_RVV_HEXL=ON       # BFV + CKKS through every call above; TODO until M0/M2
+make seal-check WITH_RVV_HEXL=ON SEAL_TESTS=ON   # + SEAL's sealtest (apt install libgtest-dev)
+make ISA=scalar seal seal-check WITH_RVV_HEXL=ON # the M3 integration check on the native path
+make bench && bench/run.sh --suite ipcei         # SEAL benches for every SEAL build
+```
+
+`seal-check` exits 0 when all checks pass, 1 on a wrong result, 2 when it reaches a stub (it
+names it, like `make test`). The smoke test prints which backend it ran on (stock, or rvv-hexl
+with RVV compiled/enabled and the VLEN), so a silent fallback shows up in the output.
+
+After changing a kernel, `make rvv-hexl-install` is enough for SEAL: `libhexl` is linked into
+the smoke test and the benches at their link step, so rerun `make seal-check` / `make bench`. Only
+a change to a public header (`include/hexl/*`, in particular `ntt.hpp`) needs `make seal
+WITH_RVV_HEXL=ON` again, because SEAL compiles those headers into `libseal`.

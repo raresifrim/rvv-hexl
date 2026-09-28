@@ -2,7 +2,8 @@
 
 RISC-V (RVV 1.0) port of [Intel HEXL](https://github.com/intel/hexl) v1.2.6, built to plug
 into OpenFHE through the same extension point Intel HEXL uses
-([openfhe-hexl](https://github.com/openfheorg/openfhe-hexl)). It implements "Etapa 1" of the
+([openfhe-hexl](https://github.com/openfheorg/openfhe-hexl)), and into Microsoft SEAL through
+SEAL's own `SEAL_USE_INTEL_HEXL` option (no source changes on either side). It implements "Etapa 1" of the
 IPCEI A14 plan (SENTHIPoli D01, *Direcția de accelerare*): an RVV-aware HEXL backend,
 measured on the SpaceMiT K3 (X100 and A100 clusters) against stock OpenFHE and the no-RVV
 baseline.
@@ -12,10 +13,11 @@ Every kernel body is a stub that throws `[rvv-hexl TODO] <function>`. `make todo
 them. Read [docs/PORTING_GUIDE.md](docs/PORTING_GUIDE.md) before you start.
 
 ```
-OpenFHE (NATIVE_SIZE 64|32) ── openfhe-hexl HAL ── intel::hexl API ── rvv-hexl
-                                                  (this repo)       ├─ dispatch (done)
-                                                                    ├─ native C++ kernels (TODO)
-                                                                    └─ RVV kernels (TODO)
+OpenFHE (NATIVE_SIZE 64|32) ── openfhe-hexl HAL ──┐
+                                                  ├─ intel::hexl API ── rvv-hexl
+Microsoft SEAL 4.1 ── SEAL_USE_INTEL_HEXL ────────┘  (this repo)       ├─ dispatch (done)
+                                                                       ├─ native C++ kernels (TODO)
+                                                                       └─ RVV kernels (TODO)
 ```
 
 ## Quick start (K3 / RISC-V Ubuntu)
@@ -39,6 +41,8 @@ make openfhe WITH_RVV_HEXL=ON         # OpenFHE + openfhe-hexl on top of rvv-hex
 make openfhe NATIVE_SIZE=32 WITH_RVV_HEXL=ON   # same with 32-bit words (binfhe)
 make openfhe-check WITH_RVV_HEXL=ON   # OpenFHE's own unit tests on the port
 make ISA=scalar openfhe-all           # the four above, built without V (no-RVV baseline)
+make seal-all                         # Microsoft SEAL 4.1.2: stock + on top of rvv-hexl
+make seal-check WITH_RVV_HEXL=ON      # BFV + CKKS round trips through every HEXL call SEAL makes
 make bench && make ISA=scalar bench
 bench/run.sh                          # full matrix, both K3 clusters -> results/<host>-<date>/
 ```
@@ -53,12 +57,14 @@ src/eltwise/         7 elementwise ops: <op>.cpp = entry + dispatch + native,  T
 src/ntt/             NTT class (ntt.cpp), native radix-2, RVV kernels          TODO
 src/util/            CPU detection, RVV helpers (rvv-util.hpp, TODO), stub marker
 test/                self-contained tests with independent __int128 oracles
+test/seal/           seal-smoke.cpp: end-to-end SEAL check (make seal-check)
 bench/hexl/          HEXL-standard microbenchmarks (Google Benchmark)
 bench/uarch/         vector-unit microbenchmarks: cycles/insn, bandwidth, thread scaling (K3 tuning)
 bench/openfhe/       IPCEI OpenFHE benches (verbatim from ZKP+FHE Research @37a6844)
-bench/run.sh         benchmark matrix runner (ISA x OpenFHE variant x RVV on/off x cluster)
-third_party/         OpenFHE / openfhe-hexl / Google Benchmark build scripts
-cmake/               HEXLConfig.cmake: lets OpenFHE find this library as "HEXL 1.2.6"
+bench/seal/          IPCEI SEAL benches (verbatim from ZKP+FHE Research @9d51ffd)
+bench/run.sh         benchmark matrix runner (ISA x OpenFHE/SEAL variant x RVV on/off x cluster)
+third_party/         OpenFHE / openfhe-hexl / SEAL / Google Benchmark build scripts
+cmake/               HEXLConfig.cmake: lets OpenFHE and SEAL find this library as "HEXL 1.2.6"
 docs/                PORTING_GUIDE.md: every class and interface, what to implement
 docs/rvv_intrinsics/ all RVA23 RVV intrinsics + searchable index, local only (make rvv-intrinsics-doc)
 docs/tools/          scripts that fetch and index docs/rvv_intrinsics
@@ -66,8 +72,9 @@ docs/tools/          scripts that fetch and index docs/rvv_intrinsics
 
 ## Make targets and knobs
 
-Two components, each with its own targets. Every OpenFHE target acts on the configuration
-selected by `NATIVE_SIZE` / `WITH_RVV_HEXL` (and `ISA`).
+Three components, each with its own targets. Every OpenFHE target acts on the configuration
+selected by `NATIVE_SIZE` / `WITH_RVV_HEXL` (and `ISA`); every SEAL target on `WITH_RVV_HEXL`
+(and `ISA`).
 
 | rvv-hexl | What it does |
 |---|---|
@@ -85,9 +92,17 @@ selected by `NATIVE_SIZE` / `WITH_RVV_HEXL` (and `ISA`).
 | `make openfhe-all` | the comparison set: `n64`, `n32`, `n64-rvvhexl`, `n32-rvvhexl` |
 | `make openfhe-list` | what exists for this ISA (read from each install's `config_core.h`) |
 
+| SEAL | What it does |
+|---|---|
+| `make seal` | configure + build + install SEAL v4.1.2 (static) into `build/seal/<ISA>/{stock,rvvhexl}/`; `WITH_RVV_HEXL=ON` builds it with `SEAL_USE_INTEL_HEXL=ON` on top of rvv-hexl |
+| `make seal-check` | `test/seal/seal-smoke.cpp` (BFV + CKKS, checked exactly / within 1e-3) against that build; with `SEAL_TESTS=ON` also SEAL's `sealtest` |
+| `make seal-bench` | the IPCEI SEAL benches (`seal_ntt_bench`, BFV deployable and 60-bit) against that build |
+| `make seal-all` | the comparison pair: `stock`, `rvvhexl` |
+| `make seal-list` | what exists for this ISA (read from each install's `seal/util/config.h`) |
+
 | Everything | |
 |---|---|
-| `make bench` | `rvv-hexl-bench` + `uarch-bench` (rvv) + IPCEI benches for every OpenFHE build + `ailaunch` |
+| `make bench` | `rvv-hexl-bench` + `uarch-bench` (rvv) + IPCEI benches for every OpenFHE and SEAL build + `ailaunch` |
 | `make run-bench` | `bench/run.sh` |
 | `make rvv-intrinsics-doc` | all RVA23 RVV intrinsics + `INDEX.md` + grep-able `rva23-intrinsics.tsv` in `docs/rvv_intrinsics/` (git-ignored) |
 | `make reconfigure` | forget the cached board/toolchain checks (after a compiler upgrade, or on another board) |
@@ -100,8 +115,9 @@ selected by `NATIVE_SIZE` / `WITH_RVV_HEXL` (and `ISA`).
 | `HEXL_SHARED_LIB` | `ON`, `OFF` | also build `libhexl.so` |
 | `HEXL_TESTING` / `HEXL_BENCHMARK` | `OFF`, `ON` | `make rvv-hexl` also builds the test / bench binary |
 | `NATIVE_SIZE` | CPU word size (64), `32` | OpenFHE's native integer width |
-| `WITH_RVV_HEXL` | `OFF`, `ON` | build OpenFHE with the HEXL backend on top of rvv-hexl (installs rvv-hexl of the same `ISA`/`BUILD` first; `NATIVE_SIZE` 64 or 32) |
+| `WITH_RVV_HEXL` | `OFF`, `ON` | build OpenFHE (or SEAL) with the HEXL backend on top of rvv-hexl (installs rvv-hexl of the same `ISA`/`BUILD` first; for OpenFHE, `NATIVE_SIZE` 64 or 32) |
 | `OPENFHE_BENCHMARKS` / `OPENFHE_UNITTESTS` | `ON` / follows `WITH_RVV_HEXL` | build upstream OpenFHE's benchmark suite / unit tests |
+| `SEAL_TESTS` | `OFF`, `ON` | also build SEAL's own `sealtest` (needs `libgtest-dev`) |
 | `RISCV_MARCH` / `RISCV_SCALAR_MARCH` | auto-detected | force the `-march` for `ISA=rvv` / `ISA=scalar` (the toolchain checks still run) |
 | `HEXL_IMPL` | `rvv`, `intel` | build the same tests/benches against upstream Intel HEXL (`INTEL_HEXL_PREFIX=`) |
 | `CROSS`, `RUN` | e.g. `riscv64-unknown-elf-`, `spike --isa=rv64gcv_zvl256b pk` | cross-build and run under a simulator |
@@ -114,6 +130,11 @@ so after changing a kernel `make rvv-hexl-install && make openfhe-check WITH_RVV
 enough; no OpenFHE rebuild. If you change a **public header** (for example, add members to
 `NTT`), rerun `make openfhe WITH_RVV_HEXL=ON`: OpenFHE compiles those headers into its own
 code, and its incremental rebuild picks up the change.
+
+Developing against SEAL: `libseal` is static and does not embed HEXL, so the smoke test and the
+SEAL benches link `libhexl` themselves. After changing a kernel, `make rvv-hexl-install &&
+make seal-check WITH_RVV_HEXL=ON` is enough; after a public-header change, rerun `make seal
+WITH_RVV_HEXL=ON`. What SEAL calls, and with which arguments, is in the porting guide, section 7.
 
 Runtime switch: `HEXL_DISABLE_RVV=1` forces the native kernels in an RVV build (the counterpart
 of upstream's `HEXL_DISABLE_AVX512DQ`).
