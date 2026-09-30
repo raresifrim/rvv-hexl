@@ -116,24 +116,26 @@ void EltwiseSubMod(uint32_t* result, const uint32_t* operand1,
 }
 
 // ---------------------------------------------------------------------------
-// Native (scalar) kernels.  TODO(port)
+// Native (scalar) kernels.
 // ---------------------------------------------------------------------------
 
 template <typename Word>
 void EltwiseSubModNative(Word* result, const Word* operand1, const Word* operand2,
                   uint64_t n, uint64_t modulus) {
-  // TODO(port): for i in [0, n): result[i] = (operand1[i] - operand2[i]) mod modulus
-  //   Compute (x + modulus) - y in a wide enough type, then one conditional
-  //   subtract; or subtract and add modulus back when x < y.
-  //   result may alias operand1 (OpenFHE calls it in place).
-  HEXL_NOT_IMPLEMENTED();
+  for(uint64_t i=0; i<n; ++i){
+	uint64_t diff = (uint64_t)operand1[i] - operand2[i];
+	result[i] = (Word)std::min(diff, diff + modulus);
+  }
 }
 
 template <typename Word>
 void EltwiseSubModNative(Word* result, const Word* operand1, uint64_t operand2,
                   uint64_t n, uint64_t modulus) {
-  // TODO(port): for i in [0, n): result[i] = (operand1[i] - operand2) mod modulus
-  HEXL_NOT_IMPLEMENTED();
+  
+  for(uint64_t i=0; i<n; ++i){
+	uint64_t diff = (uint64_t)operand1[i] - operand2;
+	result[i] = (Word)std::min(diff, diff + modulus);
+  }	
 }
 
 }  // namespace hexl

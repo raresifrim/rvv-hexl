@@ -1,0 +1,430 @@
+// Copyright (C) 2026 IPCEI-NXP A14 team (RISC-V port)
+// SPDX-License-Identifier: Apache-2.0
+//
+// src/util/rvv-util.hpp: one test per helper (each overload separately), so a
+// helper can be checked the moment it is written, before any kernel uses it.
+//
+//   hexl-tests RvvUtil                  all of them
+//   hexl-tests RvvUtil_MulModShoup      one family
+//
+// Every test runs the helper strip by strip (vsetvl per strip, so VLEN-agnostic)
+// over the same size sweep as the eltwise tests (every tail at VLEN 128..1024),
+// feeds it through plain vle/vse intrinsics (never through another helper, so a
+// failure points at exactly one function), and compares with the __int128
+// oracle. Edge values (q - 1, 0, the largest allowed input) sit at the front of
+// every vector. Lazy helpers are checked for both the residue and the range.
+//
+// Internal header: compiled only into rvv-hexl RVV builds (needs -Isrc, which
+// the Makefile adds for HEXL_IMPL=rvv; empty for ISA=scalar and HEXL_IMPL=intel).
+
+#include <cstdint>
+#include <vector>
+
+#include "oracle.hpp"
+#include "test.hpp"
+
+#if defined(__has_include)
+#if __has_include("util/rvv-util.hpp")
+#include "util/rvv-util.hpp"
+#endif
+#endif
+
+#ifdef HEXL_HAS_RVV
+
+namespace O = hexltest::oracle;
+namespace rvv = intel::hexl::rvv;
+using u128 = unsigned __int128;
+
+namespace {
+
+// ===========================================================================
+// Barrett factor conventions. The two MulModBarrett* signatures take
+// precomputed factors whose exact definition is the implementer's choice (the
+// kernels that call them compute the factors too). EDIT THESE TWO FUNCTIONS if
+// your implementation expects a different convention; nothing else depends on
+// them.
+// ===========================================================================
+
+/// e64: (barrett_hi, barrett_lo) = floor(2^128 / q), the 128-bit fixed-point
+/// reciprocal (SEAL's Modulus::const_ratio()[1], [0]). Natural pairing with the
+/// full 128-bit product (vmul + vmulhu).
+inline void Barrett64Factors(uint64_t q, uint64_t* hi, uint64_t* lo) {
+  const u128 m = ~static_cast<u128>(0);  // 2^128 - 1
+  u128 f = m / q;
+  if (m % q == q - 1) ++f;  // floor(2^128/q) = floor((2^128-1)/q) + [q | 2^128]
+  *hi = static_cast<uint64_t>(f >> 64);
+  *lo = static_cast<uint64_t>(f);
+}
+
+/// e32: barrett_factor = floor(2^(2k) / q), k = bit length of q (the header's
+/// hint). For q < 2^30 this is < 2^31, so it fits the uint32_t parameter.
+inline uint32_t Barrett32Factor(uint64_t q) {
+  const int k = 64 - __builtin_clzll(q);
+  return static_cast<uint32_t>((static_cast<u128>(1) << (2 * k)) / q);
+}
+
+// ---------------------------------------------------------------------------
+
+/// Shoup precomputation: floor(y * 2^bits / q), y < q.
+inline uint64_t ShoupPrecon(uint64_t y, uint64_t q, int bits) {
+  return static_cast<uint64_t>((static_cast<u128>(y) << bits) / q);
+}
+
+/// Moduli for the e64 helpers: every size class up to the header's contract.
+std::vector<uint64_t> Moduli64(uint64_t max_exclusive) {
+  std::vector<uint64_t> qs = {2, 3, 17};
+  for (size_t bits : {20, 27, 29, 31, 32, 40, 49, 52, 59, 60, 61}) qs.push_back(O::NttPrime(bits, 1));
+  qs.push_back(O::PrimeBelow(1ULL << 62));
+  qs.push_back(O::PrimeBelow(1ULL << 63));
+  std::vector<uint64_t> out;
+  for (uint64_t q : qs) {
+    if (q < max_exclusive) out.push_back(q);
+  }
+  return out;
+}
+
+/// Moduli for the e32 helpers: q < 2^30 (the e32 dispatch bound).
+std::vector<uint64_t> Moduli32() {
+  std::vector<uint64_t> qs = {2, 3, 17};
+  for (size_t bits : {12, 20, 27, 28, 29}) qs.push_back(O::NttPrime(bits, 1));
+  qs.push_back(O::PrimeBelow(1ULL << 30));
+  return qs;
+}
+
+/// n values in [0, bound) with edge values at the front.
+std::vector<uint64_t> WithEdges(size_t n, uint64_t bound, std::initializer_list<uint64_t> edges) {
+  auto v = O::Random(n, bound);
+  size_t i = 0;
+  for (uint64_t e : edges) {
+    if (i < n) v[i++] = e;
+  }
+  return v;
+}
+
+/// f(offset, vl) for each strip of n elements at the given element width.
+template <class F>
+void Strips64(size_t n, F f) {
+  for (size_t i = 0, vl; i < n; i += vl) {
+    vl = __riscv_vsetvl_e64m1(n - i);
+    f(i, vl);
+  }
+}
+template <class F>
+void Strips32(size_t n, F f) {
+  for (size_t i = 0, vl; i < n; i += vl) {
+    vl = __riscv_vsetvl_e32m1(n - i);
+    f(i, vl);
+  }
+}
+
+std::vector<uint32_t> To32(const std::vector<uint64_t>& v) { return O::As<uint32_t>(v); }
+
+}  // namespace
+
+// ===========================================================================
+// e64 helpers
+// ===========================================================================
+
+TEST(RvvUtil_AddMod) {
+  for (uint64_t q : Moduli64(1ULL << 63)) {
+    for (size_t n : O::EltwiseSizes()) {
+      auto a = WithEdges(n, q, {q - 1, 0, q - 1}), b = WithEdges(n, q, {q - 1, 0, 0});
+      std::vector<uint64_t> want(n), got(n);
+      for (size_t i = 0; i < n; ++i) want[i] = O::AddMod(a[i], b[i], q);
+      Strips64(n, [&](size_t i, size_t vl) {
+        auto r = rvv::AddMod(__riscv_vle64_v_u64m1(&a[i], vl), __riscv_vle64_v_u64m1(&b[i], vl), q, vl);
+        __riscv_vse64_v_u64m1(&got[i], r, vl);
+      });
+      CHECK_VEC_EQ(want, got, << "rvv::AddMod n=" << n << " q=" << q);
+    }
+  }
+}
+
+TEST(RvvUtil_SubMod) {
+  for (uint64_t q : Moduli64(1ULL << 63)) {
+    for (size_t n : O::EltwiseSizes()) {
+      auto a = WithEdges(n, q, {0, q - 1, 0}), b = WithEdges(n, q, {q - 1, 0, 0});
+      std::vector<uint64_t> want(n), got(n);
+      for (size_t i = 0; i < n; ++i) want[i] = O::SubMod(a[i], b[i], q);
+      Strips64(n, [&](size_t i, size_t vl) {
+        auto r = rvv::SubMod(__riscv_vle64_v_u64m1(&a[i], vl), __riscv_vle64_v_u64m1(&b[i], vl), q, vl);
+        __riscv_vse64_v_u64m1(&got[i], r, vl);
+      });
+      CHECK_VEC_EQ(want, got, << "rvv::SubMod n=" << n << " q=" << q);
+    }
+  }
+}
+
+TEST(RvvUtil_ReduceFromTwice) {
+  for (uint64_t q : Moduli64(1ULL << 63)) {
+    for (size_t n : O::EltwiseSizes()) {
+      auto x = WithEdges(n, 2 * q, {2 * q - 1, q, q - 1, 0});  // x in [0, 2q)
+      std::vector<uint64_t> want(n), got(n);
+      for (size_t i = 0; i < n; ++i) want[i] = x[i] % q;
+      Strips64(n, [&](size_t i, size_t vl) {
+        __riscv_vse64_v_u64m1(&got[i], rvv::ReduceFromTwice(__riscv_vle64_v_u64m1(&x[i], vl), q, vl), vl);
+      });
+      CHECK_VEC_EQ(want, got, << "rvv::ReduceFromTwice n=" << n << " q=" << q);
+    }
+  }
+}
+
+// Shoup lazy: r = x*y mod q, r in [0, 2q), for ANY 64-bit x (the NTT feeds [0, 4q)).
+namespace {
+void CheckShoupLazy64(const std::vector<uint64_t>& x, const std::vector<uint64_t>& y,
+                      const std::vector<uint64_t>& got, uint64_t q, const char* what) {
+  for (size_t i = 0; i < x.size(); ++i) {
+    CHECK_EQ(got[i] % q, O::MulMod(x[i] % q, y[i], q),
+             << what << " residue at [" << i << "] x=" << x[i] << " y=" << y[i] << " q=" << q);
+    CHECK(got[i] < 2 * q);
+  }
+}
+}  // namespace
+
+TEST(RvvUtil_MulModShoupLazy) {
+  for (uint64_t q : Moduli64(1ULL << 63)) {
+    for (size_t n : O::EltwiseSizes()) {
+      const uint64_t x4q = (q < (1ULL << 62)) ? 4 * q - 1 : ~0ULL;
+      auto x = WithEdges(n, O::AnyWord<uint64_t>(), {~0ULL, x4q, q - 1, 0});
+      auto y = WithEdges(n, q, {q - 1, q - 1, q - 1, q - 1});
+      std::vector<uint64_t> yp(n), got(n);
+      for (size_t i = 0; i < n; ++i) yp[i] = ShoupPrecon(y[i], q, 64);
+      Strips64(n, [&](size_t i, size_t vl) {
+        auto r = rvv::MulModShoupLazy(__riscv_vle64_v_u64m1(&x[i], vl), __riscv_vle64_v_u64m1(&y[i], vl),
+                                      __riscv_vle64_v_u64m1(&yp[i], vl), q, vl);
+        __riscv_vse64_v_u64m1(&got[i], r, vl);
+      });
+      CheckShoupLazy64(x, y, got, q, "rvv::MulModShoupLazy (vector y)");
+    }
+  }
+}
+
+TEST(RvvUtil_MulModShoupLazyScalar) {
+  for (uint64_t q : Moduli64(1ULL << 63)) {
+    for (uint64_t ys : {q - 1, uint64_t{1}, O::Random(1, q)[0]}) {
+      const uint64_t yp = ShoupPrecon(ys, q, 64);
+      for (size_t n : O::EltwiseSizes()) {
+        auto x = WithEdges(n, O::AnyWord<uint64_t>(), {~0ULL, q - 1, 0});
+        std::vector<uint64_t> y(n, ys), got(n);
+        Strips64(n, [&](size_t i, size_t vl) {
+          __riscv_vse64_v_u64m1(&got[i], rvv::MulModShoupLazy(__riscv_vle64_v_u64m1(&x[i], vl), ys, yp, q, vl), vl);
+        });
+        CheckShoupLazy64(x, y, got, q, "rvv::MulModShoupLazy (scalar y)");
+      }
+    }
+  }
+}
+
+TEST(RvvUtil_MulModBarrett) {
+  for (uint64_t q : Moduli64(1ULL << 62)) {  // header: e64 path, moduli up to 62 bits
+    uint64_t hi, lo;
+    Barrett64Factors(q, &hi, &lo);
+    for (size_t n : O::EltwiseSizes()) {
+      auto a = WithEdges(n, q, {q - 1, 0, q - 1}), b = WithEdges(n, q, {q - 1, q - 1, 0});
+      std::vector<uint64_t> want(n), got(n);
+      for (size_t i = 0; i < n; ++i) want[i] = O::MulMod(a[i], b[i], q);
+      Strips64(n, [&](size_t i, size_t vl) {
+        auto r = rvv::MulModBarrett(__riscv_vle64_v_u64m1(&a[i], vl), __riscv_vle64_v_u64m1(&b[i], vl), q, hi,
+                                    lo, vl);
+        __riscv_vse64_v_u64m1(&got[i], r, vl);
+      });
+      CHECK_VEC_EQ(want, got, << "rvv::MulModBarrett n=" << n << " q=" << q
+                                << " (factors: see Barrett64Factors in this file)");
+    }
+  }
+}
+
+// ===========================================================================
+// e32 helpers: storage conversion
+// ===========================================================================
+
+TEST(RvvUtil_Load32_FromUint64) {  // narrow on load: e64 storage, values < 2^32
+  for (size_t n : O::EltwiseSizes()) {
+    auto src = WithEdges(n, 1ULL << 32, {(1ULL << 32) - 1, 0, 1});
+    std::vector<uint32_t> got(n);
+    Strips32(n, [&](size_t i, size_t vl) { __riscv_vse32_v_u32m1(&got[i], rvv::Load32(&src[i], vl), vl); });
+    CHECK_VEC_EQ(To32(src), got, << "rvv::Load32(const uint64_t*) n=" << n);
+  }
+}
+
+TEST(RvvUtil_Load32_FromUint32) {
+  for (size_t n : O::EltwiseSizes()) {
+    auto src = To32(WithEdges(n, 1ULL << 32, {(1ULL << 32) - 1, 0, 1}));
+    std::vector<uint32_t> got(n);
+    Strips32(n, [&](size_t i, size_t vl) { __riscv_vse32_v_u32m1(&got[i], rvv::Load32(&src[i], vl), vl); });
+    CHECK_VEC_EQ(src, got, << "rvv::Load32(const uint32_t*) n=" << n);
+  }
+}
+
+// Stores must zero-extend (upper 32 bits cleared) and must not write past vl:
+// the destination is pre-filled with a sentinel and has guard elements at the end.
+TEST(RvvUtil_Store32_ToUint64) {
+  const uint64_t kSentinel = 0xA5A5A5A5A5A5A5A5ULL;
+  for (size_t n : O::EltwiseSizes()) {
+    auto v = To32(WithEdges(n, 1ULL << 32, {(1ULL << 32) - 1, 0, 1}));
+    std::vector<uint64_t> dst(n + 8, kSentinel), want(n + 8, kSentinel);
+    for (size_t i = 0; i < n; ++i) want[i] = v[i];
+    Strips32(n, [&](size_t i, size_t vl) { rvv::Store32(&dst[i], __riscv_vle32_v_u32m1(&v[i], vl), vl); });
+    CHECK_VEC_EQ(want, dst, << "rvv::Store32(uint64_t*) n=" << n << " (incl. 8 guard words past n)");
+  }
+}
+
+TEST(RvvUtil_Store32_ToUint32) {
+  const uint32_t kSentinel = 0xA5A5A5A5U;
+  for (size_t n : O::EltwiseSizes()) {
+    auto v = To32(WithEdges(n, 1ULL << 32, {(1ULL << 32) - 1, 0, 1}));
+    std::vector<uint32_t> dst(n + 8, kSentinel), want(n + 8, kSentinel);
+    for (size_t i = 0; i < n; ++i) want[i] = v[i];
+    Strips32(n, [&](size_t i, size_t vl) { rvv::Store32(&dst[i], __riscv_vle32_v_u32m1(&v[i], vl), vl); });
+    CHECK_VEC_EQ(want, dst, << "rvv::Store32(uint32_t*) n=" << n << " (incl. 8 guard words past n)");
+  }
+}
+
+// ===========================================================================
+// e32 helpers: arithmetic (q < 2^30)
+// ===========================================================================
+
+TEST(RvvUtil_AddMod32) {
+  for (uint64_t q : Moduli32()) {
+    for (size_t n : O::EltwiseSizes()) {
+      auto a = To32(WithEdges(n, q, {q - 1, 0, q - 1})), b = To32(WithEdges(n, q, {q - 1, 0, 0}));
+      std::vector<uint32_t> want(n), got(n);
+      for (size_t i = 0; i < n; ++i) want[i] = static_cast<uint32_t>(O::AddMod(a[i], b[i], q));
+      Strips32(n, [&](size_t i, size_t vl) {
+        auto r = rvv::AddMod32(__riscv_vle32_v_u32m1(&a[i], vl), __riscv_vle32_v_u32m1(&b[i], vl),
+                               static_cast<uint32_t>(q), vl);
+        __riscv_vse32_v_u32m1(&got[i], r, vl);
+      });
+      CHECK_VEC_EQ(want, got, << "rvv::AddMod32 n=" << n << " q=" << q);
+    }
+  }
+}
+
+TEST(RvvUtil_SubMod32) {
+  for (uint64_t q : Moduli32()) {
+    for (size_t n : O::EltwiseSizes()) {
+      auto a = To32(WithEdges(n, q, {0, q - 1, 0})), b = To32(WithEdges(n, q, {q - 1, 0, 0}));
+      std::vector<uint32_t> want(n), got(n);
+      for (size_t i = 0; i < n; ++i) want[i] = static_cast<uint32_t>(O::SubMod(a[i], b[i], q));
+      Strips32(n, [&](size_t i, size_t vl) {
+        auto r = rvv::SubMod32(__riscv_vle32_v_u32m1(&a[i], vl), __riscv_vle32_v_u32m1(&b[i], vl),
+                               static_cast<uint32_t>(q), vl);
+        __riscv_vse32_v_u32m1(&got[i], r, vl);
+      });
+      CHECK_VEC_EQ(want, got, << "rvv::SubMod32 n=" << n << " q=" << q);
+    }
+  }
+}
+
+// Shoup lazy, 32-bit lanes: r = x*y mod q in [0, 2q) for any 32-bit x.
+TEST(RvvUtil_MulModShoupLazy32) {
+  for (uint64_t q : Moduli32()) {
+    for (size_t n : O::EltwiseSizes()) {
+      auto x = To32(WithEdges(n, 1ULL << 32, {(1ULL << 32) - 1, 4 * q - 1, q - 1, 0}));
+      auto y = To32(WithEdges(n, q, {q - 1, q - 1, q - 1, q - 1}));
+      std::vector<uint32_t> yp(n), got(n);
+      for (size_t i = 0; i < n; ++i) yp[i] = static_cast<uint32_t>(ShoupPrecon(y[i], q, 32));
+      Strips32(n, [&](size_t i, size_t vl) {
+        auto r = rvv::MulModShoupLazy32(__riscv_vle32_v_u32m1(&x[i], vl), __riscv_vle32_v_u32m1(&y[i], vl),
+                                        __riscv_vle32_v_u32m1(&yp[i], vl), static_cast<uint32_t>(q), vl);
+        __riscv_vse32_v_u32m1(&got[i], r, vl);
+      });
+      for (size_t i = 0; i < n; ++i) {
+        CHECK_EQ(got[i] % q, O::MulMod(x[i] % q, y[i], q),
+                 << "rvv::MulModShoupLazy32 residue at [" << i << "] x=" << x[i] << " y=" << y[i] << " q=" << q);
+        CHECK(got[i] < 2 * q);
+      }
+    }
+  }
+}
+
+TEST(RvvUtil_MulModBarrett32) {
+  for (uint64_t q : Moduli32()) {
+    const uint32_t mu = Barrett32Factor(q);
+    for (size_t n : O::EltwiseSizes()) {
+      auto a = To32(WithEdges(n, q, {q - 1, 0, q - 1})), b = To32(WithEdges(n, q, {q - 1, q - 1, 0}));
+      std::vector<uint32_t> want(n), got(n);
+      for (size_t i = 0; i < n; ++i) want[i] = static_cast<uint32_t>(O::MulMod(a[i], b[i], q));
+      Strips32(n, [&](size_t i, size_t vl) {
+        auto r = rvv::MulModBarrett32(__riscv_vle32_v_u32m1(&a[i], vl), __riscv_vle32_v_u32m1(&b[i], vl),
+                                      static_cast<uint32_t>(q), mu, vl);
+        __riscv_vse32_v_u32m1(&got[i], r, vl);
+      });
+      CHECK_VEC_EQ(want, got, << "rvv::MulModBarrett32 n=" << n << " q=" << q
+                                << " (factor: see Barrett32Factor in this file)");
+    }
+  }
+}
+
+// ===========================================================================
+// LMUL-generic Add/Sub helpers at m4, the LMUL the light kernels use (the tests
+// above instantiate them at m1). Also the direct test of the scalar forms.
+// ===========================================================================
+
+TEST(RvvUtil_AddSub_m4) {
+  for (uint64_t q : Moduli64(1ULL << 63)) {
+    for (size_t n : O::EltwiseSizes()) {
+      auto a = WithEdges(n, q, {q - 1, 0, q - 1, 0}), b = WithEdges(n, q, {q - 1, 0, 0, q - 1});
+      auto x = WithEdges(n, 2 * q, {2 * q - 1, q, q - 1, 0});  // x in [0, 2q)
+      for (uint64_t s : {q - 1, O::Random(1, q)[0]}) {
+        std::vector<uint64_t> w_add(n), w_sub(n), w_adds(n), w_subs(n), w_red(n);
+        for (size_t i = 0; i < n; ++i) {
+          w_add[i] = O::AddMod(a[i], b[i], q);
+          w_sub[i] = O::SubMod(a[i], b[i], q);
+          w_adds[i] = O::AddMod(a[i], s, q);
+          w_subs[i] = O::SubMod(a[i], s, q);
+          w_red[i] = x[i] % q;
+        }
+        std::vector<uint64_t> g_add(n), g_sub(n), g_adds(n), g_subs(n), g_red(n);
+        for (size_t i = 0, vl; i < n; i += vl) {
+          vl = __riscv_vsetvl_e64m4(n - i);
+          vuint64m4_t va = __riscv_vle64_v_u64m4(&a[i], vl), vb = __riscv_vle64_v_u64m4(&b[i], vl);
+          __riscv_vse64_v_u64m4(&g_add[i], rvv::AddMod(va, vb, q, vl), vl);
+          __riscv_vse64_v_u64m4(&g_sub[i], rvv::SubMod(va, vb, q, vl), vl);
+          __riscv_vse64_v_u64m4(&g_adds[i], rvv::AddScalarMod(va, s, q, vl), vl);
+          __riscv_vse64_v_u64m4(&g_subs[i], rvv::SubScalarMod(va, s, q, vl), vl);
+          __riscv_vse64_v_u64m4(&g_red[i], rvv::ReduceFromTwice(__riscv_vle64_v_u64m4(&x[i], vl), q, vl), vl);
+        }
+        CHECK_VEC_EQ(w_add, g_add, << "rvv::AddMod<u64m4> n=" << n << " q=" << q);
+        CHECK_VEC_EQ(w_sub, g_sub, << "rvv::SubMod<u64m4> n=" << n << " q=" << q);
+        CHECK_VEC_EQ(w_adds, g_adds, << "rvv::AddScalarMod<u64m4> n=" << n << " q=" << q << " b=" << s);
+        CHECK_VEC_EQ(w_subs, g_subs, << "rvv::SubScalarMod<u64m4> n=" << n << " q=" << q << " b=" << s);
+        CHECK_VEC_EQ(w_red, g_red, << "rvv::ReduceFromTwice<u64m4> n=" << n << " q=" << q);
+      }
+    }
+  }
+}
+
+TEST(RvvUtil_AddSub32_m4) {
+  for (uint64_t q : Moduli32()) {
+    for (size_t n : O::EltwiseSizes()) {
+      auto a = To32(WithEdges(n, q, {q - 1, 0, q - 1, 0})), b = To32(WithEdges(n, q, {q - 1, 0, 0, q - 1}));
+      const uint32_t q32 = static_cast<uint32_t>(q);
+      for (uint64_t s : {q - 1, O::Random(1, q)[0]}) {
+        const uint32_t s32 = static_cast<uint32_t>(s);
+        std::vector<uint32_t> w_add(n), w_sub(n), w_adds(n), w_subs(n);
+        for (size_t i = 0; i < n; ++i) {
+          w_add[i] = static_cast<uint32_t>(O::AddMod(a[i], b[i], q));
+          w_sub[i] = static_cast<uint32_t>(O::SubMod(a[i], b[i], q));
+          w_adds[i] = static_cast<uint32_t>(O::AddMod(a[i], s, q));
+          w_subs[i] = static_cast<uint32_t>(O::SubMod(a[i], s, q));
+        }
+        std::vector<uint32_t> g_add(n), g_sub(n), g_adds(n), g_subs(n);
+        for (size_t i = 0, vl; i < n; i += vl) {
+          vl = __riscv_vsetvl_e32m4(n - i);
+          vuint32m4_t va = __riscv_vle32_v_u32m4(&a[i], vl), vb = __riscv_vle32_v_u32m4(&b[i], vl);
+          __riscv_vse32_v_u32m4(&g_add[i], rvv::AddMod32(va, vb, q32, vl), vl);
+          __riscv_vse32_v_u32m4(&g_sub[i], rvv::SubMod32(va, vb, q32, vl), vl);
+          __riscv_vse32_v_u32m4(&g_adds[i], rvv::AddScalarMod32(va, s32, q32, vl), vl);
+          __riscv_vse32_v_u32m4(&g_subs[i], rvv::SubScalarMod32(va, s32, q32, vl), vl);
+        }
+        CHECK_VEC_EQ(w_add, g_add, << "rvv::AddMod32<u32m4> n=" << n << " q=" << q);
+        CHECK_VEC_EQ(w_sub, g_sub, << "rvv::SubMod32<u32m4> n=" << n << " q=" << q);
+        CHECK_VEC_EQ(w_adds, g_adds, << "rvv::AddScalarMod32<u32m4> n=" << n << " q=" << q << " b=" << s);
+        CHECK_VEC_EQ(w_subs, g_subs, << "rvv::SubScalarMod32<u32m4> n=" << n << " q=" << q << " b=" << s);
+      }
+    }
+  }
+}
+
+#endif  // HEXL_HAS_RVV

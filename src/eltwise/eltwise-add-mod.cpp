@@ -116,25 +116,30 @@ void EltwiseAddMod(uint32_t* result, const uint32_t* operand1,
 }
 
 // ---------------------------------------------------------------------------
-// Native (scalar) kernels.  TODO(port)
+// Native (scalar) kernels.
 // ---------------------------------------------------------------------------
 
 template <typename Word>
 void EltwiseAddModNative(Word* result, const Word* operand1, const Word* operand2,
                   uint64_t n, uint64_t modulus) {
-  // TODO(port): for i in [0, n): result[i] = (operand1[i] + operand2[i]) mod modulus
-  //   Inputs are < modulus, so compute the sum in a type that cannot overflow
-  //   (Word = uint32_t with q up to 2^32: use a uint64_t temporary), then one
-  //   conditional subtract.
-  //   result may alias operand1 (OpenFHE calls it in place).
-  HEXL_NOT_IMPLEMENTED();
+  for(uint64_t i=0; i<n; ++i){
+	//for 64-bit operands the modulus is actually 63-bits or less, so adding the operands will not overflow over 64-bits
+	//for 32-bits we need a bigger data type, so we can use the same uint64_t data type 
+	uint64_t sum = (uint64_t)operand1[i] + operand2[i];
+	//in rva23u64 there are instructions such as minu and czero
+	//these are used automatically by gcc in sdt::min and allows for skipping branch instructions
+	result[i] = (Word)std::min(sum, sum - modulus);
+  } 
 }
 
 template <typename Word>
 void EltwiseAddModNative(Word* result, const Word* operand1, uint64_t operand2,
                   uint64_t n, uint64_t modulus) {
-  // TODO(port): for i in [0, n): result[i] = (operand1[i] + operand2) mod modulus
-  HEXL_NOT_IMPLEMENTED();
+  //same as above
+  for(uint64_t i=0; i<n; ++i){
+	uint64_t sum = (uint64_t)operand1[i] + operand2;
+	result[i] = (Word)std::min(sum, sum - modulus);
+  }
 }
 
 }  // namespace hexl

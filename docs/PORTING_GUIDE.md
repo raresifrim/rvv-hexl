@@ -257,7 +257,7 @@ pattern, and 8 threads sharing one object.
 | File | Purpose | State |
 |---|---|---|
 | `cpu-features.hpp/.cpp` | `HEXL_HAS_RVV` (compile time: TU built with V), `has_rvv` (runtime: `AT_HWCAP` has V and `HEXL_DISABLE_RVV` unset), `CurrentVLenBits()`, `kMaxModulusRVV32` | done |
-| `rvv-util.hpp` | the RVV vocabulary: `AddMod`, `SubMod`, `ReduceFromTwice`, `MulModShoupLazy`, `MulModBarrett` (e64) and `Load32`, `Store32` (overloaded on `uint64_t*` = narrow/widen and `uint32_t*` = plain vle32/vse32, which is what lets one e32 kernel serve both storage widths), `AddMod32`, `SubMod32`, `MulModShoupLazy32`, `MulModBarrett32` (e32). Signatures fix LMUL=m1 | **TODO**: write these first, then compose kernels from them. Change the signatures if a better decomposition emerges |
+| `rvv-util.hpp` | the RVV vocabulary: `AddMod`, `SubMod`, `ReduceFromTwice`, `MulModShoupLazy`, `MulModBarrett` (e64) and `Load32`, `Store32` (overloaded on `uint64_t*` = narrow/widen and `uint32_t*` = plain vle32/vse32, which is what lets one e32 kernel serve both storage widths), `AddMod32`, `SubMod32`, `MulModShoupLazy32`, `MulModBarrett32` (e32). Add/Sub/ReduceFromTwice are LMUL-generic templates; the multiply helpers and `Load32`/`Store32` fix LMUL=m1 | **TODO**: write these first, then compose kernels from them. Each helper has its own test (`hexl-tests RvvUtil`, `test/test-rvv-util.cpp`), so it can be checked before any kernel uses it. The two Barrett helpers' factor convention is defined at the top of that file (`Barrett64Factors`, `Barrett32Factor`): edit it if you choose another. Change the signatures if a better decomposition emerges (and the matching test) |
 | `not-implemented.hpp/.cpp` | `HEXL_NOT_IMPLEMENTED()` | done |
 | `util-internal.hpp` | scalar `Compare(CMPINT, a, b)` for the native Cmp kernels | done |
 | `aligned-allocator.cpp` | the global `mallocStrategy` | done |
@@ -287,7 +287,7 @@ Each milestone ends with a command that must pass.
 | M1 | the 7 native eltwise kernels | `HEXL_DISABLE_RVV=1 build/rvv-release/bin/hexl-tests Eltwise` all PASS |
 | M2 | `ComputeRootOfUnityPowers` (64-bit tables) + native radix-2 forward/inverse | `make ISA=scalar test` fully green, **0 TODO** |
 | M3 | integration with the native path only | `make ISA=scalar openfhe openfhe-check WITH_RVV_HEXL=ON`: OpenFHE's own tests pass on the port. Same for SEAL: `make ISA=scalar seal seal-check WITH_RVV_HEXL=ON` (section 7) |
-| M4 | `rvv-util.hpp` + RVV eltwise (e64 first, then e32 for Mult/FMA) | `make test` green (both passes) |
+| M4 | `rvv-util.hpp` + RVV eltwise (e64 first, then e32 for Mult/FMA) | `hexl-tests RvvUtil` green for each helper as you write it, then `make test` green (both passes) |
 | M5 | RVV32 NTT (+ `m_rvv32_*` tables): the binfhe path | `Ntt_*` green; `bench-hexl --benchmark_filter=NTT.*qbits:27` vs `HEXL_DISABLE_RVV=1` |
 | M6 | RVV64 NTT | green; honest comparison against native for 60-bit q |
 | M7 | full matrix on both K3 clusters | `bench/run.sh` |
@@ -306,8 +306,14 @@ Intrinsics reference: `docs/rvv_intrinsics/` (`make rvv-intrinsics-doc`; see the
 * **SEW=e32 whenever q < 2^30.** On both K3 clusters the multiplier retires 8× more bits per
   cycle at e32 than at e64 (the e64 multiplier does one element per cycle). binfhe's moduli are
   ≤ 28 bits, so the e32 path covers the whole TFHE side.
-* **LMUL=m1** for transfer and compute: larger LMUL adds no throughput. Fractional LMUL only
-  exposes the low part of a register (verified on silicon). **mf2 is the smallest portable
+* **LMUL by kernel type.** Light kernels (Add/Sub/CmpAdd/CmpSubMod, 1-3 ALU ops per element) are
+  bound by per-strip overhead, so use **m4**. On EltwiseAddMod at n = 1K-64K, m4 was 2.3-3.4×
+  faster than m1 on the X100 and 2-3× on the A100. m8 was slower than m4 on the X100, and on the
+  A100 at e64 n ≥ 64K. Multiply-bound kernels (Mult/FMA/NTT) keep **m1** for compute: larger
+  LMUL adds no multiplier throughput and costs registers. The Add/Sub/ReduceFromTwice helpers
+  in `rvv-util.hpp` are LMUL-generic templates (overloaded intrinsics), so only the kernel's
+  `vsetvl`/`vle`/`vse` name the LMUL. Fractional LMUL only exposes the low part of a register
+  (verified on silicon). **mf2 is the smallest portable
   one**: X100 returns vl=0 and traps on e32/mf4 and mf8.
 * **32-bit compute, either storage.** With 64-bit storage (`n64-rvvhexl`), load `e64,m2` and
   narrow (`vncvt.x.x.w`) to `e32,m1`, and widen (`vzext.vf2`) before the store. In the NTT do

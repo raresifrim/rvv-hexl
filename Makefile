@@ -61,6 +61,8 @@ LIB_SO   := $(LIBDIR)/libhexl.$(SHLIB_EXT)
 LIB_CPPFLAGS := -Iinclude -Isrc -DHEXL_BUILD_FLAGS='"$(strip $(OPT_FLAGS) $(ISA_FLAGS))"'
 
 TEST_SRCS := $(sort $(wildcard test/*.cpp))
+# test-rvv-util.cpp checks internal helpers (src/util/rvv-util.hpp): rvv-hexl only
+TEST_CPPFLAGS := $(if $(filter rvv,$(HEXL_IMPL)),-Isrc,)
 TEST_OBJS := $(patsubst test/%.cpp,$(OBJDIR)/test/%.o,$(TEST_SRCS))
 TEST_BIN  := $(BINDIR)/hexl-tests
 STRICT    ?=
@@ -117,7 +119,7 @@ $(LIB_SO): $(LIB_OBJS)
 # ---- tests (self-contained harness, no GoogleTest dependency) --------------
 $(OBJDIR)/test/%.o: test/%.cpp $(FLAGS_STAMP)
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) $(HEXL_CPPFLAGS) -Itest -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(HEXL_CPPFLAGS) $(TEST_CPPFLAGS) -Itest -c $< -o $@
 
 $(TEST_BIN): $(TEST_OBJS) $(HEXL_DEPS)
 	@mkdir -p $(dir $@)

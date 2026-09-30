@@ -8,15 +8,27 @@
 // TODO(port-rvv) stub: the signatures fix the vocabulary the kernels are
 // written in, the bodies are yours.
 //
-// Parameterisation, fixed by the K3 measurements (SENTHIPoli A14/D01,
-// "Directia de accelerare"):
+// Parameterisation, fixed by the K3 measurements:
 //   * SEW=e32 whenever the modulus allows it (q < 2^30): the vector multiplier
 //     retires 8x more bits/cycle at e32 than at e64 on both clusters.
-//   * LMUL=m1 for both transfer and compute: larger LMUL buys no throughput,
-//     and fractional LMUL only exposes the low part of a register.
+//   * LMUL depends on what bounds the kernel:
+//       - light kernels (Add/Sub/CmpAdd/CmpSubMod: 1-3 ALU ops per element)
+//         are bound by per-strip overhead, so use LMUL=m4. Measured on
+//         EltwiseAddMod, n = 1K-64K: 2.3-3.4x faster than m1 on the X100 and
+//         2-3x on the A100. m8 is slower than m4 on the X100 and on the A100 at
+//         e64 n >= 64K.
+//       - multiply-bound kernels (Mult/FMA/NTT) keep LMUL=m1 for compute:
+//         larger LMUL buys no multiplier throughput and costs registers.
+//     Fractional LMUL only exposes the low part of a register.
 //   * mf2 is the smallest PORTABLE fractional LMUL: X100 returns vl=0 and traps
 //     on e32/mf4 and mf8. Never use mf4/mf8.
 //   * Stay VLEN-agnostic (vsetvl every strip): X100 has VLEN=256, A100 1024.
+//
+// The Add/Sub/ReduceFromTwice helpers below are LMUL-generic templates: they
+// use the overloaded intrinsics (__riscv_vadd(a, b, vl) etc.), which take the
+// SEW/LMUL from the argument type, so the same helper serves u64m1 and u64m4.
+// Only the kernel's vsetvl / vle / vse carry an explicit LMUL suffix. The
+// e64 helpers reject e32 vectors at compile time and vice versa.
 //
 // Storage is uint64_t (OpenFHE NATIVE_SIZE=64) or uint32_t (NATIVE_SIZE=32).
 // The e32 kernels are templates on the storage word and read/write through
@@ -36,32 +48,85 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <type_traits>
+#include <utility>
+
 #include "util/not-implemented.hpp"
 
 namespace intel {
 namespace hexl {
 namespace rvv {
 
+/// Element type of an RVV vector type (uint64_t for vuint64m4_t, ...), taken
+/// from the overloaded vmv.x.s. Used to keep the e64 and e32 helper families
+/// apart at compile time.
+template <class V>
+using ElemT = decltype(__riscv_vmv_x(std::declval<V>()));
+
+template <class V>
+constexpr bool IsE64 = std::is_same_v<ElemT<V>, uint64_t>;
+template <class V>
+constexpr bool IsE32 = std::is_same_v<ElemT<V>, uint32_t>;
+
 // ---------------------------------------------------------------------------
-// e64 path (any modulus up to 62 bits)
+// e64 path (any modulus up to 62 bits). V = vuint64m1_t ... vuint64m8_t.
 // ---------------------------------------------------------------------------
 
 /// @brief (a + b) mod q for a, b in [0, q), q < 2^63.
-/// Hint: s = a + b; r = vminu(s, s - q) (s - q wraps to a huge value when s < q).
-inline vuint64m1_t AddMod(vuint64m1_t a, vuint64m1_t b, uint64_t q,
-                          size_t vl) {
-  HEXL_NOT_IMPLEMENTED();
+/// s = a + b; r = vminu(s, s - q) (s - q wraps to a huge value when s < q).
+template <class V>
+inline V AddMod(V a, V b, uint64_t q, size_t vl) {
+	static_assert(IsE64<V>, "rvv::AddMod takes e64 vectors; use AddMod32 for e32");
+  	//add all elements inside the vectors
+	V sum = __riscv_vadd(a, b, vl);
+	//subtract the modulus from the element-wise sum
+	V remainder = __riscv_vsub(sum, q, vl);
+	//return the minimum between the sum and the modulus diff
+	return __riscv_vminu(sum, remainder, vl);
 }
 
 /// @brief (a - b) mod q for a, b in [0, q).
-inline vuint64m1_t SubMod(vuint64m1_t a, vuint64m1_t b, uint64_t q,
-                          size_t vl) {
-  HEXL_NOT_IMPLEMENTED();
+template <class V>
+inline V SubMod(V a, V b, uint64_t q, size_t vl) {
+	static_assert(IsE64<V>, "rvv::SubMod takes e64 vectors; use SubMod32 for e32");
+  	//sub all elements inside the vectors
+	V diff = __riscv_vsub(a, b, vl);
+	//add the modulus from the element-wise sum
+	V remainder = __riscv_vadd(diff, q, vl);
+	//return the minimum between the diff and the modulus sum
+	return __riscv_vminu(diff, remainder, vl);
+}
+
+/// @brief (a + b) mod q for a in [0, q), scalar b in [0, q), q < 2^63.
+/// s = a + b; r = vminu(s, s - q) (s - q wraps to a huge value when s < q).
+template <class V>
+inline V AddScalarMod(V a, uint64_t b, uint64_t q, size_t vl) {
+	static_assert(IsE64<V>, "rvv::AddScalarMod takes e64 vectors; use AddScalarMod32 for e32");
+  	//add all elements inside the vectors
+	V sum = __riscv_vadd(a, b, vl);
+	//subtract the modulus from the element-wise sum
+	V remainder = __riscv_vsub(sum, q, vl);
+	//return the minimum between the sum and the modulus diff
+	return __riscv_vminu(sum, remainder, vl);
+}
+
+/// @brief (a - b) mod q for a in [0, q), scalar b in [0, q).
+template <class V>
+inline V SubScalarMod(V a, uint64_t b, uint64_t q, size_t vl) {
+	static_assert(IsE64<V>, "rvv::SubScalarMod takes e64 vectors; use SubScalarMod32 for e32");
+  	//sub all elements inside the vectors
+	V diff = __riscv_vsub(a, b, vl);
+	//add the modulus from the element-wise sum
+	V remainder = __riscv_vadd(diff, q, vl);
+	//return the minimum between the diff and the modulus sum
+	return __riscv_vminu(diff, remainder, vl);
 }
 
 /// @brief Maps x in [0, 2q) to [0, q) (the "vminu" conditional subtract).
-inline vuint64m1_t ReduceFromTwice(vuint64m1_t x, uint64_t q, size_t vl) {
-  HEXL_NOT_IMPLEMENTED();
+template <class V>
+inline V ReduceFromTwice(V x, uint64_t q, size_t vl) {
+	static_assert(IsE64<V>, "rvv::ReduceFromTwice takes e64 vectors");
+	return __riscv_vminu(x, __riscv_vsub(x, q, vl), vl);
 }
 
 /// @brief Shoup multiplication by a precomputed operand, LAZY: returns
@@ -101,32 +166,71 @@ inline vuint64m1_t MulModBarrett(vuint64m1_t a, vuint64m1_t b, uint64_t q,
 ///     Hint: __riscv_vle64_v_u64m2 + __riscv_vncvt_x_x_w_u32m1.
 ///   uint32_t* (NATIVE_SIZE=32): plain __riscv_vle32_v_u32m1.
 inline vuint32m1_t Load32(const uint64_t* p, size_t vl) {
-  HEXL_NOT_IMPLEMENTED();
+	//nice trick to load 32-bit lanes from wide 64-bit pointer, narrowing the values to fit
+	return __riscv_vncvt_x_x_w_u32m1(__riscv_vle64_v_u64m2(p, vl), vl);
 }
 inline vuint32m1_t Load32(const uint32_t* p, size_t vl) {
-  HEXL_NOT_IMPLEMENTED();
+	return __riscv_vle32_v_u32m1(p, vl);
 }
 
 /// @brief Stores vl 32-bit lanes into the storage type (see Load32).
 ///   uint64_t*: widen, __riscv_vzext_vf2_u64m2 + __riscv_vse64_v_u64m2.
 ///   uint32_t*: plain __riscv_vse32_v_u32m1.
 inline void Store32(uint64_t* p, vuint32m1_t v, size_t vl) {
-  HEXL_NOT_IMPLEMENTED();
+  	__riscv_vse64_v_u64m2(p, __riscv_vzext_vf2_u64m2(v, vl), vl);
 }
 inline void Store32(uint32_t* p, vuint32m1_t v, size_t vl) {
-  HEXL_NOT_IMPLEMENTED();
+	__riscv_vse32_v_u32m1(p, v, vl);
 }
 
+// The Add/Sub helpers below are LMUL-generic: V = vuint32mf2_t ... vuint32m8_t.
+
 /// @brief (a + b) mod q, 32-bit lanes.
-inline vuint32m1_t AddMod32(vuint32m1_t a, vuint32m1_t b, uint32_t q,
-                            size_t vl) {
-  HEXL_NOT_IMPLEMENTED();
+template <class V>
+inline V AddMod32(V a, V b, uint32_t q, size_t vl) {
+	static_assert(IsE32<V>, "rvv::AddMod32 takes e32 vectors; use AddMod for e64");
+  	//add all elements inside the vectors
+	V sum = __riscv_vadd(a, b, vl);
+	//subtract the modulus from the element-wise sum
+	V remainder = __riscv_vsub(sum, q, vl);
+	//return the minimum between the sum and the modulus diff
+	return __riscv_vminu(sum, remainder, vl);
 }
 
 /// @brief (a - b) mod q, 32-bit lanes.
-inline vuint32m1_t SubMod32(vuint32m1_t a, vuint32m1_t b, uint32_t q,
-                            size_t vl) {
-  HEXL_NOT_IMPLEMENTED();
+template <class V>
+inline V SubMod32(V a, V b, uint32_t q, size_t vl) {
+	static_assert(IsE32<V>, "rvv::SubMod32 takes e32 vectors; use SubMod for e64");
+  	//sub all elements inside the vectors
+	V diff = __riscv_vsub(a, b, vl);
+	//add the modulus from the element-wise sum
+	V remainder = __riscv_vadd(diff, q, vl);
+	//return the minimum between the diff and the modulus sum
+	return __riscv_vminu(diff, remainder, vl);
+}
+
+/// @brief (a + b) mod q, 32-bit lanes, scalar b.
+template <class V>
+inline V AddScalarMod32(V a, uint32_t b, uint32_t q, size_t vl) {
+	static_assert(IsE32<V>, "rvv::AddScalarMod32 takes e32 vectors; use AddScalarMod for e64");
+  	//add all elements inside the vectors
+	V sum = __riscv_vadd(a, b, vl);
+	//subtract the modulus from the element-wise sum
+	V remainder = __riscv_vsub(sum, q, vl);
+	//return the minimum between the sum and the modulus diff
+	return __riscv_vminu(sum, remainder, vl);
+}
+
+/// @brief (a - b) mod q, 32-bit lanes, scalar b.
+template <class V>
+inline V SubScalarMod32(V a, uint32_t b, uint32_t q, size_t vl) {
+	static_assert(IsE32<V>, "rvv::SubScalarMod32 takes e32 vectors; use SubScalarMod for e64");
+  	//sub all elements inside the vectors
+	V diff = __riscv_vsub(a, b, vl);
+	//add the modulus from the element-wise sum
+	V remainder = __riscv_vadd(diff, q, vl);
+	//return the minimum between the diff and the modulus sum
+	return __riscv_vminu(diff, remainder, vl);
 }
 
 /// @brief Shoup lazy multiply in 32-bit lanes: [0, 2q).

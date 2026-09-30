@@ -91,7 +91,7 @@ void EltwiseReduceMod(uint32_t* result, const uint32_t* operand, uint64_t n,
 }
 
 // ---------------------------------------------------------------------------
-// Native (scalar) kernel.  TODO(port)
+// Native (scalar) kernel. 
 // ---------------------------------------------------------------------------
 
 template <typename Word>
