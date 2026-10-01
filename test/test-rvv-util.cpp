@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "hexl/number-theory/number-theory.hpp"
 #include "oracle.hpp"
 #include "test.hpp"
 
@@ -169,6 +170,67 @@ TEST(RvvUtil_ReduceFromTwice) {
   }
 }
 
+// Barrett: x mod q for ANY 64-bit x, at m1 and m4 (the helper is LMUL-generic),
+// both output ranges. Also pins the factor convention to MultiplyFactor, which
+// is what the kernels will call.
+namespace {
+/// The full 64-bit input range, edge values first (only those that don't wrap).
+std::vector<uint64_t> BarrettInputs64(size_t n, uint64_t q) {
+  const uint64_t top = ~0ULL, kq = top / q * q;  // kq: largest multiple of q
+  std::vector<uint64_t> edges = {0, 1, q - 1, q, top, top - 1, kq, kq - 1};
+  if (q < top) edges.push_back(q + 1);
+  if (q <= top / 2) {
+    edges.push_back(2 * q - 1);
+    edges.push_back(2 * q);
+  }
+  auto v = O::Random(n, top);
+  for (size_t i = 0; i < edges.size() && i < n; ++i) v[i] = edges[i];
+  return v;
+}
+
+template <int OutputModFactor>
+std::vector<uint64_t> RunBarrett64(const std::vector<uint64_t>& x, uint64_t q, uint64_t q_barr, bool m4) {
+  const size_t n = x.size();
+  std::vector<uint64_t> got(n);
+  for (size_t i = 0, vl; i < n; i += vl) {
+    if (m4) {
+      vl = __riscv_vsetvl_e64m4(n - i);
+      __riscv_vse64_v_u64m4(&got[i], rvv::BarrettReduce<OutputModFactor>(__riscv_vle64_v_u64m4(&x[i], vl), q, q_barr, vl), vl);
+    } else {
+      vl = __riscv_vsetvl_e64m1(n - i);
+      __riscv_vse64_v_u64m1(&got[i], rvv::BarrettReduce<OutputModFactor>(__riscv_vle64_v_u64m1(&x[i], vl), q, q_barr, vl), vl);
+    }
+  }
+  return got;
+}
+}  // namespace
+
+TEST(RvvUtil_BarrettReduce) {
+  // every helper modulus, plus q >= 2^63 (Barrett needs no bound on q) and a non-prime
+  std::vector<uint64_t> qs = Moduli64(~0ULL);
+  for (uint64_t q : {1000ULL, 1ULL << 63, 0xFFFFFFFFFFFFFFC5ULL}) qs.push_back(q);
+  for (uint64_t q : qs) {
+    const uint64_t q_barr = static_cast<uint64_t>((static_cast<u128>(1) << 64) / q);  // floor(2^64/q)
+    CHECK_EQ(intel::hexl::MultiplyFactor(1, 64, q).BarrettFactor(), q_barr, << "factor convention q=" << q);
+    for (size_t n : O::EltwiseSizes()) {
+      const auto x = BarrettInputs64(n, q);
+      std::vector<uint64_t> want(n);
+      for (size_t i = 0; i < n; ++i) want[i] = x[i] % q;
+      for (bool m4 : {false, true}) {
+        const char* lmul = m4 ? "u64m4" : "u64m1";
+        CHECK_VEC_EQ(want, RunBarrett64<1>(x, q, q_barr, m4),
+                     << "rvv::BarrettReduce<1> " << lmul << " n=" << n << " q=" << q);
+        const auto lazy = RunBarrett64<2>(x, q, q_barr, m4);
+        for (size_t i = 0; i < n; ++i) {
+          CHECK_EQ(lazy[i] % q, want[i], << "rvv::BarrettReduce<2> " << lmul << " residue, x=" << x[i] << " q=" << q);
+          CHECK_EQ(static_cast<u128>(lazy[i]) < 2 * static_cast<u128>(q), true,
+                   << "rvv::BarrettReduce<2> " << lmul << " range [0, 2q), x=" << x[i] << " got=" << lazy[i] << " q=" << q);
+        }
+      }
+    }
+  }
+}
+
 // Shoup lazy: r = x*y mod q, r in [0, 2q), for ANY 64-bit x (the NTT feeds [0, 4q)).
 namespace {
 void CheckShoupLazy64(const std::vector<uint64_t>& x, const std::vector<uint64_t>& y,
@@ -312,6 +374,66 @@ TEST(RvvUtil_SubMod32) {
         __riscv_vse32_v_u32m1(&got[i], r, vl);
       });
       CHECK_VEC_EQ(want, got, << "rvv::SubMod32 n=" << n << " q=" << q);
+    }
+  }
+}
+
+// Barrett, 32-bit lanes: x mod q for ANY 32-bit x, at m1 and m4, both output ranges.
+namespace {
+std::vector<uint32_t> BarrettInputs32(size_t n, uint64_t q) {
+  const uint64_t top = 0xFFFFFFFFULL, kq = top / q * q;
+  std::vector<uint64_t> edges = {0, 1, q - 1, q, top, top - 1, kq, kq - 1};
+  if (q < top) edges.push_back(q + 1);
+  if (2 * q <= top) {
+    edges.push_back(2 * q - 1);
+    edges.push_back(2 * q);
+  }
+  auto v = O::Random(n, top + 1);  // [0, 2^32)
+  for (size_t i = 0; i < edges.size() && i < n; ++i) v[i] = edges[i];
+  return To32(v);
+}
+
+template <int OutputModFactor>
+std::vector<uint32_t> RunBarrett32(const std::vector<uint32_t>& x, uint32_t q, uint32_t q_barr, bool m4) {
+  const size_t n = x.size();
+  std::vector<uint32_t> got(n);
+  for (size_t i = 0, vl; i < n; i += vl) {
+    if (m4) {
+      vl = __riscv_vsetvl_e32m4(n - i);
+      __riscv_vse32_v_u32m4(&got[i], rvv::BarrettReduce32<OutputModFactor>(__riscv_vle32_v_u32m4(&x[i], vl), q, q_barr, vl), vl);
+    } else {
+      vl = __riscv_vsetvl_e32m1(n - i);
+      __riscv_vse32_v_u32m1(&got[i], rvv::BarrettReduce32<OutputModFactor>(__riscv_vle32_v_u32m1(&x[i], vl), q, q_barr, vl), vl);
+    }
+  }
+  return got;
+}
+}  // namespace
+
+TEST(RvvUtil_BarrettReduce32) {
+  // the e32 dispatch range (q < 2^30), plus larger 32-bit moduli and a non-prime
+  std::vector<uint64_t> qs = Moduli32();
+  for (uint64_t q : std::vector<uint64_t>{1000, 1ULL << 31, O::PrimeBelow(1ULL << 32)}) qs.push_back(q);
+  for (uint64_t q : qs) {
+    const uint32_t q32 = static_cast<uint32_t>(q);
+    const uint32_t q_barr = static_cast<uint32_t>((1ULL << 32) / q);  // floor(2^32/q)
+    CHECK_EQ(intel::hexl::MultiplyFactor(1, 32, q).BarrettFactor(), static_cast<uint64_t>(q_barr),
+             << "factor convention q=" << q);
+    for (size_t n : O::EltwiseSizes()) {
+      const auto x = BarrettInputs32(n, q);
+      std::vector<uint32_t> want(n);
+      for (size_t i = 0; i < n; ++i) want[i] = static_cast<uint32_t>(x[i] % q);
+      for (bool m4 : {false, true}) {
+        const char* lmul = m4 ? "u32m4" : "u32m1";
+        CHECK_VEC_EQ(want, RunBarrett32<1>(x, q32, q_barr, m4),
+                     << "rvv::BarrettReduce32<1> " << lmul << " n=" << n << " q=" << q);
+        const auto lazy = RunBarrett32<2>(x, q32, q_barr, m4);
+        for (size_t i = 0; i < n; ++i) {
+          CHECK_EQ(lazy[i] % q32, want[i], << "rvv::BarrettReduce32<2> " << lmul << " residue, x=" << x[i] << " q=" << q);
+          CHECK_EQ(static_cast<uint64_t>(lazy[i]) < 2 * q, true,
+                   << "rvv::BarrettReduce32<2> " << lmul << " range [0, 2q), x=" << x[i] << " got=" << lazy[i] << " q=" << q);
+        }
+      }
     }
   }
 }

@@ -59,6 +59,38 @@ TEST(NumberTheory_MultiplyMod) {
   }
 }
 
+// MultiplyFactor has three paths (one 64-bit divu when the dividend fits,
+// the floor(2^64/q) divu identity, and the generic 128-by-64 division): every
+// path must equal floor(operand * 2^bit_shift / q) computed in __int128.
+TEST(NumberTheory_MultiplyFactor) {
+  using u128 = unsigned __int128;
+  auto want = [](uint64_t operand, uint64_t bit_shift, uint64_t q) {
+    return static_cast<uint64_t>((static_cast<u128>(operand) << bit_shift) / q);
+  };
+  std::vector<uint64_t> qs = TestModuli();
+  for (int b = 1; b < 64; ++b) qs.push_back(1ULL << b);  // where the 2^64 identity adds 1
+  for (uint64_t q : {1000ULL, (1ULL << 63) + 1, ~0ULL, 0xFFFFFFFFFFFFFFC5ULL}) qs.push_back(q);
+  for (uint64_t q : qs) {
+    // operand 1: the plain Barrett factors (2^64 identity path, and the
+    // fits-in-64-bits path for 32 and 52)
+    for (uint64_t shift : {32ULL, 52ULL, 64ULL}) {
+      CHECK_EQ(MultiplyFactor(1, shift, q).BarrettFactor(), want(1, shift, q),
+               << "operand=1 bit_shift=" << shift << " q=" << q);
+    }
+    // operand y < q: the Shoup factors. bit_shift 64 is the generic path;
+    // bit_shift 32 fits in 64 bits while y < 2^32.
+    auto ys = O::Random(200, q);
+    ys[0] = q - 1;
+    ys[1] = 0;
+    for (uint64_t y : ys) {
+      CHECK_EQ(MultiplyFactor(y, 64, q).BarrettFactor(), want(y, 64, q), << "y=" << y << " bit_shift=64 q=" << q);
+      if (q <= (1ULL << 32)) {
+        CHECK_EQ(MultiplyFactor(y, 32, q).BarrettFactor(), want(y, 32, q), << "y=" << y << " bit_shift=32 q=" << q);
+      }
+    }
+  }
+}
+
 TEST(NumberTheory_MultiplyModShoup) {
   // MultiplyMod(x, y, y_precon, q) with y_precon = floor(y * 2^64 / q)
   for (uint64_t q : TestModuli()) {

@@ -129,6 +129,22 @@ inline V ReduceFromTwice(V x, uint64_t q, size_t vl) {
 	return __riscv_vminu(x, __riscv_vsub(x, q, vl), vl);
 }
 
+/// @brief x mod q for ANY 64-bit x (Barrett reduction), q >= 2. LMUL-generic.
+/// q_barr = floor(2^64 / q) = MultiplyFactor(1, 64, q).BarrettFactor();
+/// compute it once per kernel call, before the strip loop.
+/// OutputModFactor 1 returns [0, q); 2 returns the lazy [0, 2q) (skips the
+/// final correction), like the scalar BarrettReduce64<OutputModFactor>.
+/// Used by EltwiseCmpSubMod, EltwiseReduceMod (input_mod_factor == q).
+/// Hint: Q = vmulhu(x, q_barr) is floor(x/q) or one less, so
+/// r = x - Q*q (vnmsac) is in [0, 2q) and never overflows (r <= x);
+/// then ReduceFromTwice for OutputModFactor 1.
+template <int OutputModFactor = 1, class V>
+inline V BarrettReduce(V x, uint64_t q, uint64_t q_barr, size_t vl) {
+	static_assert(IsE64<V>, "rvv::BarrettReduce takes e64 vectors; use BarrettReduce32 for e32");
+	static_assert(OutputModFactor == 1 || OutputModFactor == 2, "OutputModFactor must be 1 or 2");
+  HEXL_NOT_IMPLEMENTED();
+}
+
 /// @brief Shoup multiplication by a precomputed operand, LAZY: returns
 /// x * y mod q in [0, 2q). y_precon = floor(y * 2^64 / q).
 /// Hint: Q = vmulhu(x, y_precon); r = vmul(x, y) - vmul(Q, q).
@@ -231,6 +247,19 @@ inline V SubScalarMod32(V a, uint32_t b, uint32_t q, size_t vl) {
 	V remainder = __riscv_vadd(diff, q, vl);
 	//return the minimum between the diff and the modulus sum
 	return __riscv_vminu(diff, remainder, vl);
+}
+
+/// @brief x mod q for ANY 32-bit x (Barrett reduction), 32-bit lanes, q >= 2.
+/// LMUL-generic. q_barr = floor(2^32 / q) = MultiplyFactor(1, 32, q).BarrettFactor()
+/// (< 2^32 for q >= 2); compute it once per kernel call, before the strip loop.
+/// OutputModFactor 1 returns [0, q); 2 returns the lazy [0, 2q).
+/// Hint: same as BarrettReduce at e32: Q = vmulhu(x, q_barr), r = x - Q*q in
+/// [0, 2q), then one vminu correction for OutputModFactor 1.
+template <int OutputModFactor = 1, class V>
+inline V BarrettReduce32(V x, uint32_t q, uint32_t q_barr, size_t vl) {
+	static_assert(IsE32<V>, "rvv::BarrettReduce32 takes e32 vectors; use BarrettReduce for e64");
+	static_assert(OutputModFactor == 1 || OutputModFactor == 2, "OutputModFactor must be 1 or 2");
+  HEXL_NOT_IMPLEMENTED();
 }
 
 /// @brief Shoup lazy multiply in 32-bit lanes: [0, 2q).

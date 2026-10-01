@@ -257,7 +257,7 @@ pattern, and 8 threads sharing one object.
 | File | Purpose | State |
 |---|---|---|
 | `cpu-features.hpp/.cpp` | `HEXL_HAS_RVV` (compile time: TU built with V), `has_rvv` (runtime: `AT_HWCAP` has V and `HEXL_DISABLE_RVV` unset), `CurrentVLenBits()`, `kMaxModulusRVV32` | done |
-| `rvv-util.hpp` | the RVV vocabulary: `AddMod`, `SubMod`, `ReduceFromTwice`, `MulModShoupLazy`, `MulModBarrett` (e64) and `Load32`, `Store32` (overloaded on `uint64_t*` = narrow/widen and `uint32_t*` = plain vle32/vse32, which is what lets one e32 kernel serve both storage widths), `AddMod32`, `SubMod32`, `MulModShoupLazy32`, `MulModBarrett32` (e32). Add/Sub/ReduceFromTwice are LMUL-generic templates; the multiply helpers and `Load32`/`Store32` fix LMUL=m1 | **TODO**: write these first, then compose kernels from them. Each helper has its own test (`hexl-tests RvvUtil`, `test/test-rvv-util.cpp`), so it can be checked before any kernel uses it. The two Barrett helpers' factor convention is defined at the top of that file (`Barrett64Factors`, `Barrett32Factor`): edit it if you choose another. Change the signatures if a better decomposition emerges (and the matching test) |
+| `rvv-util.hpp` | the RVV vocabulary: `AddMod`, `SubMod`, `ReduceFromTwice`, `BarrettReduce` (any 64-bit x mod q, factor `MultiplyFactor(1, 64, q)`), `MulModShoupLazy`, `MulModBarrett` (e64) and `Load32`, `Store32` (overloaded on `uint64_t*` = narrow/widen and `uint32_t*` = plain vle32/vse32, which is what lets one e32 kernel serve both storage widths), `AddMod32`, `SubMod32`, `BarrettReduce32` (factor `MultiplyFactor(1, 32, q)`), `MulModShoupLazy32`, `MulModBarrett32` (e32). Add/Sub/ReduceFromTwice/BarrettReduce are LMUL-generic templates; the multiply helpers and `Load32`/`Store32` fix LMUL=m1 | **TODO**: write these first, then compose kernels from them. Each helper has its own test (`hexl-tests RvvUtil`, `test/test-rvv-util.cpp`), so it can be checked before any kernel uses it. The two Barrett helpers' factor convention is defined at the top of that file (`Barrett64Factors`, `Barrett32Factor`): edit it if you choose another. Change the signatures if a better decomposition emerges (and the matching test) |
 | `not-implemented.hpp/.cpp` | `HEXL_NOT_IMPLEMENTED()` | done |
 | `util-internal.hpp` | scalar `Compare(CMPINT, a, b)` for the native Cmp kernels | done |
 | `aligned-allocator.cpp` | the global `mallocStrategy` | done |
@@ -320,6 +320,12 @@ Intrinsics reference: `docs/rvv_intrinsics/` (`make rvv-intrinsics-doc`; see the
   this once, in the first and last stage, not as separate passes. With 32-bit storage
   (`n32-rvvhexl`) the same kernel reads and writes directly. `rvv::Load32`/`Store32` hide the
   difference. `[0, 4q) < 2^32` holds for q < 2^30, so lazy butterflies fit in 32-bit lanes.
+* **Native kernels in an RVV build are compiled with V enabled**, so GCC may auto-vectorize
+  them at -O3. For loops around the scalar `BarrettReduce64` this is 3-4x slower than scalar
+  on the K3 (X100 15 vs 3.9 cycles/elem, A100 49 vs 18.7): put `#pragma GCC novector`
+  before such loops. It also means `HEXL_DISABLE_RVV=1` is not a vector-free baseline; use
+  `ISA=scalar` for that. Keep per-element conditions branch-free by selecting a value
+  (`sub = c ? diff : 0U`, which becomes `czero`) rather than one of two results.
 * **VLEN-agnostic, always.** X100 VLEN=256, A100 VLEN=1024, same binary. `vsetvl` in every
   strip, and never cache VLEN in a table built at construction time. The benchmark runner
   starts A100 processes through `ailaunch` (VLEN changes across clusters, so migration after

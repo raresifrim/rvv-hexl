@@ -44,13 +44,15 @@ uint64_t MultiplyMod(uint64_t x, uint64_t y, uint64_t y_precon,
 }
 
 uint64_t AddUIntMod(uint64_t x, uint64_t y, uint64_t modulus) {
-  // TODO(port): (x + y) mod modulus for x, y < modulus.
-  HEXL_NOT_IMPLEMENTED();
+  //(x + y) mod modulus for x, y < modulus.
+  uint64_t sum = x+y;
+  return std::min(sum, sum-modulus);
 }
 
 uint64_t SubUIntMod(uint64_t x, uint64_t y, uint64_t modulus) {
-  // TODO(port): (x - y) mod modulus for x, y < modulus.
-  HEXL_NOT_IMPLEMENTED();
+  // (x - y) mod modulus for x, y < modulus.
+  uint64_t diff = x-y;
+  return std::min(diff, diff + modulus);
 }
 
 uint64_t PowMod(uint64_t base, uint64_t exp, uint64_t modulus) {

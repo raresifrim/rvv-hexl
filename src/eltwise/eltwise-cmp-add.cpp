@@ -58,18 +58,72 @@ void EltwiseCmpAdd(uint32_t* result, const uint32_t* operand1, uint64_t n,
 }
 
 // ---------------------------------------------------------------------------
-// Native (scalar) kernel.  TODO(port)
+// Native (scalar) kernel.
 // ---------------------------------------------------------------------------
 
+// Per-element work, shared by every comparison: only the condition differs.
+// Select the VALUE to add (diff or 0) rather than one of two results, the same
+// form as CmpSubModOne. The add wraps in Word (the cast), as the API specifies.
 template <typename Word>
-void EltwiseCmpAddNative(Word* result, const Word* operand1, uint64_t n, CMPINT cmp, uint64_t bound, uint64_t diff) {
-  // TODO(port): result[i] = cmp(operand1[i], bound) ? operand1[i] + diff
-  //                                             : operand1[i]
-  //   Handle CMPINT::TRUE / FALSE up front (copy or add everywhere). Keep the
-  //   switch on cmp OUTSIDE the element loop (one loop per predicate, or a
-  //   template on the predicate) so the loop body stays branch-free. The add
-  //   wraps in Word (cast the result back to Word).
-  HEXL_NOT_IMPLEMENTED();
+static inline Word CmpAddOne(uint64_t x, bool hit, uint64_t diff) {
+  return (Word)(x + (hit ? diff : 0U)); //this style forces a czero instruction instead of using a branch
+}
+
+template <typename Word>
+void EltwiseCmpAddNative(Word* result, const Word* operand1, uint64_t n, CMPINT cmp,
+                         uint64_t bound, uint64_t diff) {
+  switch (cmp) {
+    case CMPINT::EQ:
+      for (uint64_t i = 0; i < n; ++i) {
+        result[i] = CmpAddOne<Word>(operand1[i], operand1[i] == bound, diff);
+      }
+      break;
+    case CMPINT::LT:
+      for (uint64_t i = 0; i < n; ++i) {
+        result[i] = CmpAddOne<Word>(operand1[i], operand1[i] < bound, diff);
+      }
+      break;
+    case CMPINT::LE:
+      for (uint64_t i = 0; i < n; ++i) {
+        result[i] = CmpAddOne<Word>(operand1[i], operand1[i] <= bound, diff);
+      }
+      break;
+    case CMPINT::NE:
+      for (uint64_t i = 0; i < n; ++i) {
+        result[i] = CmpAddOne<Word>(operand1[i], operand1[i] != bound, diff);
+      }
+      break;
+    case CMPINT::NLT:
+      for (uint64_t i = 0; i < n; ++i) {
+        result[i] = CmpAddOne<Word>(operand1[i], operand1[i] >= bound, diff);
+      }
+      break;
+    case CMPINT::NLE:
+      for (uint64_t i = 0; i < n; ++i) {
+        result[i] = CmpAddOne<Word>(operand1[i], operand1[i] > bound, diff);
+      }
+      break;
+    case CMPINT::TRUE:
+      for (uint64_t i = 0; i < n; ++i) {
+        result[i] = CmpAddOne<Word>(operand1[i], true, diff);
+      }
+      break;
+    case CMPINT::FALSE:
+      // no element changes: copy only when not in place (a pointer compare,
+      // one instruction; in place the call does no memory traffic at all)
+      if (result != operand1) {
+        for (uint64_t i = 0; i < n; ++i) {
+          result[i] = operand1[i];
+        }
+      }
+      break;
+    default:
+      // not a valid CMPINT; the scalar Compare() treats unknown values as TRUE
+      for (uint64_t i = 0; i < n; ++i) {
+        result[i] = CmpAddOne<Word>(operand1[i], true, diff);
+      }
+      break;
+  }
 }
 
 }  // namespace hexl

@@ -12,6 +12,7 @@
 
 #include <type_traits>
 
+#include "hexl/number-theory/number-theory.hpp"
 #include "util/not-implemented.hpp"
 #include "util/rvv-util.hpp"
 
@@ -23,6 +24,11 @@ void EltwiseCmpSubModRVV(Word* result, const Word* operand1, uint64_t n, uint64_
   // TODO(port-rvv): mask from vmsXX.vx on the raw values, vectorised Barrett
   //   reduction to [0,q), then a masked rvv::SubMod (e64) / rvv::SubMod32 (e32)
   //   with diff broadcast. SEW follows Word.
+  //   Barrett: rvv::BarrettReduce (e64) / rvv::BarrettReduce32 (e32), with the
+  //   factor computed ONCE before the strip loop:
+  //     q_barr = MultiplyFactor(1, 64, modulus).BarrettFactor();  // floor(2^64/q)
+  //     q_barr = MultiplyFactor(1, 32, modulus).BarrettFactor();  // floor(2^32/q), e32
+  //   Switch on cmp outside the loop (one loop per CMPINT, or a mask builder).
   HEXL_NOT_IMPLEMENTED();
 }
 

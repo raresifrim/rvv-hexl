@@ -105,6 +105,13 @@ void EltwiseReduceModNative(Word* result, const Word* operand, uint64_t n, uint6
   //     conditional subtract of 2q (to [0,2q)).
   //   Any output congruent to x mod q inside [0, output_mod_factor * q) is
   //   accepted by the tests (and by OpenFHE).
+  //   Put "#pragma GCC novector" right before each element loop that calls
+  //   BarrettReduce64: the library builds at -O3 with V enabled, and GCC
+  //   auto-vectorizes such loops into RVV code that is 3-4x SLOWER than the
+  //   scalar loop on the K3 (X100 15 vs 3.9 cycles/elem, A100 49 vs 18.7).
+  //   Keep conditional steps branch-free: select a value, e.g.
+  //   "sub = c ? diff : 0U", rather than a ternary between two results, which
+  //   GCC turned into a mispredicting branch in EltwiseCmpSubModNative.
   HEXL_NOT_IMPLEMENTED();
 }
 
