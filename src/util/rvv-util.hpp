@@ -135,14 +135,21 @@ inline V ReduceFromTwice(V x, uint64_t q, size_t vl) {
 /// OutputModFactor 1 returns [0, q); 2 returns the lazy [0, 2q) (skips the
 /// final correction), like the scalar BarrettReduce64<OutputModFactor>.
 /// Used by EltwiseCmpSubMod, EltwiseReduceMod (input_mod_factor == q).
-/// Hint: Q = vmulhu(x, q_barr) is floor(x/q) or one less, so
-/// r = x - Q*q (vnmsac) is in [0, 2q) and never overflows (r <= x);
-/// then ReduceFromTwice for OutputModFactor 1.
 template <int OutputModFactor = 1, class V>
 inline V BarrettReduce(V x, uint64_t q, uint64_t q_barr, size_t vl) {
 	static_assert(IsE64<V>, "rvv::BarrettReduce takes e64 vectors; use BarrettReduce32 for e32");
 	static_assert(OutputModFactor == 1 || OutputModFactor == 2, "OutputModFactor must be 1 or 2");
-  HEXL_NOT_IMPLEMENTED();
+	//we already have q_barr as 2^k/q, we just need to multiply it by x and shift it by k bits
+	//the trick is that mulhu already perform the multiplication + the shift so we can use that
+	V Q = __riscv_vmulhu(x, q_barr, vl);
+	//now we can compute Q*q using the standar vmul as we know this will never overflow the data type
+	//Q = __riscv_vmul(Q, q, vl);
+	//Q = __riscv_vsub(x, Q, vl);
+	Q = __riscv_vnmsac(x, q, Q, vl); //= x - q*Q in one instruction with better measured performance 
+	if constexpr (OutputModFactor == 1){
+		return ReduceFromTwice(Q, q, vl);
+	}
+	return Q;
 }
 
 /// @brief Shoup multiplication by a precomputed operand, LAZY: returns
@@ -253,13 +260,21 @@ inline V SubScalarMod32(V a, uint32_t b, uint32_t q, size_t vl) {
 /// LMUL-generic. q_barr = floor(2^32 / q) = MultiplyFactor(1, 32, q).BarrettFactor()
 /// (< 2^32 for q >= 2); compute it once per kernel call, before the strip loop.
 /// OutputModFactor 1 returns [0, q); 2 returns the lazy [0, 2q).
-/// Hint: same as BarrettReduce at e32: Q = vmulhu(x, q_barr), r = x - Q*q in
-/// [0, 2q), then one vminu correction for OutputModFactor 1.
 template <int OutputModFactor = 1, class V>
 inline V BarrettReduce32(V x, uint32_t q, uint32_t q_barr, size_t vl) {
 	static_assert(IsE32<V>, "rvv::BarrettReduce32 takes e32 vectors; use BarrettReduce for e64");
 	static_assert(OutputModFactor == 1 || OutputModFactor == 2, "OutputModFactor must be 1 or 2");
-  HEXL_NOT_IMPLEMENTED();
+  	//we already have q_barr as 2^k/q, we just need to multiply it by x and shift it by k bits
+	//the trick is that mulhu already perform the multiplication + the shift so we can use that
+	V Q = __riscv_vmulhu(x, q_barr, vl);
+	//now we can compute Q*q using the standar vmul as we know this will never overflow the data type
+	//Q = __riscv_vmul(Q, q, vl);
+	//Q = __riscv_vsub(x, Q, vl);
+	Q = __riscv_vnmsac(x, q, Q, vl); 
+	if constexpr (OutputModFactor == 1){
+		return __riscv_vminu(Q, __riscv_vsub(Q, q, vl), vl);	
+	}
+	return Q;
 }
 
 /// @brief Shoup lazy multiply in 32-bit lanes: [0, 2q).
