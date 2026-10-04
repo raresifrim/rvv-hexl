@@ -18,7 +18,10 @@
 //      2-3 stages per pass over memory, raising arithmetic intensity toward
 //      the roofline balance point (A100's 4x larger VRF gains the most).
 //   4. Only then hand-tune instruction selection.
-// Parameters: SEW=e32 whenever q < 2^30, LMUL=m1, never below mf2.
+// Parameters: SEW=e32 whenever q < 2^30; LMUL m4 where a stage's butterfly
+// span allows it (the Shoup multiply alone measured 1.5-2.4x over m1 on the
+// X100), never below mf2. m8 leaves 4 register groups: a butterfly keeps more
+// values live, so expect spills there.
 
 #include "ntt/ntt-internal.hpp"
 

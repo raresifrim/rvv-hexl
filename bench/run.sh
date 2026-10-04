@@ -19,8 +19,7 @@
 #            entered through build/tools/ailaunch). Elsewhere: none.
 #
 # Suites:
-#   hexl      bench-hexl: HEXL-standard kernels (Google Benchmark JSON). Builds
-#             unchanged against upstream Intel HEXL on x86 for the same table.
+#   hexl      bench-hexl: HEXL-standard kernels (Google Benchmark JSON).
 #   ipcei     the IPCEI OpenFHE and SEAL benches, same arguments as ZKP+FHE Research/benchmark.sh
 #   upstream  OpenFHE's own Google-Benchmark suite (lib-benchmark, poly-benchmark-*,
 #             binfhe-ginx, VectorMath; + the *-hexl ones on rvv-hexl builds)
@@ -47,9 +46,8 @@ while [ $# -gt 0 ]; do
 done
 
 ARCH="$(uname -m)"
-if [ -z "$ISAS" ]; then
-  if [ "$ARCH" = riscv64 ]; then ISAS="rvv,scalar"; else ISAS="native"; fi
-fi
+[ "$ARCH" = riscv64 ] || { echo "bench/run.sh runs on the riscv64 board only (this host: $ARCH)" >&2; exit 1; }
+ISAS="${ISAS:-rvv,scalar}"
 IS_K3=0; [ -e /proc/set_ai_thread ] && IS_K3=1
 if [ -z "$CLUSTERS" ]; then
   if [ "$IS_K3" = 1 ]; then CLUSTERS="x100,a100"; else CLUSTERS="none"; fi

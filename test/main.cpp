@@ -35,16 +35,12 @@ bool Selected(const char* name, const std::vector<const char*>& filters) {
 }
 
 void PrintBuildInfo() {
-#ifdef HEXL_RVV_PORT
   const auto info = intel::hexl::rvv::GetPortInfo();
   std::printf("rvv-hexl: rvv compiled=%d available=%d enabled=%d VLEN=%zu\n",
               info.compiled_with_rvv, info.rvv_available, info.rvv_enabled,
               info.vlen_bits);
   std::printf("            flags: %s\n            compiler: %s\n",
               info.build_flags, info.compiler);
-#else
-  std::printf("upstream Intel HEXL (HEXL_IMPL=intel)\n");
-#endif
 }
 
 }  // namespace

@@ -155,9 +155,9 @@ code, branch at compile time:
 template <typename Word>
 void EltwiseAddModRVV(Word* result, const Word* a, const Word* b, uint64_t n, uint64_t q) {
   if constexpr (std::is_same_v<Word, uint64_t>) {
-    // e64/m1 loop
+    // e64/m4 loop
   } else {
-    // e32/m1 loop (q < 2^30 here)
+    // e32/m4 loop (q < 2^30 here)
   }
 }
 ```
@@ -180,9 +180,9 @@ and lazy `[0, 4q)` values do not fit in 32 bits.
 
 | Op | Semantics | Native: what to write | RVV: what to write |
 |---|---|---|---|
-| `EltwiseAddMod` (vv, vs) | r = (a + b) mod q, inputs < q < 2^63 | add + conditional subtract | e64/m1 strip loop; `vminu(s, s−q)` does the conditional subtract branch-free |
+| `EltwiseAddMod` (vv, vs) | r = (a + b) mod q, inputs < q < 2^63 | add + conditional subtract | e64/m4 strip loop; `vminu(s, s−q)` does the conditional subtract branch-free |
 | `EltwiseSubMod` (vv, vs) | r = (a − b) mod q | subtract + conditional add | as above (`vmsltu` mask + masked add, or the minu trick on `a−b+q`) |
-| `EltwiseMultMod` | r = a·b mod q, inputs < imf·q (imf ∈ {1,2,4}), output < q | reduce inputs (`ReduceMod<imf>`), Barrett with a precomputed factor (never `% q` on a 128-bit value, which is a libgcc call) | **RVV32**: no fixed multiplier, so Barrett on e32 lanes (`vmul`+`vmulhu` give both halves of the 64-bit product at e32 speed). **RVV64**: `vmul`+`vmulhu` at e64, Barrett |
+| `EltwiseMultMod` | r = a·b mod q, inputs < imf·q (imf ∈ {1,2,4}), output < q | reduce inputs (`ReduceMod<imf>`), Barrett with a precomputed factor (never `% q` on a 128-bit value, which is a libgcc call) | **RVV32**: no fixed multiplier, so Barrett on e32 lanes (`vmul`+`vmulhu` give both halves of the 64-bit product at e32 speed): the pre-shift Barrett at 32-bit words, `rvv::MulModBarrett32(a, b, q, mu, shift)`; for 30-bit q the final correction is needed twice. **RVV64**: `vmul`+`vmulhu` at e64, upstream's pre-shift Barrett (`rvv::MulModBarrett(a, b, q, mu, shift)`, μ and shift computed once per call). Requires q < 2^61: for 62-bit q the quotient estimate can be two short (measured) |
 | `EltwiseFMAMod` | r = (a·s + c) mod q, `c` may be `nullptr`, imf ∈ {1,2,4,8} | reduce `s` once, Shoup factor once (`MultiplyFactor(s,64,q)`), per element `MultiplyMod(x,s,precon,q)` + `AddUIntMod` | Shoup with scalar broadcast (`.vx` forms); separate loops for `c == nullptr` |
 | `EltwiseReduceMod` | r ≡ a (mod q), r < omf·q; imf ∈ {q ("any 64-bit"), 2, 4}, omf ∈ {1, 2} | three cases: Barrett (`BarrettReduce64<omf>`), `ReduceMod<2>`, `ReduceMod<4>` or one −2q | `vmulhu` Barrett + `vminu` chain; hoist the case switch out of the loop |
 | `EltwiseCmpAdd` | r = cmp(a, bound) ? a + diff : a (plain wrapping add) | switch on `cmp` **outside** the loop | one `vms{eq,ne,ltu,leu,gtu,…}.vx` → mask → masked `vadd.vx` |
@@ -257,7 +257,7 @@ pattern, and 8 threads sharing one object.
 | File | Purpose | State |
 |---|---|---|
 | `cpu-features.hpp/.cpp` | `HEXL_HAS_RVV` (compile time: TU built with V), `has_rvv` (runtime: `AT_HWCAP` has V and `HEXL_DISABLE_RVV` unset), `CurrentVLenBits()`, `kMaxModulusRVV32` | done |
-| `rvv-util.hpp` | the RVV vocabulary: `AddMod`, `SubMod`, `ReduceFromTwice`, `BarrettReduce` (any 64-bit x mod q, factor `MultiplyFactor(1, 64, q)`), `MulModShoupLazy`, `MulModBarrett` (e64) and `Load32`, `Store32` (overloaded on `uint64_t*` = narrow/widen and `uint32_t*` = plain vle32/vse32, which is what lets one e32 kernel serve both storage widths), `AddMod32`, `SubMod32`, `BarrettReduce32` (factor `MultiplyFactor(1, 32, q)`), `MulModShoupLazy32`, `MulModBarrett32` (e32). Add/Sub/ReduceFromTwice/BarrettReduce are LMUL-generic templates; the multiply helpers and `Load32`/`Store32` fix LMUL=m1 | **TODO**: write these first, then compose kernels from them. Each helper has its own test (`hexl-tests RvvUtil`, `test/test-rvv-util.cpp`), so it can be checked before any kernel uses it. The two Barrett helpers' factor convention is defined at the top of that file (`Barrett64Factors`, `Barrett32Factor`): edit it if you choose another. Change the signatures if a better decomposition emerges (and the matching test) |
+| `rvv-util.hpp` | the RVV vocabulary: `AddMod`, `SubMod`, `ReduceFromTwice`, `BarrettReduce` (any 64-bit x mod q, factor `MultiplyFactor(1, 64, q)`), `MulModShoupLazy`, `MulModBarrett` (e64) and `Load32`, `Store32` (overloaded on `uint64_t*` = narrow/widen and `uint32_t*` = plain vle32/vse32, which is what lets one e32 kernel serve both storage widths), `AddMod32`, `SubMod32`, `BarrettReduce32` (factor `MultiplyFactor(1, 32, q)`), `MulModShoupLazy32`, `MulModBarrett32` (e32). All helpers are LMUL-generic templates: the arithmetic ones deduce the LMUL from their arguments; `Load32<V32>(p, vl)` takes the lane type as a template argument (default `vuint32m1_t`) and `Store32` deduces it | **TODO**: write these first, then compose kernels from them. Each helper has its own test (`hexl-tests RvvUtil`, `test/test-rvv-util.cpp`), so it can be checked before any kernel uses it. The two Barrett helpers' factor convention is defined at the top of that file (`Barrett64Factors`, `Barrett32Factor`): edit it if you choose another. Change the signatures if a better decomposition emerges (and the matching test) |
 | `not-implemented.hpp/.cpp` | `HEXL_NOT_IMPLEMENTED()` | done |
 | `util-internal.hpp` | scalar `Compare(CMPINT, a, b)` for the native Cmp kernels | done |
 | `aligned-allocator.cpp` | the global `mallocStrategy` | done |
@@ -306,17 +306,21 @@ Intrinsics reference: `docs/rvv_intrinsics/` (`make rvv-intrinsics-doc`; see the
 * **SEW=e32 whenever q < 2^30.** On both K3 clusters the multiplier retires 8× more bits per
   cycle at e32 than at e64 (the e64 multiplier does one element per cycle). binfhe's moduli are
   ≤ 28 bits, so the e32 path covers the whole TFHE side.
-* **LMUL by kernel type.** Light kernels (Add/Sub/CmpAdd/CmpSubMod, 1-3 ALU ops per element) are
-  bound by per-strip overhead, so use **m4**. On EltwiseAddMod at n = 1K-64K, m4 was 2.3-3.4×
-  faster than m1 on the X100 and 2-3× on the A100. m8 was slower than m4 on the X100, and on the
-  A100 at e64 n ≥ 64K. Multiply-bound kernels (Mult/FMA/NTT) keep **m1** for compute: larger
-  LMUL adds no multiplier throughput and costs registers. The Add/Sub/ReduceFromTwice helpers
-  in `rvv-util.hpp` are LMUL-generic templates (overloaded intrinsics), so only the kernel's
+* **LMUL=m4 for every kernel.** Light kernels (Add/Sub/CmpAdd/CmpSubMod) are bound by per-strip
+  overhead: on EltwiseAddMod at n = 1K-64K, m4 was 2.3-3.4× faster than m1 on the X100 and 2-3×
+  on the A100. Multiply kernels gain too (n = 4096, cycles/element on the X100, m1 → m4):
+  MulModBarrett32 3.51 → 1.59, MulModShoupLazy32 2.66 → 1.13, MulModBarrett 11.0 → 6.4, Shoup
+  e64 7.6 → 5.2; m4 is the best LMUL there. m8 is slower than m4 on the X100; on the A100 it is
+  5-20% faster, but it leaves only 4 register groups, so kernels that keep more values live (NTT
+  butterflies, MultMod with input reduction) will spill. All arithmetic helpers in
+  `rvv-util.hpp` are LMUL-generic templates (overloaded intrinsics), so only the kernel's
   `vsetvl`/`vle`/`vse` name the LMUL. Fractional LMUL only exposes the low part of a register
   (verified on silicon). **mf2 is the smallest portable
   one**: X100 returns vl=0 and traps on e32/mf4 and mf8.
-* **32-bit compute, either storage.** With 64-bit storage (`n64-rvvhexl`), load `e64,m2` and
-  narrow (`vncvt.x.x.w`) to `e32,m1`, and widen (`vzext.vf2`) before the store. In the NTT do
+* **32-bit compute, either storage.** With 64-bit storage (`n64-rvvhexl`), load `e64,m8` and
+  narrow (`vncvt.x.x.w`) to `e32,m4` (`rvv::Load32<vuint32m4_t>`), and widen (`vzext.vf2`)
+  before the store. That pair reaches about 2× the load bandwidth of `e64,m2` → `e32,m1` on
+  both clusters. In the NTT do
   this once, in the first and last stage, not as separate passes. With 32-bit storage
   (`n32-rvvhexl`) the same kernel reads and writes directly. `rvv::Load32`/`Store32` hide the
   difference. `[0, 4q) < 2^32` holds for q < 2^30, so lazy butterflies fit in 32-bit lanes.
@@ -365,7 +369,6 @@ with `SEAL_TESTS=ON`, also SEAL's own `sealtest`).
 | `n{64,32}-rvvhexl` vs the same + `HEXL_DISABLE_RVV=1` | your RVV kernels vs your native kernels under the same auto-vectoriser |
 | SEAL `rvvhexl` vs **`stock`** | the HEXL backend under SEAL (same flags, identical bench binaries). **`stock` SEAL's NTT is already partly auto-vectorised by GCC**, so it is a harder baseline than OpenFHE's scalar NTT |
 | x100 vs a100 | VLEN 256 vs 1024, in-order vs out-of-order |
-| `bench-hexl` on K3 vs `HEXL_IMPL=intel` on AMD/Intel | the cross-architecture table (same source, AVX-512 vs RVV vs AVX2 fallback) |
 
 Never compare an `n64-rvvhexl` result with an `n32` run and call the difference "HEXL": it mixes the
 backend with the word size (same caveat as the x86 HEXL runs in D01). Compare at equal word size.

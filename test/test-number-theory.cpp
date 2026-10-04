@@ -50,6 +50,7 @@ TEST(NumberTheory_AddSubUIntMod) {
 
 TEST(NumberTheory_MultiplyMod) {
   for (uint64_t q : TestModuli()) {
+    if (q >= (1ULL << 61)) continue;  // MultiplyMod requires q < 2^61 (pre-shift Barrett)
     auto a = O::Random(300, q), b = O::Random(300, q);
     a.push_back(q - 1); b.push_back(q - 1);
     for (size_t i = 0; i < a.size(); ++i) {

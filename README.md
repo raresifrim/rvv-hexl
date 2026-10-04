@@ -110,7 +110,7 @@ selected by `NATIVE_SIZE` / `WITH_RVV_HEXL` (and `ISA`); every SEAL target on `W
 
 | Variable | Values (default first) | Meaning |
 |---|---|---|
-| `ISA` | riscv64: auto-detected `rvv`, or `scalar`; `native` on x86/arm | `scalar` = the rvv `-march` minus V: the base RISC-V point. Applies to rvv-hexl **and** OpenFHE. See [Board and toolchain detection](#board-and-toolchain-detection) |
+| `ISA` | auto-detected `rvv`, or `scalar` (riscv64 only) | `scalar` = the rvv `-march` minus V: the base RISC-V point. Applies to rvv-hexl **and** OpenFHE. See [Board and toolchain detection](#board-and-toolchain-detection) |
 | `BUILD` (or `CMAKE_BUILD_TYPE`) | `release`, `debug` | rvv-hexl only; `debug` enables every `HEXL_CHECK`, and `HEXL_VLOG=3` prints the dispatched kernel |
 | `HEXL_SHARED_LIB` | `ON`, `OFF` | also build `libhexl.so` |
 | `HEXL_TESTING` / `HEXL_BENCHMARK` | `OFF`, `ON` | `make rvv-hexl` also builds the test / bench binary |
@@ -119,7 +119,6 @@ selected by `NATIVE_SIZE` / `WITH_RVV_HEXL` (and `ISA`); every SEAL target on `W
 | `OPENFHE_BENCHMARKS` / `OPENFHE_UNITTESTS` | `ON` / follows `WITH_RVV_HEXL` | build upstream OpenFHE's benchmark suite / unit tests |
 | `SEAL_TESTS` | `OFF`, `ON` | also build SEAL's own `sealtest` (needs `libgtest-dev`) |
 | `RISCV_MARCH` / `RISCV_SCALAR_MARCH` | auto-detected | force the `-march` for `ISA=rvv` / `ISA=scalar` (the toolchain checks still run) |
-| `HEXL_IMPL` | `rvv`, `intel` | build the same tests/benches against upstream Intel HEXL (`INTEL_HEXL_PREFIX=`) |
 | `CROSS`, `RUN` | e.g. `riscv64-unknown-elf-`, `spike --isa=rv64gcv_zvl256b pk` | cross-build and run under a simulator |
 | `SANITIZE` | `address`, `undefined` | sanitizer build |
 
@@ -207,21 +206,8 @@ make CROSS=riscv64-unknown-elf- RISCV_MARCH=rv64gcv \
 ```
 
 `zvl256b` emulates the X100 VLEN, `zvl1024b` the A100's. Spike checks correctness only; its
-timings mean nothing. On macOS/arm64 a plain `make test` also works (native path only).
-
-## Cross-architecture comparison
-
-The HEXL microbenchmarks and the tests use only the public HEXL API, so the same sources build
-against upstream Intel HEXL on the x86 machines from the IPCEI campaign:
-
-```bash
-make HEXL_IMPL=intel INTEL_HEXL_PREFIX=/path/to/hexl-install test bench-hexl
-```
-
-Same code, parameters and harness, so the only differences are the library and the CPU.
-`HEXL_DISABLE_AVX512DQ=1` gives upstream's native path, the counterpart of
-`HEXL_DISABLE_RVV=1` here. The test suite passes against upstream HEXL (release and
-`HEXL_DEBUG` builds). That is how the test oracles were validated.
+timings mean nothing. The build is RISC-V only: without `CROSS=`, `make` stops on a non-RISC-V
+host.
 
 ## Relation to the upstream Intel HEXL / OpenFHE builds
 

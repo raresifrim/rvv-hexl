@@ -4,39 +4,41 @@
 // RVV building blocks shared by the eltwise and NTT kernels.
 // RISC-V counterpart of upstream's util/avx512-util.hpp.
 //
-// Only compiled when the TU has V enabled (HEXL_HAS_RVV). Everything here is a
-// TODO(port-rvv) stub: the signatures fix the vocabulary the kernels are
-// written in, the bodies are yours.
+// Only compiled when the TU has V enabled (HEXL_HAS_RVV).
 //
 // Parameterisation, fixed by the K3 measurements:
 //   * SEW=e32 whenever the modulus allows it (q < 2^30): the vector multiplier
 //     retires 8x more bits/cycle at e32 than at e64 on both clusters.
-//   * LMUL depends on what bounds the kernel:
-//       - light kernels (Add/Sub/CmpAdd/CmpSubMod: 1-3 ALU ops per element)
-//         are bound by per-strip overhead, so use LMUL=m4. Measured on
-//         EltwiseAddMod, n = 1K-64K: 2.3-3.4x faster than m1 on the X100 and
-//         2-3x on the A100. m8 is slower than m4 on the X100 and on the A100 at
-//         e64 n >= 64K.
-//       - multiply-bound kernels (Mult/FMA/NTT) keep LMUL=m1 for compute:
-//         larger LMUL buys no multiplier throughput and costs registers.
+//   * LMUL=m4 for every kernel (measured on the K3, n = 4096):
+//       - light kernels (Add/Sub/CmpAdd/CmpSubMod) are bound by per-strip
+//         overhead: EltwiseAddMod m4 is 2.3-3.4x faster than m1 on the X100
+//         and 2-3x on the A100.
+//       - multiply kernels gain too: m4 is 1.5-2.4x faster than m1 on the X100
+//         (MulModBarrett32 3.51 -> 1.59, MulModShoupLazy32 2.66 -> 1.13,
+//         MulModBarrett 11.0 -> 6.4 cycles/elem) and the best LMUL there.
+//       - m8 is slower than m4 on the X100. On the A100 it is 5-20% faster, but
+//         it leaves only 4 register groups: kernels that keep more values live
+//         (NTT butterflies, MultMod with input reduction) will spill.
 //     Fractional LMUL only exposes the low part of a register.
 //   * mf2 is the smallest PORTABLE fractional LMUL: X100 returns vl=0 and traps
 //     on e32/mf4 and mf8. Never use mf4/mf8.
 //   * Stay VLEN-agnostic (vsetvl every strip): X100 has VLEN=256, A100 1024.
 //
-// The Add/Sub/ReduceFromTwice helpers below are LMUL-generic templates: they
-// use the overloaded intrinsics (__riscv_vadd(a, b, vl) etc.), which take the
-// SEW/LMUL from the argument type, so the same helper serves u64m1 and u64m4.
-// Only the kernel's vsetvl / vle / vse carry an explicit LMUL suffix. The
-// e64 helpers reject e32 vectors at compile time and vice versa.
+// All arithmetic helpers below (add/sub, ReduceFromTwice, BarrettReduce, the
+// Barrett and Shoup multiplies) are LMUL-generic templates: they use the
+// overloaded intrinsics (__riscv_vadd(a, b, vl) etc.), which take the SEW/LMUL
+// from the argument type, so the same helper serves u64m1 and u64m4. Only the
+// kernel's vsetvl / vle / vse carry an explicit LMUL suffix. The e64 helpers
+// reject e32 vectors at compile time and vice versa. Load32 takes its lane
+// type as a template argument (Load32<vuint32m4_t>(p, vl)), since a pointer
+// carries no LMUL; Store32 deduces it from the vector.
 //
 // Storage is uint64_t (OpenFHE NATIVE_SIZE=64) or uint32_t (NATIVE_SIZE=32).
 // The e32 kernels are templates on the storage word and read/write through
-// Load32 / Store32 below, overloaded on the pointer type:
-//   uint64_t: vle64 (e64,m2) -> vncvt.x.x.w -> e32,m1 ... vzext.vf2 -> vse64
-//   uint32_t: vle32 (e32,m1) ...                                    ... vse32
-// so the arithmetic is written once. Alternative worth measuring for uint64_t
-// storage: e64,m1 -> e32,mf2 (half the elements per op).
+// Load32 / Store32 below, overloaded on the pointer type (shown at m4):
+//   uint64_t: vle64 (e64,m8) -> vncvt.x.x.w -> e32,m4 ... vzext.vf2 -> vse64 (e64,m8)
+//   uint32_t: vle32 (e32,m4) ...                                    ... vse32
+// so the arithmetic is written once.
 
 #pragma once
 
@@ -51,7 +53,6 @@
 #include <type_traits>
 #include <utility>
 
-#include "util/not-implemented.hpp"
 
 namespace intel {
 namespace hexl {
@@ -154,56 +155,123 @@ inline V BarrettReduce(V x, uint64_t q, uint64_t q_barr, size_t vl) {
 
 /// @brief Shoup multiplication by a precomputed operand, LAZY: returns
 /// x * y mod q in [0, 2q). y_precon = floor(y * 2^64 / q).
-/// Hint: Q = vmulhu(x, y_precon); r = vmul(x, y) - vmul(Q, q).
 /// This is the NTT butterfly multiply and the EltwiseFMAMod scalar multiply.
-inline vuint64m1_t MulModShoupLazy(vuint64m1_t x, vuint64m1_t y,
-                                   vuint64m1_t y_precon, uint64_t q,
-                                   size_t vl) {
-  HEXL_NOT_IMPLEMENTED();
+template <class V>
+inline V MulModShoupLazy(V x, V y, V y_precon, uint64_t q, size_t vl) {
+  static_assert(IsE64<V>, "rvv::MulModShoupLazy takes e64 vectors; use MulModShoupLazy32 for e32");
+  V Q = __riscv_vmulhu(x, y_precon, vl);
+  V r = __riscv_vnmsac(__riscv_vmul(x, y, vl), q, Q, vl);  // x*y - q*Q: the multiply-subtract in one instruction
+  return r; 
 }
+
 
 /// @brief Same, with a scalar multiplier broadcast to every lane.
-inline vuint64m1_t MulModShoupLazy(vuint64m1_t x, uint64_t y,
-                                   uint64_t y_precon, uint64_t q, size_t vl) {
-  HEXL_NOT_IMPLEMENTED();
+template <class V>
+inline V MulModShoupLazy(V x, uint64_t y, uint64_t y_precon, uint64_t q, size_t vl) {
+  static_assert(IsE64<V>, "rvv::MulModShoupLazy takes e64 vectors; use MulModShoupLazy32 for e32");
+  V Q = __riscv_vmulhu(x, y_precon, vl);
+  V r = __riscv_vnmsac(__riscv_vmul(x, y, vl), q, Q, vl);  // x*y - q*Q: the multiply-subtract in one instruction
+  return r; 
 }
 
+
 /// @brief Full modular product of two VECTORS (no precomputed operand), as
-/// needed by EltwiseMultMod. Returns [0, q).
-/// Hint: needs the 128-bit product (vmul + vmulhu) and a Barrett reduction
-/// with mu = floor(2^(2k) / q); see upstream EltwiseMultModNative for the
-/// scalar algorithm with its exact shift amounts.
-inline vuint64m1_t MulModBarrett(vuint64m1_t a, vuint64m1_t b, uint64_t q,
-                                 uint64_t barrett_hi, uint64_t barrett_lo,
-                                 size_t vl) {
-  HEXL_NOT_IMPLEMENTED();
+/// needed by EltwiseMultMod. a, b < q < 2^61. Returns [0, q).
+/// Method: upstream HEXL's pre-shift Barrett (EltwiseMultModNative), with
+/// n = bit length of q:
+///   shift = n - 2,   mu = floor(2^(n+62) / q)
+///                       = MultiplyFactor(1ULL << shift, 64, q).BarrettFactor()
+/// The kernel computes both ONCE per call (mu is a 128-by-64 division), never
+/// per strip in here.
+/// The quotient estimate is at most one short for q < 2^61 (it can be two
+/// short for 62-bit q, measured), so one final correction suffices. shift == 0
+/// only for q < 4, where hi == 0 (vsll by 64 shifts by 0 in RVV: harmless).
+template <class V>
+inline V MulModBarrett(V a, V b, uint64_t q, uint64_t mu, uint64_t shift, size_t vl) {
+  static_assert(IsE64<V>, "rvv::MulModBarrett takes e64 vectors; use MulModBarrett32 for e32");
+  V hi, lo;
+  hi = __riscv_vmulhu(a, b, vl);
+  lo = __riscv_vmul(a, b, vl);
+  
+  V c = __riscv_vor(
+		   __riscv_vsrl(lo, shift, vl),
+		   __riscv_vsll(hi, 64-shift, vl),
+		   vl
+		 ); 
+  
+  V Q = __riscv_vmulhu(c, mu, vl);
+  
+  V r = __riscv_vnmsac(lo, q, Q, vl);  // lo - q*Q in one instruction (8-33% faster than vmul + vsub, measured)
+  
+  return __riscv_vminu(
+		  r, 
+		  __riscv_vsub(r, q, vl),
+		  vl);
 }
+
 
 // ---------------------------------------------------------------------------
 // e32 path (q < 2^30): compute in 32-bit lanes, store in 64-bit words
 // ---------------------------------------------------------------------------
 
-/// @brief Loads vl values into 32-bit lanes. Overloaded on the storage type so
-/// that one kernel template serves both OpenFHE word sizes:
-///   uint64_t* (NATIVE_SIZE=64): each value < 2^32, narrow on load.
-///     Hint: __riscv_vle64_v_u64m2 + __riscv_vncvt_x_x_w_u32m1.
-///   uint32_t* (NATIVE_SIZE=32): plain __riscv_vle32_v_u32m1.
-inline vuint32m1_t Load32(const uint64_t* p, size_t vl) {
+/// @brief Loads vl values into 32-bit lanes of type V32. Overloaded on the
+/// storage type so that one kernel template serves both OpenFHE word sizes:
+///   uint64_t* (NATIVE_SIZE=64): each value < 2^32, narrow on load: vle64 at
+///     TWICE the LMUL, then vncvt.x.x.w (u64m2 -> u32m1, ..., u64m8 -> u32m4).
+///   uint32_t* (NATIVE_SIZE=32): plain vle32.
+/// A pointer carries no LMUL, so the lane type is a template argument:
+///   rvv::Load32<vuint32m4_t>(p, vl)      (default: vuint32m1_t)
+/// From uint64_t storage V32 can be mf2..m4 (the e64 side needs twice the
+/// LMUL, at most m8); from uint32_t storage mf2..m8. Measured on the K3, the
+/// narrowing load reaches about 2x the bandwidth at u64m8 -> u32m4 than at
+/// u64m2 -> u32m1 (X100 L1: 12.4 vs 5.8 B/cycle; A100: 17.0 vs 8.2).
+template <class V32 = vuint32m1_t>
+inline V32 Load32(const uint64_t* p, size_t vl) {
+  static_assert(IsE32<V32>, "rvv::Load32<V32>: V32 must be an e32 vector type");
 	//nice trick to load 32-bit lanes from wide 64-bit pointer, narrowing the values to fit
-	return __riscv_vncvt_x_x_w_u32m1(__riscv_vle64_v_u64m2(p, vl), vl);
+  if constexpr (std::is_same_v<V32, vuint32mf2_t>) {
+    return __riscv_vncvt_x(__riscv_vle64_v_u64m1(p, vl), vl);
+  } else if constexpr (std::is_same_v<V32, vuint32m1_t>) {
+    return __riscv_vncvt_x(__riscv_vle64_v_u64m2(p, vl), vl);
+  } else if constexpr (std::is_same_v<V32, vuint32m2_t>) {
+    return __riscv_vncvt_x(__riscv_vle64_v_u64m4(p, vl), vl);
+  } else {
+    static_assert(std::is_same_v<V32, vuint32m4_t>,
+                  "rvv::Load32 from uint64_t storage: V32 must be u32mf2..u32m4 (the e64 load needs twice the LMUL)");
+    return __riscv_vncvt_x(__riscv_vle64_v_u64m8(p, vl), vl);
+  }
 }
-inline vuint32m1_t Load32(const uint32_t* p, size_t vl) {
-	return __riscv_vle32_v_u32m1(p, vl);
+template <class V32 = vuint32m1_t>
+inline V32 Load32(const uint32_t* p, size_t vl) {
+  static_assert(IsE32<V32>, "rvv::Load32<V32>: V32 must be an e32 vector type");
+  if constexpr (std::is_same_v<V32, vuint32mf2_t>) {
+    return __riscv_vle32_v_u32mf2(p, vl);
+  } else if constexpr (std::is_same_v<V32, vuint32m1_t>) {
+    return __riscv_vle32_v_u32m1(p, vl);
+  } else if constexpr (std::is_same_v<V32, vuint32m2_t>) {
+    return __riscv_vle32_v_u32m2(p, vl);
+  } else if constexpr (std::is_same_v<V32, vuint32m4_t>) {
+    return __riscv_vle32_v_u32m4(p, vl);
+  } else {
+    return __riscv_vle32_v_u32m8(p, vl);
+  }
 }
 
-/// @brief Stores vl 32-bit lanes into the storage type (see Load32).
-///   uint64_t*: widen, __riscv_vzext_vf2_u64m2 + __riscv_vse64_v_u64m2.
-///   uint32_t*: plain __riscv_vse32_v_u32m1.
-inline void Store32(uint64_t* p, vuint32m1_t v, size_t vl) {
-  	__riscv_vse64_v_u64m2(p, __riscv_vzext_vf2_u64m2(v, vl), vl);
+/// @brief Stores vl 32-bit lanes into the storage type (see Load32). The lane
+/// type is deduced from v:
+///   uint64_t*: widen with vzext.vf2 to twice the LMUL, then vse64 (V32 up to m4).
+///   uint32_t*: plain vse32.
+template <class V32>
+inline void Store32(uint64_t* p, V32 v, size_t vl) {
+  static_assert(IsE32<V32>, "rvv::Store32: v must be an e32 vector");
+  static_assert(!std::is_same_v<V32, vuint32m8_t>,
+                "rvv::Store32 to uint64_t storage: at most u32m4 (the e64 store needs twice the LMUL)");
+  __riscv_vse64(p, __riscv_vzext_vf2(v, vl), vl);
 }
-inline void Store32(uint32_t* p, vuint32m1_t v, size_t vl) {
-	__riscv_vse32_v_u32m1(p, v, vl);
+template <class V32>
+inline void Store32(uint32_t* p, V32 v, size_t vl) {
+  static_assert(IsE32<V32>, "rvv::Store32: v must be an e32 vector");
+  __riscv_vse32(p, v, vl);
 }
 
 // The Add/Sub helpers below are LMUL-generic: V = vuint32mf2_t ... vuint32m8_t.
@@ -279,21 +347,52 @@ inline V BarrettReduce32(V x, uint32_t q, uint32_t q_barr, size_t vl) {
 
 /// @brief Shoup lazy multiply in 32-bit lanes: [0, 2q).
 /// y_precon = floor(y * 2^32 / q) (MultiplyFactor(y, 32, q)).
-/// Hint: Q = vmulhu(x, y_precon) at e32; r = x*y - Q*q (all e32, wrapping).
-/// This is the operation whose throughput the K3 datapath table measures.
-inline vuint32m1_t MulModShoupLazy32(vuint32m1_t x, vuint32m1_t y,
-                                     vuint32m1_t y_precon, uint32_t q,
-                                     size_t vl) {
-  HEXL_NOT_IMPLEMENTED();
+template <class V>
+inline V MulModShoupLazy32(V x, V y, V y_precon, uint32_t q, size_t vl) {
+  static_assert(IsE32<V>, "rvv::MulModShoupLazy32 takes e32 vectors; use MulModShoupLazy for e64");
+  V Q = __riscv_vmulhu(x, y_precon, vl);
+  V r = __riscv_vnmsac(__riscv_vmul(x, y, vl), q, Q, vl);  // x*y - q*Q: the multiply-subtract in one instruction
+  return r; 
 }
 
-/// @brief Full modular product of two 32-bit vectors, [0, q).
-/// Hint: lo = vmul, hi = vmulhu (both e32, no widening needed), then a
-/// two-word Barrett; or vwmulu to e64 and reduce there (measure both).
-inline vuint32m1_t MulModBarrett32(vuint32m1_t a, vuint32m1_t b, uint32_t q,
-                                   uint32_t barrett_factor, size_t vl) {
-  HEXL_NOT_IMPLEMENTED();
+
+/// @brief Full modular product of two 32-bit vectors, a, b < q < 2^30. Returns [0, q).
+/// Same pre-shift Barrett as the e64 MulModBarrett, at 32-bit words, with
+/// n = bit length of q (n <= 30):
+///   shift = n - 2,   mu = floor(2^(n+30) / q)
+///                       = MultiplyFactor(1 << shift, 32, q).BarrettFactor()
+/// The kernel computes both ONCE per call (a single 64-bit divu here).
+template <class V>
+inline V MulModBarrett32(V a, V b, uint32_t q, uint32_t mu, uint32_t shift, size_t vl) {
+  static_assert(IsE32<V>, "rvv::MulModBarrett32 takes e32 vectors; use MulModBarrett for e64");
+  V hi, lo;
+  hi = __riscv_vmulhu(a, b, vl);
+  lo = __riscv_vmul(a, b, vl);
+  
+  V c = __riscv_vor(
+		   __riscv_vsrl(lo, shift, vl),
+		   __riscv_vsll(hi, 32-shift, vl),
+		   vl
+		 ); 
+  
+  V Q = __riscv_vmulhu(c, mu, vl);
+  
+  V r = __riscv_vnmsac(lo, q, Q, vl);  // lo - q*Q in one instruction (8-33% faster than vmul + vsub, measured)
+  
+  r = __riscv_vminu(
+		  r, 
+		  __riscv_vsub(r, q, vl),
+		  vl);
+  
+  if ((q >> 29) == 0) //if moduli is 30-bits or higher we need a double correction
+    return r;
+  else
+    return __riscv_vminu(
+		  r, 
+		  __riscv_vsub(r, q, vl),
+		  vl);
 }
+
 
 }  // namespace rvv
 }  // namespace hexl

@@ -16,7 +16,6 @@
 #include "bench-common.hpp"
 
 int main(int argc, char** argv) {
-#ifdef HEXL_RVV_PORT
   const auto info = intel::hexl::rvv::GetPortInfo();
   benchmark::AddCustomContext("hexl_impl", "rvv-hexl");
   benchmark::AddCustomContext("hexl_rvv_compiled", info.compiled_with_rvv ? "1" : "0");
@@ -25,14 +24,8 @@ int main(int argc, char** argv) {
   benchmark::AddCustomContext("hexl_vlen_bits", std::to_string(info.vlen_bits));
   benchmark::AddCustomContext("hexl_build_flags", info.build_flags);
   benchmark::AddCustomContext("hexl_compiler", info.compiler);
-#else
-  benchmark::AddCustomContext("hexl_impl", "intel-hexl");
-#endif
   if (const char* v = std::getenv("HEXL_DISABLE_RVV")) {
     benchmark::AddCustomContext("HEXL_DISABLE_RVV", v);
-  }
-  if (const char* v = std::getenv("HEXL_DISABLE_AVX512DQ")) {
-    benchmark::AddCustomContext("HEXL_DISABLE_AVX512DQ", v);
   }
   if (const char* v = std::getenv("BENCH_CLUSTER")) {
     benchmark::AddCustomContext("cluster", v);

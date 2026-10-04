@@ -22,6 +22,9 @@ void EltwiseMultMod(uint64_t* result, const uint64_t* operand1,
   HEXL_CHECK(operand2 != nullptr, "Require operand2 != nullptr");
   HEXL_CHECK(n != 0, "Require n != 0");
   HEXL_CHECK(modulus > 1, "Require modulus > 1");
+  // The pre-shift Barrett estimate is at most one short only for moduli of up
+  // to 61 bits (OpenFHE <= 60, SEAL <= 61); same bound as EltwiseFMAMod.
+  HEXL_CHECK(modulus < (1ULL << 61), "Require modulus < (1ULL << 61)");
   HEXL_CHECK(input_mod_factor * modulus < (1ULL << 63),
              "Require input_mod_factor * modulus < (1ULL << 63)");
   HEXL_CHECK(

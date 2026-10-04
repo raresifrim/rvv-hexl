@@ -14,10 +14,11 @@
 // oracle. Edge values (q - 1, 0, the largest allowed input) sit at the front of
 // every vector. Lazy helpers are checked for both the residue and the range.
 //
-// Internal header: compiled only into rvv-hexl RVV builds (needs -Isrc, which
-// the Makefile adds for HEXL_IMPL=rvv; empty for ISA=scalar and HEXL_IMPL=intel).
+// Internal header: compiled only into RVV builds (needs -Isrc, which the
+// Makefile adds; the tests are empty for ISA=scalar).
 
 #include <cstdint>
+#include <type_traits>
 #include <vector>
 
 #include "hexl/number-theory/number-theory.hpp"
@@ -46,22 +47,23 @@ namespace {
 // them.
 // ===========================================================================
 
-/// e64: (barrett_hi, barrett_lo) = floor(2^128 / q), the 128-bit fixed-point
-/// reciprocal (SEAL's Modulus::const_ratio()[1], [0]). Natural pairing with the
-/// full 128-bit product (vmul + vmulhu).
-inline void Barrett64Factors(uint64_t q, uint64_t* hi, uint64_t* lo) {
-  const u128 m = ~static_cast<u128>(0);  // 2^128 - 1
-  u128 f = m / q;
-  if (m % q == q - 1) ++f;  // floor(2^128/q) = floor((2^128-1)/q) + [q | 2^128]
-  *hi = static_cast<uint64_t>(f >> 64);
-  *lo = static_cast<uint64_t>(f);
+/// e64: upstream HEXL's pre-shift Barrett (EltwiseMultModNative), q < 2^61.
+/// With n = bit length of q: shift = n - 2 and mu = floor(2^(n+62) / q), i.e.
+/// MultiplyFactor(1 << shift, 64, q).BarrettFactor(), which is what the kernel
+/// calls (checked in RvvUtil_MulModBarrett). Computed here independently.
+inline void Barrett64Factors(uint64_t q, uint64_t* mu, uint64_t* shift) {
+  const int n = 64 - __builtin_clzll(q);
+  *shift = static_cast<uint64_t>(n - 2);
+  *mu = static_cast<uint64_t>((static_cast<u128>(1) << (n + 62)) / q);
 }
 
-/// e32: barrett_factor = floor(2^(2k) / q), k = bit length of q (the header's
-/// hint). For q < 2^30 this is < 2^31, so it fits the uint32_t parameter.
-inline uint32_t Barrett32Factor(uint64_t q) {
-  const int k = 64 - __builtin_clzll(q);
-  return static_cast<uint32_t>((static_cast<u128>(1) << (2 * k)) / q);
+/// e32: the same pre-shift Barrett at 32-bit words, q < 2^30. With n = bit
+/// length of q: shift = n - 2 and mu = floor(2^(n+30) / q) (< 2^32), i.e.
+/// MultiplyFactor(1 << shift, 32, q).BarrettFactor() (checked in the test).
+inline void Barrett32Factors(uint64_t q, uint32_t* mu, uint32_t* shift) {
+  const int n = 64 - __builtin_clzll(q);
+  *shift = static_cast<uint32_t>(n - 2);
+  *mu = static_cast<uint32_t>((uint64_t{1} << (n + 30)) / q);
 }
 
 // ---------------------------------------------------------------------------
@@ -278,16 +280,18 @@ TEST(RvvUtil_MulModShoupLazyScalar) {
 }
 
 TEST(RvvUtil_MulModBarrett) {
-  for (uint64_t q : Moduli64(1ULL << 62)) {  // header: e64 path, moduli up to 62 bits
-    uint64_t hi, lo;
-    Barrett64Factors(q, &hi, &lo);
+  for (uint64_t q : Moduli64(1ULL << 61)) {  // header: e64 path, q < 2^61
+    uint64_t mu, shift;
+    Barrett64Factors(q, &mu, &shift);
+    CHECK_EQ(intel::hexl::MultiplyFactor(1ULL << shift, 64, q).BarrettFactor(), mu,
+             << "factor convention q=" << q);
     for (size_t n : O::EltwiseSizes()) {
       auto a = WithEdges(n, q, {q - 1, 0, q - 1}), b = WithEdges(n, q, {q - 1, q - 1, 0});
       std::vector<uint64_t> want(n), got(n);
       for (size_t i = 0; i < n; ++i) want[i] = O::MulMod(a[i], b[i], q);
       Strips64(n, [&](size_t i, size_t vl) {
-        auto r = rvv::MulModBarrett(__riscv_vle64_v_u64m1(&a[i], vl), __riscv_vle64_v_u64m1(&b[i], vl), q, hi,
-                                    lo, vl);
+        auto r = rvv::MulModBarrett(__riscv_vle64_v_u64m1(&a[i], vl), __riscv_vle64_v_u64m1(&b[i], vl), q, mu,
+                                    shift, vl);
         __riscv_vse64_v_u64m1(&got[i], r, vl);
       });
       CHECK_VEC_EQ(want, got, << "rvv::MulModBarrett n=" << n << " q=" << q
@@ -461,19 +465,38 @@ TEST(RvvUtil_MulModShoupLazy32) {
 }
 
 TEST(RvvUtil_MulModBarrett32) {
-  for (uint64_t q : Moduli32()) {
-    const uint32_t mu = Barrett32Factor(q);
+  // 30-bit primes with inputs where the quotient estimate is TWO short (found by
+  // search; random inputs hit this only ~2 in a million): with a single final
+  // correction the helper returns a value in [q, 2q) for these.
+  const std::vector<std::pair<uint64_t, std::vector<std::pair<uint64_t, uint64_t>>>> two_short = {
+      {1011494717, {{1008325232, 1001574391}, {1010685420, 1003203244}, {1010268970, 1003690734}}},
+      {931089161, {{917661731, 929557181}}}};
+  std::vector<uint64_t> qs = Moduli32();
+  for (const auto& h : two_short) qs.push_back(h.first);
+  for (uint64_t q : qs) {
+    uint32_t mu, shift;
+    Barrett32Factors(q, &mu, &shift);
+    CHECK_EQ(intel::hexl::MultiplyFactor(1ULL << shift, 32, q).BarrettFactor(), static_cast<uint64_t>(mu),
+             << "factor convention q=" << q);
     for (size_t n : O::EltwiseSizes()) {
-      auto a = To32(WithEdges(n, q, {q - 1, 0, q - 1})), b = To32(WithEdges(n, q, {q - 1, q - 1, 0}));
+      auto a64 = WithEdges(n, q, {q - 1, 0, q - 1}), b64 = WithEdges(n, q, {q - 1, q - 1, 0});
+      for (const auto& h : two_short) {
+        if (h.first != q) continue;
+        for (size_t j = 0; j < h.second.size() && 3 + j < n; ++j) {
+          a64[3 + j] = h.second[j].first;
+          b64[3 + j] = h.second[j].second;
+        }
+      }
+      auto a = To32(a64), b = To32(b64);
       std::vector<uint32_t> want(n), got(n);
       for (size_t i = 0; i < n; ++i) want[i] = static_cast<uint32_t>(O::MulMod(a[i], b[i], q));
       Strips32(n, [&](size_t i, size_t vl) {
         auto r = rvv::MulModBarrett32(__riscv_vle32_v_u32m1(&a[i], vl), __riscv_vle32_v_u32m1(&b[i], vl),
-                                      static_cast<uint32_t>(q), mu, vl);
+                                      static_cast<uint32_t>(q), mu, shift, vl);
         __riscv_vse32_v_u32m1(&got[i], r, vl);
       });
       CHECK_VEC_EQ(want, got, << "rvv::MulModBarrett32 n=" << n << " q=" << q
-                                << " (factor: see Barrett32Factor in this file)");
+                                << " (factors: see Barrett32Factors in this file)");
     }
   }
 }
@@ -545,6 +568,136 @@ TEST(RvvUtil_AddSub32_m4) {
         CHECK_VEC_EQ(w_adds, g_adds, << "rvv::AddScalarMod32<u32m4> n=" << n << " q=" << q << " b=" << s);
         CHECK_VEC_EQ(w_subs, g_subs, << "rvv::SubScalarMod32<u32m4> n=" << n << " q=" << q << " b=" << s);
       }
+    }
+  }
+}
+
+// ===========================================================================
+// Load32 / Store32 at every LMUL: uint64_t storage (mf2..m4) and uint32_t
+// storage (mf2..m8), round trips and the cross-storage conversion, with guard
+// words past n.
+// ===========================================================================
+
+namespace {
+template <class V32>
+size_t Vl32(size_t n) {
+  if constexpr (std::is_same_v<V32, vuint32mf2_t>) return __riscv_vsetvl_e32mf2(n);
+  else if constexpr (std::is_same_v<V32, vuint32m1_t>) return __riscv_vsetvl_e32m1(n);
+  else if constexpr (std::is_same_v<V32, vuint32m2_t>) return __riscv_vsetvl_e32m2(n);
+  else if constexpr (std::is_same_v<V32, vuint32m4_t>) return __riscv_vsetvl_e32m4(n);
+  else return __riscv_vsetvl_e32m8(n);
+}
+
+template <class V32, bool kWithU64>
+void CheckLoadStore32(const char* lmul) {
+  constexpr uint64_t kGuard64 = 0xA5A5A5A5A5A5A5A5ULL;
+  constexpr uint32_t kGuard32 = 0xA5A5A5A5u;
+  for (size_t n : O::EltwiseSizes()) {
+    auto src64 = WithEdges(n, 1ULL << 32, {(1ULL << 32) - 1, 0, 1});  // values < 2^32
+    auto src32 = To32(src64);
+    std::vector<uint64_t> back64(n + 8, kGuard64), want64(src64);
+    std::vector<uint32_t> back32(n + 8, kGuard32), from64(n + 8, kGuard32), want32(src32);
+    want64.resize(n + 8, kGuard64);
+    want32.resize(n + 8, kGuard32);
+    for (size_t i = 0, vl; i < n; i += vl) {
+      vl = Vl32<V32>(n - i);
+      rvv::Store32(&back32[i], rvv::Load32<V32>(&src32[i], vl), vl);    // u32 -> e32 -> u32
+      if constexpr (kWithU64) {
+        rvv::Store32(&back64[i], rvv::Load32<V32>(&src64[i], vl), vl);  // u64 -> e32 -> u64
+        rvv::Store32(&from64[i], rvv::Load32<V32>(&src64[i], vl), vl);  // u64 -> e32 -> u32
+      }
+    }
+    CHECK_VEC_EQ(want32, back32, << "Load32/Store32 uint32_t round trip at " << lmul << " n=" << n);
+    if constexpr (kWithU64) {
+      CHECK_VEC_EQ(want64, back64, << "Load32/Store32 uint64_t round trip at " << lmul << " n=" << n);
+      CHECK_VEC_EQ(want32, from64, << "Load32(uint64_t*) -> Store32(uint32_t*) at " << lmul << " n=" << n);
+    }
+  }
+}
+}  // namespace
+
+TEST(RvvUtil_Load32Store32_AllLmul) {
+  CheckLoadStore32<vuint32mf2_t, true>("u32mf2");
+  CheckLoadStore32<vuint32m1_t, true>("u32m1");
+  CheckLoadStore32<vuint32m2_t, true>("u32m2");
+  CheckLoadStore32<vuint32m4_t, true>("u32m4");
+  CheckLoadStore32<vuint32m8_t, false>("u32m8");  // uint32_t storage only
+}
+
+// ===========================================================================
+// The multiply helpers at m4, the LMUL the kernels use (the tests above
+// instantiate them at m1).
+// ===========================================================================
+
+TEST(RvvUtil_MulMod_m4) {
+  for (uint64_t q : Moduli64(1ULL << 61)) {  // Barrett needs q < 2^61 (Shoup is tested to 2^63 above)
+    uint64_t mu, shift;
+    Barrett64Factors(q, &mu, &shift);
+    const uint64_t ys = O::Random(1, q)[0], yps = ShoupPrecon(ys, q, 64);
+    for (size_t n : O::EltwiseSizes()) {
+      auto x = WithEdges(n, O::AnyWord<uint64_t>(), {~0ULL, 4 * q - 1, q - 1, 0});
+      auto y = WithEdges(n, q, {q - 1, q - 1, q - 1, q - 1});
+      auto a = WithEdges(n, q, {q - 1, 0, q - 1}), b = WithEdges(n, q, {q - 1, q - 1, 0});
+      std::vector<uint64_t> yp(n), ysv(n, ys), g_sv(n), g_ss(n), g_bar(n), w_bar(n);
+      for (size_t i = 0; i < n; ++i) {
+        yp[i] = ShoupPrecon(y[i], q, 64);
+        w_bar[i] = O::MulMod(a[i], b[i], q);
+      }
+      for (size_t i = 0, vl; i < n; i += vl) {
+        vl = __riscv_vsetvl_e64m4(n - i);
+        vuint64m4_t vx = __riscv_vle64_v_u64m4(&x[i], vl);
+        __riscv_vse64_v_u64m4(&g_sv[i], rvv::MulModShoupLazy(vx, __riscv_vle64_v_u64m4(&y[i], vl),
+                                                             __riscv_vle64_v_u64m4(&yp[i], vl), q, vl), vl);
+        __riscv_vse64_v_u64m4(&g_ss[i], rvv::MulModShoupLazy(vx, ys, yps, q, vl), vl);
+        __riscv_vse64_v_u64m4(&g_bar[i], rvv::MulModBarrett(__riscv_vle64_v_u64m4(&a[i], vl),
+                                                            __riscv_vle64_v_u64m4(&b[i], vl), q, mu, shift, vl), vl);
+      }
+      CheckShoupLazy64(x, y, g_sv, q, "rvv::MulModShoupLazy<u64m4> (vector y)");
+      CheckShoupLazy64(x, ysv, g_ss, q, "rvv::MulModShoupLazy<u64m4> (scalar y)");
+      CHECK_VEC_EQ(w_bar, g_bar, << "rvv::MulModBarrett<u64m4> n=" << n << " q=" << q);
+    }
+  }
+}
+
+TEST(RvvUtil_MulMod32_m4) {
+  // the 30-bit "two short" inputs from RvvUtil_MulModBarrett32, one per modulus
+  const std::vector<std::pair<uint64_t, std::pair<uint64_t, uint64_t>>> two_short = {
+      {1011494717, {1008325232, 1001574391}}, {931089161, {917661731, 929557181}}};
+  std::vector<uint64_t> qs = Moduli32();
+  for (const auto& h : two_short) qs.push_back(h.first);
+  for (uint64_t q : qs) {
+    uint32_t mu, shift;
+    Barrett32Factors(q, &mu, &shift);
+    const uint32_t q32 = static_cast<uint32_t>(q);
+    for (size_t n : O::EltwiseSizes()) {
+      auto x = To32(WithEdges(n, 1ULL << 32, {(1ULL << 32) - 1, 4 * q - 1, q - 1, 0}));
+      auto y = To32(WithEdges(n, q, {q - 1, q - 1, q - 1, q - 1}));
+      auto a64 = WithEdges(n, q, {q - 1, 0, q - 1}), b64 = WithEdges(n, q, {q - 1, q - 1, 0});
+      for (const auto& h : two_short) {
+        if (h.first == q && n > 3) {
+          a64[3] = h.second.first;
+          b64[3] = h.second.second;
+        }
+      }
+      auto a = To32(a64), b = To32(b64);
+      std::vector<uint32_t> yp(n), g_sh(n), g_bar(n), w_bar(n);
+      for (size_t i = 0; i < n; ++i) {
+        yp[i] = static_cast<uint32_t>(ShoupPrecon(y[i], q, 32));
+        w_bar[i] = static_cast<uint32_t>(O::MulMod(a[i], b[i], q));
+      }
+      for (size_t i = 0, vl; i < n; i += vl) {
+        vl = __riscv_vsetvl_e32m4(n - i);
+        __riscv_vse32_v_u32m4(&g_sh[i], rvv::MulModShoupLazy32(__riscv_vle32_v_u32m4(&x[i], vl), __riscv_vle32_v_u32m4(&y[i], vl),
+                                                               __riscv_vle32_v_u32m4(&yp[i], vl), q32, vl), vl);
+        __riscv_vse32_v_u32m4(&g_bar[i], rvv::MulModBarrett32(__riscv_vle32_v_u32m4(&a[i], vl),
+                                                              __riscv_vle32_v_u32m4(&b[i], vl), q32, mu, shift, vl), vl);
+      }
+      for (size_t i = 0; i < n; ++i) {
+        CHECK_EQ(g_sh[i] % q, O::MulMod(x[i] % q, y[i], q),
+                 << "rvv::MulModShoupLazy32<u32m4> residue at [" << i << "] q=" << q);
+        CHECK(g_sh[i] < 2 * q);
+      }
+      CHECK_VEC_EQ(w_bar, g_bar, << "rvv::MulModBarrett32<u32m4> n=" << n << " q=" << q);
     }
   }
 }

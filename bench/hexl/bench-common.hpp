@@ -3,10 +3,8 @@
 //
 // Shared helpers for the HEXL microbenchmarks.
 //
-// These benches use ONLY the public HEXL API, so the identical source builds
-// against upstream Intel HEXL (make HEXL_IMPL=intel) on x86 and against this
-// port on RISC-V. That is the cross-architecture comparison: same code, same
-// parameters, same harness, only the library and the CPU differ.
+// These benches use ONLY the public HEXL API (the same API upstream Intel HEXL
+// exposes), so the numbers are comparable with upstream's own benchmark suite.
 //
 // Parameters follow upstream HEXL's own benchmark suite (n = 1024/4096/16384,
 // 45-bit NTT primes) plus the moduli the IPCEI protocol actually uses:

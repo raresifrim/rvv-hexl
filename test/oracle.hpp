@@ -3,8 +3,8 @@
 //
 // Independent ground truth for the tests. Deliberately naive and written only
 // with unsigned __int128 arithmetic: nothing here calls into HEXL, so a bug in
-// the library cannot hide by also being in the oracle. Validated by running the
-// whole test suite against upstream Intel HEXL (make HEXL_IMPL=intel).
+// the library cannot hide by also being in the oracle. (Validated earlier by
+// running the whole test suite against upstream Intel HEXL.)
 
 #pragma once
 

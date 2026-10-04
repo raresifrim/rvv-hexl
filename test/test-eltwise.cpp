@@ -124,11 +124,12 @@ void RunAddSub(bool add) {
 template <typename Word>
 void RunMultMod() {
   for (uint64_t imf : {1ULL, 2ULL, 4ULL}) {
-    // 64-bit: imf*q < 2^63. 32-bit: imf*q <= 2^32.
+    // 64-bit: q < 2^61 (the pre-shift Barrett; same bound as EltwiseFMAMod),
+    // which also keeps imf*q < 2^63. 32-bit: imf*q <= 2^32.
     auto ok = [imf](uint64_t q) {
       // (written as a division: imf * q itself can wrap past 2^64)
       return Is32<Word>() ? q <= (1ULL << 32) / imf
-                          : q < (1ULL << 62) && imf * q < (1ULL << 63);
+                          : q < (1ULL << 61) && imf * q < (1ULL << 63);
     };
     for (uint64_t q : Moduli(ok)) {
       for (size_t n : O::EltwiseSizes()) {

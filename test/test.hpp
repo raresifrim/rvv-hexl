@@ -10,9 +10,8 @@
 // "[rvv-hexl TODO]") is reported as TODO, not FAIL, together with the name of
 // the stub it hit. So the test binary is also the port's progress report.
 //
-// Tests only use the PUBLIC HEXL API, so the same sources also build against
-// upstream Intel HEXL (make HEXL_IMPL=intel), which is how the oracles in
-// oracle.hpp were themselves validated.
+// Tests only use the PUBLIC HEXL API (the same API upstream Intel HEXL exposes;
+// running them against upstream is how the oracles in oracle.hpp were validated).
 
 #pragma once
 

@@ -104,7 +104,9 @@ uint64_t ReverseBits(uint64_t x, uint64_t bit_width);
 /// gcd(x, modulus) == 1 (modulus need not be prime: use extended Euclid).
 uint64_t InverseMod(uint64_t x, uint64_t modulus);
 
-/// @brief Returns (x * y) mod modulus. Assumes x, y < modulus.
+/// @brief Returns (x * y) mod modulus. Assumes x, y < modulus < 2^61.
+/// (rvv-hexl computes it with upstream HEXL's pre-shift Barrett, exact for
+/// moduli of up to 61 bits; OpenFHE uses <= 60 bits, SEAL <= 61.)
 uint64_t MultiplyMod(uint64_t x, uint64_t y, uint64_t modulus);
 
 /// @brief Returns (x * y) mod modulus, Shoup style.

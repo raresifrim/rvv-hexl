@@ -2,8 +2,9 @@
 # Included by the top-level Makefile. Every variable can be overridden on the
 # command line:  make ISA=scalar BUILD=debug CXX=g++-15 ...
 #
-# Kept compatible with GNU make 3.81 (the macOS default) so the library and the
-# tests can also be developed on a laptop; the real target is Linux/riscv64.
+# Builds for riscv64 only: natively on the board, or cross-compiled with
+# CROSS=riscv64-...- (e.g. spike + pk on a laptop). Kept compatible with GNU make
+# 3.81 (the macOS default) so the cross build also works from a Mac.
 
 ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
 
@@ -46,8 +47,7 @@ BAREMETAL := $(if $(findstring -elf,$(TARGET_TRIPLE)),1,)
 #   scalar  RISC-V WITHOUT V: exactly the rvv -march minus V (and zv*). The
 #           library is pure native C++ and the compiler cannot auto-vectorise.
 #           This is the "base RISC-V (no RVV)" data point.
-#   native  non-RISC-V hosts (x86-64/arm64): -march/-mcpu=native, for
-#           cross-architecture comparison runs and laptop development.
+# There is no non-RISC-V build: on another host, cross-compile with CROSS=.
 #
 # On RISC-V the choice is checked, not assumed (mk/detect-riscv.sh):
 #   * the board (native builds): every hart must report V in /proc/cpuinfo, and
@@ -88,21 +88,7 @@ ifeq ($(TARGET_ARCH),riscv64)
     endif
   endif
 else
-  ISA ?= native
-  ifeq ($(filter $(TARGET_ARCH),arm64 aarch64),)
-    NATIVE_FLAG := -march=native
-  else
-    NATIVE_FLAG := -mcpu=native
-  endif
-  ifeq ($(ISA),native)
-    ISA_FLAGS := $(NATIVE_FLAG)
-  else ifeq ($(ISA),scalar)
-    # Non-RISC-V "scalar" = same ISA with the auto-vectorisers off. Placed after
-    # -O3 on the command line (see CXXFLAGS below) or clang silently re-enables them.
-    ISA_FLAGS := $(NATIVE_FLAG) -fno-tree-vectorize -fno-tree-slp-vectorize
-  else
-    $(error ISA=$(ISA) is only valid on riscv64; use native or scalar here)
-  endif
+  $(error rvv-hexl builds for riscv64 only (this target is $(TARGET_ARCH)). On another host, cross-compile: make CROSS=riscv64-unknown-elf- ... (README, "Develop on a laptop with spike"))
 endif
 
 # ---------------------------------------------------------------------------
@@ -131,17 +117,7 @@ ifneq ($(SANITIZE),)
   LDFLAGS   += -fsanitize=$(SANITIZE)
 endif
 
-# ---------------------------------------------------------------------------
-# Which HEXL the tests/benches link against
-# ---------------------------------------------------------------------------
-#   rvv    this repository (default)
-#   intel  an installed upstream Intel HEXL at INTEL_HEXL_PREFIX: builds the SAME
-#          test and benchmark sources against it (e.g. on the AMD AVX-512 box),
-#          so cross-architecture numbers come from identical code.
-HEXL_IMPL ?= rvv
-INTEL_HEXL_PREFIX ?= /usr/local
-
-VARIANT  := $(if $(filter intel,$(HEXL_IMPL)),intel-,)$(ISA)-$(BUILD)
+VARIANT  := $(ISA)-$(BUILD)
 BUILDDIR := $(ROOT)/build/$(VARIANT)
 OBJDIR   := $(BUILDDIR)/obj
 LIBDIR   := $(BUILDDIR)/lib

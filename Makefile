@@ -8,7 +8,6 @@
 #   make rvv-hexl-install     headers, libs, CMake + pkg-config files -> PREFIX     alias: install
 #       ISA=rvv|scalar (auto-detected on RISC-V, see mk/detect-riscv.sh)  BUILD=release|debug  PREFIX=...
 #       HEXL_SHARED_LIB / HEXL_TESTING / HEXL_BENCHMARK=ON|OFF   (upstream option names)
-#       HEXL_IMPL=intel INTEL_HEXL_PREFIX=...   same tests/benches against upstream Intel HEXL
 #
 # ---- OpenFHE ------------------------------------------------------------------
 #   make openfhe              build OpenFHE v1.5.1
@@ -61,8 +60,8 @@ LIB_SO   := $(LIBDIR)/libhexl.$(SHLIB_EXT)
 LIB_CPPFLAGS := -Iinclude -Isrc -DHEXL_BUILD_FLAGS='"$(strip $(OPT_FLAGS) $(ISA_FLAGS))"'
 
 TEST_SRCS := $(sort $(wildcard test/*.cpp))
-# test-rvv-util.cpp checks internal helpers (src/util/rvv-util.hpp): rvv-hexl only
-TEST_CPPFLAGS := $(if $(filter rvv,$(HEXL_IMPL)),-Isrc,)
+# test-rvv-util.cpp checks internal helpers (src/util/rvv-util.hpp)
+TEST_CPPFLAGS := -Isrc
 TEST_OBJS := $(patsubst test/%.cpp,$(OBJDIR)/test/%.o,$(TEST_SRCS))
 TEST_BIN  := $(BINDIR)/hexl-tests
 STRICT    ?=
@@ -76,32 +75,19 @@ BENCH_HEXL_BIN  := $(BINDIR)/bench-hexl
 # different -march after `make reconfigure` or on another board): make itself
 # only compares timestamps. The stamp is rewritten only when its content changes.
 FLAGS_STAMP   := $(BUILDDIR)/.build-flags
-CURRENT_FLAGS := $(CXX) $(CXXFLAGS) $(HEXL_IMPL) $(INTEL_HEXL_PREFIX)
+CURRENT_FLAGS := $(CXX) $(CXXFLAGS)
 FLAGS_CHANGED := $(shell mkdir -p $(BUILDDIR) && \
   if [ "$$(cat $(FLAGS_STAMP) 2>/dev/null)" != "$(CURRENT_FLAGS)" ]; then \
     echo "$(CURRENT_FLAGS)" > $(FLAGS_STAMP); echo yes; fi)
 
-ifeq ($(HEXL_IMPL),rvv)
-  HEXL_CPPFLAGS := -Iinclude
-  HEXL_DEPS     := $(LIB_A)
-  HEXL_LDLIBS   := $(LIB_A)
-  LIB_TARGETS   := $(LIB_A) $(if $(filter 1,$(SHARED)),$(LIB_SO))
-else ifeq ($(HEXL_IMPL),intel)
-  HEXL_CPPFLAGS := -I$(INTEL_HEXL_PREFIX)/include
-  HEXL_DEPS     :=
-  HEXL_LDLIBS   := -L$(INTEL_HEXL_PREFIX)/lib -L$(INTEL_HEXL_PREFIX)/lib64 \
-                   $(call RPATH,$(INTEL_HEXL_PREFIX)/lib) -lhexl
-  LIB_TARGETS   :=
-else
-  $(error HEXL_IMPL must be rvv or intel)
-endif
+HEXL_CPPFLAGS := -Iinclude
+HEXL_DEPS     := $(LIB_A)
+HEXL_LDLIBS   := $(LIB_A)
+LIB_TARGETS   := $(LIB_A) $(if $(filter 1,$(SHARED)),$(LIB_SO))
 
 rvv-hexl: $(LIB_TARGETS) \
           $(if $(filter ON,$(call onoff,$(HEXL_TESTING))),$(TEST_BIN)) \
           $(if $(filter ON,$(call onoff,$(HEXL_BENCHMARK))),$(BENCH_HEXL_BIN))
-ifeq ($(HEXL_IMPL),intel)
-	@echo "HEXL_IMPL=intel: library comes from $(INTEL_HEXL_PREFIX)"
-endif
 
 $(OBJDIR)/lib/%.o: src/%.cpp $(FLAGS_STAMP)
 	@mkdir -p $(dir $@)
@@ -130,7 +116,7 @@ $(TEST_BIN): $(TEST_OBJS) $(HEXL_DEPS)
 rvv-hexl-test: $(TEST_BIN)
 	@echo "==> $(VARIANT): default dispatch"
 	$(RUN) $(TEST_BIN) $(TEST_ARGS)
-ifeq ($(ISA)$(HEXL_IMPL)$(RUN),rvvrvv)
+ifeq ($(ISA)$(RUN),rvv)
 	@echo "==> $(VARIANT): HEXL_DISABLE_RVV=1 (native path)"
 	HEXL_DISABLE_RVV=1 $(RUN) $(TEST_BIN) $(TEST_ARGS)
 endif
@@ -186,9 +172,6 @@ endif
 HEXL_VERSION := 1.2.6
 
 rvv-hexl-install: $(LIB_TARGETS)
-ifneq ($(HEXL_IMPL),rvv)
-	$(error rvv-hexl-install needs HEXL_IMPL=rvv)
-endif
 	@mkdir -p $(PREFIX)/include $(PREFIX)/lib/cmake/hexl-$(HEXL_VERSION) $(PREFIX)/lib/pkgconfig
 	cp -R include/hexl $(PREFIX)/include/
 	cp $(LIB_A) $(PREFIX)/lib/
@@ -349,7 +332,6 @@ ifeq ($(TARGET_ARCH),riscv64)
 	@echo "  board         : $(if $(RVV_DETECT_HOST),$(RVV_DETECT_HOST),n/a (cross build))"
 endif
 	@echo "--- rvv-hexl"
-	@echo "HEXL_IMPL       : $(HEXL_IMPL)$(if $(filter intel,$(HEXL_IMPL)), ($(INTEL_HEXL_PREFIX)))"
 	@echo "build dir       : $(BUILDDIR)"
 	@echo "install PREFIX  : $(PREFIX)"
 	@echo "HEXL_SHARED_LIB : $(call onoff,$(HEXL_SHARED_LIB))   HEXL_TESTING: $(call onoff,$(HEXL_TESTING))   HEXL_BENCHMARK: $(call onoff,$(HEXL_BENCHMARK))"
