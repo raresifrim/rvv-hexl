@@ -60,7 +60,7 @@ LIB_SO   := $(LIBDIR)/libhexl.$(SHLIB_EXT)
 LIB_CPPFLAGS := -Iinclude -Isrc -DHEXL_BUILD_FLAGS='"$(strip $(OPT_FLAGS) $(ISA_FLAGS))"'
 
 TEST_SRCS := $(sort $(wildcard test/*.cpp))
-# test-rvv-util.cpp checks internal helpers (src/util/rvv-util.hpp)
+# tests and bench-lanes.cpp use internal headers (src/util/rvv-util.hpp, the eltwise kernels)
 TEST_CPPFLAGS := -Isrc
 TEST_OBJS := $(patsubst test/%.cpp,$(OBJDIR)/test/%.o,$(TEST_SRCS))
 TEST_BIN  := $(BINDIR)/hexl-tests
@@ -126,7 +126,7 @@ test: rvv-hexl-test
 # ---- HEXL microbenchmarks (Google Benchmark) -------------------------------
 $(OBJDIR)/bench/hexl/%.o: bench/hexl/%.cpp $(FLAGS_STAMP)
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) $(HEXL_CPPFLAGS) $(GBENCH_CXXFLAGS) -Itest -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(HEXL_CPPFLAGS) $(TEST_CPPFLAGS) $(GBENCH_CXXFLAGS) -Itest -c $< -o $@
 
 $(BENCH_HEXL_BIN): $(BENCH_HEXL_OBJS) $(HEXL_DEPS)
 	@mkdir -p $(dir $@)

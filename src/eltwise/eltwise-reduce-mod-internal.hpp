@@ -14,6 +14,7 @@
 #include <stdint.h>
 
 #include "util/cpu-features.hpp"
+#include "util/rvv-config.hpp"  // lane types (empty without RVV)
 
 namespace intel {
 namespace hexl {
@@ -27,7 +28,7 @@ void EltwiseReduceModNative(Word* result, const Word* operand, uint64_t n, uint6
 #ifdef HEXL_HAS_RVV
 /// @brief RVV variant, same contract. Word = uint32_t only reaches it with
 /// modulus < 2^30 (where a modulus applies).
-template <typename Word>
+template <typename Word, class V = rvv::LaneFor<Word, rvv::cfg::ReduceMod64, rvv::cfg::ReduceMod32>>
 void EltwiseReduceModRVV(Word* result, const Word* operand, uint64_t n, uint64_t modulus, uint64_t input_mod_factor, uint64_t output_mod_factor);
 #endif
 

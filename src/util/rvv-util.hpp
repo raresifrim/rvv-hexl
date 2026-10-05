@@ -27,8 +27,9 @@
 // All arithmetic helpers below (add/sub, ReduceFromTwice, BarrettReduce, the
 // Barrett and Shoup multiplies) are LMUL-generic templates: they use the
 // overloaded intrinsics (__riscv_vadd(a, b, vl) etc.), which take the SEW/LMUL
-// from the argument type, so the same helper serves u64m1 and u64m4. Only the
-// kernel's vsetvl / vle / vse carry an explicit LMUL suffix. The e64 helpers
+// from the argument type, so the same helper serves u64m1 and u64m4. The
+// kernels name their lane type V once (util/rvv-config.hpp) and use SetVl<V> /
+// Load<V> / Store below, so no kernel intrinsic carries an LMUL suffix. The e64 helpers
 // reject e32 vectors at compile time and vice versa. Load32 takes its lane
 // type as a template argument (Load32<vuint32m4_t>(p, vl)), since a pointer
 // carries no LMUL; Store32 deduces it from the vector.
@@ -68,6 +69,81 @@ template <class V>
 constexpr bool IsE64 = std::is_same_v<ElemT<V>, uint64_t>;
 template <class V>
 constexpr bool IsE32 = std::is_same_v<ElemT<V>, uint32_t>;
+
+// ---------------------------------------------------------------------------
+// Type-driven vsetvl / load / store. A kernel names its lane type V once (the
+// defaults are in util/rvv-config.hpp) and these pick the intrinsic with V's
+// SEW and LMUL; everything else uses the overloaded intrinsics, so moving a
+// kernel to another LMUL is a change of V only.
+// ---------------------------------------------------------------------------
+
+/// @brief vsetvl for lane type V: min(n, VLMAX of V).
+template <class V>
+inline size_t SetVl(size_t n) {
+  if constexpr (std::is_same_v<V, vuint64m1_t>) {
+    return __riscv_vsetvl_e64m1(n);
+  } else if constexpr (std::is_same_v<V, vuint64m2_t>) {
+    return __riscv_vsetvl_e64m2(n);
+  } else if constexpr (std::is_same_v<V, vuint64m4_t>) {
+    return __riscv_vsetvl_e64m4(n);
+  } else if constexpr (std::is_same_v<V, vuint64m8_t>) {
+    return __riscv_vsetvl_e64m8(n);
+  } else if constexpr (std::is_same_v<V, vuint32mf2_t>) {
+    return __riscv_vsetvl_e32mf2(n);
+  } else if constexpr (std::is_same_v<V, vuint32m1_t>) {
+    return __riscv_vsetvl_e32m1(n);
+  } else if constexpr (std::is_same_v<V, vuint32m2_t>) {
+    return __riscv_vsetvl_e32m2(n);
+  } else if constexpr (std::is_same_v<V, vuint32m4_t>) {
+    return __riscv_vsetvl_e32m4(n);
+  } else {
+    static_assert(std::is_same_v<V, vuint32m8_t>, "rvv::SetVl<V>: V must be vuint64m1_t..m8_t or vuint32mf2_t..m8_t");
+    return __riscv_vsetvl_e32m8(n);
+  }
+}
+
+/// @brief Unit-stride load of vl elements as lane type V (e64 from uint64_t).
+template <class V>
+inline V Load(const uint64_t* p, size_t vl) {
+  static_assert(IsE64<V>, "rvv::Load<V>(const uint64_t*): V must be vuint64m1_t..m8_t");
+  if constexpr (std::is_same_v<V, vuint64m1_t>) {
+    return __riscv_vle64_v_u64m1(p, vl);
+  } else if constexpr (std::is_same_v<V, vuint64m2_t>) {
+    return __riscv_vle64_v_u64m2(p, vl);
+  } else if constexpr (std::is_same_v<V, vuint64m4_t>) {
+    return __riscv_vle64_v_u64m4(p, vl);
+  } else {
+    return __riscv_vle64_v_u64m8(p, vl);
+  }
+}
+/// @brief Unit-stride load of vl elements as lane type V (e32 from uint32_t).
+template <class V>
+inline V Load(const uint32_t* p, size_t vl) {
+  static_assert(IsE32<V>, "rvv::Load<V>(const uint32_t*): V must be vuint32mf2_t..m8_t");
+  if constexpr (std::is_same_v<V, vuint32mf2_t>) {
+    return __riscv_vle32_v_u32mf2(p, vl);
+  } else if constexpr (std::is_same_v<V, vuint32m1_t>) {
+    return __riscv_vle32_v_u32m1(p, vl);
+  } else if constexpr (std::is_same_v<V, vuint32m2_t>) {
+    return __riscv_vle32_v_u32m2(p, vl);
+  } else if constexpr (std::is_same_v<V, vuint32m4_t>) {
+    return __riscv_vle32_v_u32m4(p, vl);
+  } else {
+    return __riscv_vle32_v_u32m8(p, vl);
+  }
+}
+
+/// @brief Unit-stride store of vl elements (lane type deduced from v).
+template <class V>
+inline void Store(uint64_t* p, V v, size_t vl) {
+  static_assert(IsE64<V>, "rvv::Store(uint64_t*, v): v must be an e64 vector");
+  __riscv_vse64(p, v, vl);
+}
+template <class V>
+inline void Store(uint32_t* p, V v, size_t vl) {
+  static_assert(IsE32<V>, "rvv::Store(uint32_t*, v): v must be an e32 vector");
+  __riscv_vse32(p, v, vl);
+}
 
 // ---------------------------------------------------------------------------
 // e64 path (any modulus up to 62 bits). V = vuint64m1_t ... vuint64m8_t.

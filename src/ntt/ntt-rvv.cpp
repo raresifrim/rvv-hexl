@@ -21,7 +21,8 @@
 // Parameters: SEW=e32 whenever q < 2^30; LMUL m4 where a stage's butterfly
 // span allows it (the Shoup multiply alone measured 1.5-2.4x over m1 on the
 // X100), never below mf2. m8 leaves 4 register groups: a butterfly keeps more
-// values live, so expect spills there.
+// values live, so expect spills there. Lane types: rvv::cfg::Ntt64 / Ntt32 in
+// util/rvv-config.hpp, with rvv::SetVl<V> / rvv::Load<V> / rvv::Store.
 
 #include "ntt/ntt-internal.hpp"
 

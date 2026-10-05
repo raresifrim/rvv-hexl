@@ -18,23 +18,26 @@
 namespace intel {
 namespace hexl {
 
-template <typename Word, int InputModFactor>
+template <typename Word, int InputModFactor, class V>
 void EltwiseMultModRVV32(Word* result, const Word* operand1, const Word* operand2, uint64_t n, uint64_t modulus) {
   // TODO(port-rvv): the binfhe case (q ~ 2^27..2^28), written once for both
-  //   storage types: vl = __riscv_vsetvl_e32m4(n) per strip (m4: MulModBarrett32
-  //   measured 2.2x faster than at m1 on the X100);
-  //   rvv::Load32<vuint32m4_t>(operand1, vl) / (operand2, vl) (the overload
-  //   picks narrow-from-u64m8 or plain vle32 from Word); reduce inputs to [0, q)
+  //   storage types, at lane type V (default rvv::cfg::MultMod32 = u32m4;
+  //   MulModBarrett32 measured 2.2x faster at m4 than at m1 on the X100):
+  //   vl = rvv::SetVl<V>(n) per strip; rvv::Load32<V>(operand1, vl) / (operand2,
+  //   vl) (the overload picks narrow-from-u64 at twice the LMUL, or plain vle32,
+  //   from Word); reduce inputs to [0, q)
   //   if InputModFactor > 1; rvv::MulModBarrett32; rvv::Store32(result, ..).
   //   There is no fixed multiplier, so Shoup does not apply.
   HEXL_NOT_IMPLEMENTED();
 }
 
-template <int InputModFactor>
+template <int InputModFactor, class V>
 void EltwiseMultModRVV64(uint64_t* result, const uint64_t* operand1,
                          const uint64_t* operand2, uint64_t n,
                          uint64_t modulus) {
-  // TODO(port-rvv): the BFV case (60-bit primes), e64/m4, rvv::MulModBarrett.
+  // TODO(port-rvv): the BFV case (60-bit primes), lane type V (default
+  //   rvv::cfg::MultMod64 = u64m4): rvv::SetVl<V>, rvv::Load<V>,
+  //   rvv::MulModBarrett, rvv::Store.
   //   Expect ~1 element/cycle from the e64 multiplier on K3: compare against
   //   the native path (HEXL_DISABLE_RVV=1) before assuming RVV wins here.
   HEXL_NOT_IMPLEMENTED();

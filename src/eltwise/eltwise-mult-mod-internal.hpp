@@ -14,6 +14,7 @@
 #include <stdint.h>
 
 #include "util/cpu-features.hpp"
+#include "util/rvv-config.hpp"  // lane types (empty without RVV)
 
 namespace intel {
 namespace hexl {
@@ -28,12 +29,12 @@ void EltwiseMultModNative(Word* result, const Word* operand1, const Word* operan
 /// @brief RVV, 32-bit lanes, modulus < kMaxModulusRVV32 (2^30), so every
 /// input fits in 32 bits. Word = uint64_t narrows on load / widens on store
 /// (rvv::Load32 / rvv::Store32); Word = uint32_t loads and stores directly.
-template <typename Word, int InputModFactor>
+template <typename Word, int InputModFactor, class V = rvv::cfg::MultMod32>
 void EltwiseMultModRVV32(Word* result, const Word* operand1, const Word* operand2, uint64_t n, uint64_t modulus);
 
 /// @brief RVV, 64-bit lanes: every other modulus (BFV's 60-bit primes).
 /// 64-bit storage only.
-template <int InputModFactor>
+template <int InputModFactor, class V = rvv::cfg::MultMod64>
 void EltwiseMultModRVV64(uint64_t* result, const uint64_t* operand1,
                          const uint64_t* operand2, uint64_t n,
                          uint64_t modulus);

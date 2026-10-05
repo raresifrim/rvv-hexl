@@ -148,16 +148,22 @@ src/eltwise/eltwise-<op>-rvv.cpp       <Op>RVV (or RVV32/RVV64) kernel(s)       
 ```
 
 Every kernel is a **template on the storage word** (`Word = uint64_t` for the upstream API,
-`uint32_t` for the 32-bit extension). You write one body; where the two widths want different
-code, branch at compile time:
+`uint32_t` for the 32-bit extension) **and on its lane type `V`** (SEW + LMUL), whose default
+comes from `src/util/rvv-config.hpp` (m4). The loop names `V` only through `rvv::SetVl<V>`,
+`rvv::Load<V>` and `rvv::Store`, and uses the overloaded intrinsics for everything else, so the
+same body runs at any LMUL. Where the two widths want different code, branch at compile time:
 
 ```cpp
-template <typename Word>
+template <typename Word, class V>   // default V declared in eltwise-add-mod-internal.hpp
 void EltwiseAddModRVV(Word* result, const Word* a, const Word* b, uint64_t n, uint64_t q) {
-  if constexpr (std::is_same_v<Word, uint64_t>) {
-    // e64/m4 loop
-  } else {
-    // e32/m4 loop (q < 2^30 here)
+  for (size_t vl; n > 0; n -= vl, a += vl, b += vl, result += vl) {
+    vl = rvv::SetVl<V>(n);
+    V x = rvv::Load<V>(a, vl), y = rvv::Load<V>(b, vl);
+    if constexpr (std::is_same_v<Word, uint64_t>) {
+      rvv::Store(result, rvv::AddMod(x, y, q, vl), vl);                           // e64 lanes
+    } else {
+      rvv::Store(result, rvv::AddMod32(x, y, static_cast<uint32_t>(q), vl), vl);  // e32, q < 2^30
+    }
   }
 }
 ```
@@ -258,6 +264,7 @@ pattern, and 8 threads sharing one object.
 |---|---|---|
 | `cpu-features.hpp/.cpp` | `HEXL_HAS_RVV` (compile time: TU built with V), `has_rvv` (runtime: `AT_HWCAP` has V and `HEXL_DISABLE_RVV` unset), `CurrentVLenBits()`, `kMaxModulusRVV32` | done |
 | `rvv-util.hpp` | the RVV vocabulary: `AddMod`, `SubMod`, `ReduceFromTwice`, `BarrettReduce` (any 64-bit x mod q, factor `MultiplyFactor(1, 64, q)`), `MulModShoupLazy`, `MulModBarrett` (e64) and `Load32`, `Store32` (overloaded on `uint64_t*` = narrow/widen and `uint32_t*` = plain vle32/vse32, which is what lets one e32 kernel serve both storage widths), `AddMod32`, `SubMod32`, `BarrettReduce32` (factor `MultiplyFactor(1, 32, q)`), `MulModShoupLazy32`, `MulModBarrett32` (e32). All helpers are LMUL-generic templates: the arithmetic ones deduce the LMUL from their arguments; `Load32<V32>(p, vl)` takes the lane type as a template argument (default `vuint32m1_t`) and `Store32` deduces it | **TODO**: write these first, then compose kernels from them. Each helper has its own test (`hexl-tests RvvUtil`, `test/test-rvv-util.cpp`), so it can be checked before any kernel uses it. The two Barrett helpers' factor convention is defined at the top of that file (`Barrett64Factors`, `Barrett32Factor`): edit it if you choose another. Change the signatures if a better decomposition emerges (and the matching test) |
+| `rvv-config.hpp` | the lane type (SEW + LMUL) of every RVV kernel (`rvv::cfg::AddMod64`, `…32`, `MultMod64`, `Ntt64`, …), m4 by default; each kernel takes it as its `V` template parameter | done: one line moves a kernel to another LMUL; `RvvLanes` tests and `BM_Lanes` benchmarks cover m1-m8 |
 | `not-implemented.hpp/.cpp` | `HEXL_NOT_IMPLEMENTED()` | done |
 | `util-internal.hpp` | scalar `Compare(CMPINT, a, b)` for the native Cmp kernels | done |
 | `aligned-allocator.cpp` | the global `mallocStrategy` | done |
@@ -313,10 +320,17 @@ Intrinsics reference: `docs/rvv_intrinsics/` (`make rvv-intrinsics-doc`; see the
   e64 7.6 → 5.2; m4 is the best LMUL there. m8 is slower than m4 on the X100; on the A100 it is
   5-20% faster, but it leaves only 4 register groups, so kernels that keep more values live (NTT
   butterflies, MultMod with input reduction) will spill. All arithmetic helpers in
-  `rvv-util.hpp` are LMUL-generic templates (overloaded intrinsics), so only the kernel's
-  `vsetvl`/`vle`/`vse` name the LMUL. Fractional LMUL only exposes the low part of a register
+  `rvv-util.hpp` are LMUL-generic templates (overloaded intrinsics), and the kernels name their
+  lane type once (`rvv-config.hpp`) through `rvv::SetVl<V>` / `rvv::Load<V>` / `rvv::Store`. Fractional LMUL only exposes the low part of a register
   (verified on silicon). **mf2 is the smallest portable
   one**: X100 returns vl=0 and traps on e32/mf4 and mf8.
+* **Lane types per kernel.** `src/util/rvv-config.hpp` holds one lane type per kernel
+  (`rvv::cfg::AddMod64`, `…32`, …), m4 by default; each kernel is instantiated at m1/m2/m4/m8,
+  `hexl-tests RvvLanes` checks every instantiation and `bench-hexl --benchmark_filter=BM_Lanes`
+  times them. Measured on the finished kernels (n = 4096): m4 is the best LMUL on the X100
+  (m8 within 3% only for CmpAdd/CmpSubMod); the A100 is 7-35% faster at m8 on every kernel
+  (e.g. AddMod u64 1.59 → 1.12 cycles/element). A per-cluster choice therefore needs a runtime
+  VLEN dispatch in the entry points between two instantiations (VLEN 256 → m4, 1024 → m8).
 * **32-bit compute, either storage.** With 64-bit storage (`n64-rvvhexl`), load `e64,m8` and
   narrow (`vncvt.x.x.w`) to `e32,m4` (`rvv::Load32<vuint32m4_t>`), and widen (`vzext.vf2`)
   before the store. That pair reaches about 2× the load bandwidth of `e64,m2` → `e32,m1` on

@@ -14,6 +14,7 @@
 #include <stdint.h>
 
 #include "util/cpu-features.hpp"
+#include "util/rvv-config.hpp"  // lane types (empty without RVV)
 
 namespace intel {
 namespace hexl {
@@ -27,11 +28,11 @@ void EltwiseFMAModNative(Word* result, const Word* arg1, uint64_t arg2, const Wo
 #ifdef HEXL_HAS_RVV
 /// @brief RVV, 32-bit lanes: modulus < kMaxModulusRVV32 and every input fits
 /// in 32 bits. Word = uint64_t or uint32_t storage (rvv::Load32 / Store32).
-template <typename Word, int InputModFactor>
+template <typename Word, int InputModFactor, class V = rvv::cfg::FMAMod32>
 void EltwiseFMAModRVV32(Word* result, const Word* arg1, uint64_t arg2, const Word* arg3, uint64_t n, uint64_t modulus);
 
 /// @brief RVV, 64-bit lanes, 64-bit storage only.
-template <int InputModFactor>
+template <int InputModFactor, class V = rvv::cfg::FMAMod64>
 void EltwiseFMAModRVV64(uint64_t* result, const uint64_t* arg1, uint64_t arg2,
                         const uint64_t* arg3, uint64_t n, uint64_t modulus);
 #endif

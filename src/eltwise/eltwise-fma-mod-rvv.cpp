@@ -18,21 +18,23 @@
 namespace intel {
 namespace hexl {
 
-template <typename Word, int InputModFactor>
+template <typename Word, int InputModFactor, class V>
 void EltwiseFMAModRVV32(Word* result, const Word* arg1, uint64_t arg2, const Word* arg3, uint64_t n, uint64_t modulus) {
   // TODO(port-rvv): scalar multiplier => Shoup: precompute
   //   w = arg2 mod q and w_precon = MultiplyFactor(w, 32, q).BarrettFactor()
-  //   once, then per strip rvv::Load32 (either storage), rvv::MulModShoupLazy32
+  //   once, then per strip (lane type V, default rvv::cfg::FMAMod32 = u32m4;
+  //   vl = rvv::SetVl<V>(n)) rvv::Load32<V> (either storage), rvv::MulModShoupLazy32
   //   (.vx forms), reduce [0,2q) -> [0,q), add arg3 with rvv::AddMod32,
   //   rvv::Store32. Split the arg3 == nullptr case into its own loop rather
   //   than testing it per strip.
   HEXL_NOT_IMPLEMENTED();
 }
 
-template <int InputModFactor>
+template <int InputModFactor, class V>
 void EltwiseFMAModRVV64(uint64_t* result, const uint64_t* arg1, uint64_t arg2,
                         const uint64_t* arg3, uint64_t n, uint64_t modulus) {
-  // TODO(port-rvv): as above with 64-bit lanes and a 64-bit Shoup factor.
+  // TODO(port-rvv): as above with 64-bit lanes and a 64-bit Shoup factor (lane
+  //   type V, default rvv::cfg::FMAMod64: rvv::SetVl<V>, rvv::Load<V>, rvv::Store).
   HEXL_NOT_IMPLEMENTED();
 }
 

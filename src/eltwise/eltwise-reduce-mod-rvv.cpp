@@ -19,7 +19,7 @@
 namespace intel {
 namespace hexl {
 
-template <typename Word>
+template <typename Word, class V>
 void EltwiseReduceModRVV(Word* result, const Word* operand, uint64_t n, uint64_t modulus, uint64_t input_mod_factor, uint64_t output_mod_factor) {
   // TODO(port-rvv): the 2q/4q cases are vminu chains (rvv::ReduceFromTwice);
   //   the "input_mod_factor == modulus" case is a vectorised Barrett:
@@ -28,6 +28,8 @@ void EltwiseReduceModRVV(Word* result, const Word* operand, uint64_t n, uint64_t
   //   rvv::BarrettReduce32<...> (q_barr = MultiplyFactor(1, 32, q).BarrettFactor())
   //   for Word = uint32_t (q < 2^30 there). Compute q_barr once, before the
   //   loop. Hoist the branch on the mod factors out of the loop.
+  //   Lane type V (default rvv::cfg::ReduceMod64 / ReduceMod32, m4):
+  //   vl = rvv::SetVl<V>(n), rvv::Load<V>, rvv::Store.
   HEXL_NOT_IMPLEMENTED();
 }
 
