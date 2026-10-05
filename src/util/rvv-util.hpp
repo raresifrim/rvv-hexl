@@ -202,7 +202,7 @@ inline V SubScalarMod(V a, uint64_t b, uint64_t q, size_t vl) {
 /// @brief Maps x in [0, 2q) to [0, q) (the "vminu" conditional subtract).
 template <class V>
 inline V ReduceFromTwice(V x, uint64_t q, size_t vl) {
-	static_assert(IsE64<V>, "rvv::ReduceFromTwice takes e64 vectors");
+	static_assert(IsE64<V>, "rvv::ReduceFromTwice takes e64 vectors; use ReduceFromTwice32 for e32");
 	return __riscv_vminu(x, __riscv_vsub(x, q, vl), vl);
 }
 
@@ -398,6 +398,13 @@ inline V SubScalarMod32(V a, uint32_t b, uint32_t q, size_t vl) {
 	V remainder = __riscv_vadd(diff, q, vl);
 	//return the minimum between the diff and the modulus sum
 	return __riscv_vminu(diff, remainder, vl);
+}
+
+/// @brief Maps x in [0, 2q) to [0, q), 32-bit lanes (the "vminu" conditional subtract).
+template <class V>
+inline V ReduceFromTwice32(V x, uint32_t q, size_t vl) {
+	static_assert(IsE32<V>, "rvv::ReduceFromTwice32 takes e32 vectors; use ReduceFromTwice for e64");
+	return __riscv_vminu(x, __riscv_vsub(x, q, vl), vl);
 }
 
 /// @brief x mod q for ANY 32-bit x (Barrett reduction), 32-bit lanes, q >= 2.

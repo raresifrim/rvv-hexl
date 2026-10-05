@@ -4,6 +4,9 @@
 
 #include "hexl/eltwise/eltwise-mult-mod.hpp"
 
+#include <algorithm>
+#include <type_traits>
+
 #include "eltwise/eltwise-mult-mod-internal.hpp"
 #include "hexl/logging/logging.hpp"
 #include "hexl/number-theory/number-theory.hpp"
@@ -105,22 +108,39 @@ void EltwiseMultMod(uint32_t* result, const uint32_t* operand1,
 }
 
 // ---------------------------------------------------------------------------
-// Native (scalar) kernel.  TODO(port)
+// Native (scalar) kernel.
 // ---------------------------------------------------------------------------
 
 template <typename Word, int InputModFactor>
 void EltwiseMultModNative(Word* result, const Word* operand1, const Word* operand2, uint64_t n, uint64_t modulus) {
-  // TODO(port): result[i] = (operand1[i] * operand2[i]) mod modulus, in [0, q).
-  //   Inputs are NOT reduced: first bring each into [0, q) with
-  //   ReduceMod<InputModFactor>(x, q, &twice_q) (number-theory.hpp), or fold
-  //   the input range into the Barrett bound instead.
-  //   Barrett with a precomputed floor(2^(2k)/q) (k = bit length of the
-  //   largest input) avoids the 128-bit division of a naive (a*b) % q, which
-  //   on RV64 is a libgcc __umodti3 call: ~100x slower than mul+mulhu.
-  //   Word = uint32_t: the product fits in uint64_t, so a 64-bit Barrett (or
-  //   even a single 64-bit % for a first version) is enough.
-  //   Upstream's EltwiseMultModNative is the reference algorithm.
-  HEXL_NOT_IMPLEMENTED();
+  // result[i] = (operand1[i] * operand2[i]) mod modulus, in [0, q).
+  // Inputs are NOT reduced: first bring each into [0, q) with branch-free
+  constexpr bool kWord32 = std::is_same_v<Word, uint32_t>;
+  const uint64_t shift = kWord32 ? 0 : MSB(modulus) - 1;
+  const uint64_t mu = kWord32 ? 0 : MultiplyFactor(uint64_t{1} << shift, 64, modulus).BarrettFactor();
+  const uint64_t q_barr = kWord32 ? MultiplyFactor(1, 64, modulus).BarrettFactor() : 0;
+  #pragma GCC novector
+  for(uint64_t i=0; i<n; ++i){
+    uint64_t a = operand1[i];
+    uint64_t b = operand2[i];
+    if constexpr (InputModFactor >= 4) { a = std::min(a, a - 2*modulus); b = std::min(b, b - 2*modulus); }
+    if constexpr (InputModFactor >= 2) { a = std::min(a, a - modulus);  b = std::min(b, b - modulus);  }
+
+    if constexpr (kWord32) {
+      result[i] = static_cast<Word>(BarrettReduce64(a * b, modulus, q_barr));  // a*b < 2^64
+    } else {
+      uint64_t hi, lo;
+      asm("mulhu %0, %1, %2" : "=r"(hi) : "r"(a), "r"(b));
+      asm("mul %0, %1, %2" : "=r"(lo) : "r"(a), "r"(b));
+
+      uint64_t c = lo >> shift | hi << (64-shift);
+      uint64_t q;
+      asm("mulhu %0, %1, %2" : "=r"(q) : "r"(c), "r"(mu));
+
+      uint64_t r = lo - (q * modulus);
+      result[i] = std::min(r, r - modulus);
+    }
+  }
 }
 
 }  // namespace hexl

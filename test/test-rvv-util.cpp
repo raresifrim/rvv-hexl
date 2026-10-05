@@ -382,6 +382,20 @@ TEST(RvvUtil_SubMod32) {
   }
 }
 
+TEST(RvvUtil_ReduceFromTwice32) {
+  for (uint64_t q : Moduli32()) {
+    for (size_t n : O::EltwiseSizes()) {
+      auto x = To32(WithEdges(n, 2 * q, {2 * q - 1, q, q - 1, 0}));  // x in [0, 2q)
+      std::vector<uint32_t> want(n), got(n);
+      for (size_t i = 0; i < n; ++i) want[i] = static_cast<uint32_t>(x[i] % q);
+      Strips32(n, [&](size_t i, size_t vl) {
+        __riscv_vse32_v_u32m1(&got[i], rvv::ReduceFromTwice32(__riscv_vle32_v_u32m1(&x[i], vl), static_cast<uint32_t>(q), vl), vl);
+      });
+      CHECK_VEC_EQ(want, got, << "rvv::ReduceFromTwice32 n=" << n << " q=" << q);
+    }
+  }
+}
+
 // Barrett, 32-bit lanes: x mod q for ANY 32-bit x, at m1 and m4, both output ranges.
 namespace {
 std::vector<uint32_t> BarrettInputs32(size_t n, uint64_t q) {
@@ -544,17 +558,19 @@ TEST(RvvUtil_AddSub32_m4) {
   for (uint64_t q : Moduli32()) {
     for (size_t n : O::EltwiseSizes()) {
       auto a = To32(WithEdges(n, q, {q - 1, 0, q - 1, 0})), b = To32(WithEdges(n, q, {q - 1, 0, 0, q - 1}));
+      auto x = To32(WithEdges(n, 2 * q, {2 * q - 1, q, q - 1, 0}));  // x in [0, 2q)
       const uint32_t q32 = static_cast<uint32_t>(q);
       for (uint64_t s : {q - 1, O::Random(1, q)[0]}) {
         const uint32_t s32 = static_cast<uint32_t>(s);
-        std::vector<uint32_t> w_add(n), w_sub(n), w_adds(n), w_subs(n);
+        std::vector<uint32_t> w_add(n), w_sub(n), w_adds(n), w_subs(n), w_red(n);
         for (size_t i = 0; i < n; ++i) {
           w_add[i] = static_cast<uint32_t>(O::AddMod(a[i], b[i], q));
           w_sub[i] = static_cast<uint32_t>(O::SubMod(a[i], b[i], q));
           w_adds[i] = static_cast<uint32_t>(O::AddMod(a[i], s, q));
           w_subs[i] = static_cast<uint32_t>(O::SubMod(a[i], s, q));
+          w_red[i] = static_cast<uint32_t>(x[i] % q);
         }
-        std::vector<uint32_t> g_add(n), g_sub(n), g_adds(n), g_subs(n);
+        std::vector<uint32_t> g_add(n), g_sub(n), g_adds(n), g_subs(n), g_red(n);
         for (size_t i = 0, vl; i < n; i += vl) {
           vl = __riscv_vsetvl_e32m4(n - i);
           vuint32m4_t va = __riscv_vle32_v_u32m4(&a[i], vl), vb = __riscv_vle32_v_u32m4(&b[i], vl);
@@ -562,11 +578,13 @@ TEST(RvvUtil_AddSub32_m4) {
           __riscv_vse32_v_u32m4(&g_sub[i], rvv::SubMod32(va, vb, q32, vl), vl);
           __riscv_vse32_v_u32m4(&g_adds[i], rvv::AddScalarMod32(va, s32, q32, vl), vl);
           __riscv_vse32_v_u32m4(&g_subs[i], rvv::SubScalarMod32(va, s32, q32, vl), vl);
+          __riscv_vse32_v_u32m4(&g_red[i], rvv::ReduceFromTwice32(__riscv_vle32_v_u32m4(&x[i], vl), q32, vl), vl);
         }
         CHECK_VEC_EQ(w_add, g_add, << "rvv::AddMod32<u32m4> n=" << n << " q=" << q);
         CHECK_VEC_EQ(w_sub, g_sub, << "rvv::SubMod32<u32m4> n=" << n << " q=" << q);
         CHECK_VEC_EQ(w_adds, g_adds, << "rvv::AddScalarMod32<u32m4> n=" << n << " q=" << q << " b=" << s);
         CHECK_VEC_EQ(w_subs, g_subs, << "rvv::SubScalarMod32<u32m4> n=" << n << " q=" << q << " b=" << s);
+        CHECK_VEC_EQ(w_red, g_red, << "rvv::ReduceFromTwice32<u32m4> n=" << n << " q=" << q);
       }
     }
   }

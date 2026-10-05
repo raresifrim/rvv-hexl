@@ -14,33 +14,53 @@
 
 #include "util/not-implemented.hpp"
 #include "util/rvv-util.hpp"
+#include "hexl/number-theory/number-theory.hpp"
 
 namespace intel {
 namespace hexl {
 
 template <typename Word, int InputModFactor, class V>
 void EltwiseMultModRVV32(Word* result, const Word* operand1, const Word* operand2, uint64_t n, uint64_t modulus) {
-  // TODO(port-rvv): the binfhe case (q ~ 2^27..2^28), written once for both
-  //   storage types, at lane type V (default rvv::cfg::MultMod32 = u32m4;
-  //   MulModBarrett32 measured 2.2x faster at m4 than at m1 on the X100):
-  //   vl = rvv::SetVl<V>(n) per strip; rvv::Load32<V>(operand1, vl) / (operand2,
-  //   vl) (the overload picks narrow-from-u64 at twice the LMUL, or plain vle32,
-  //   from Word); reduce inputs to [0, q)
-  //   if InputModFactor > 1; rvv::MulModBarrett32; rvv::Store32(result, ..).
-  //   There is no fixed multiplier, so Shoup does not apply.
-  HEXL_NOT_IMPLEMENTED();
+  const uint32_t shift = MSB(modulus) - 1;
+  const uint32_t mu = MultiplyFactor(uint32_t{1} << shift, 32, modulus).BarrettFactor();
+  for(size_t vl; n > 0; n-=vl, result+=vl, operand1+=vl, operand2+=vl){
+    vl = rvv::SetVl<V>(n);
+    V v1 = rvv::Load32<V>(operand1, vl);
+    V v2 = rvv::Load32<V>(operand2, vl);
+    if constexpr (InputModFactor >= 4) { 
+      v1 = rvv::ReduceFromTwice32(v1, static_cast<uint32_t>(2*modulus), vl);
+      v2 = rvv::ReduceFromTwice32(v2, static_cast<uint32_t>(2*modulus), vl);
+    }
+    if constexpr (InputModFactor >= 2) { 
+      v1 = rvv::ReduceFromTwice32(v1, static_cast<uint32_t>(modulus), vl);
+      v2 = rvv::ReduceFromTwice32(v2, static_cast<uint32_t>(modulus), vl);
+    } 
+    V vr = rvv::MulModBarrett32<V>(v1, v2, modulus, mu, shift, vl);
+    rvv::Store32<V>(result, vr, vl);
+  }
 }
 
 template <int InputModFactor, class V>
 void EltwiseMultModRVV64(uint64_t* result, const uint64_t* operand1,
                          const uint64_t* operand2, uint64_t n,
                          uint64_t modulus) {
-  // TODO(port-rvv): the BFV case (60-bit primes), lane type V (default
-  //   rvv::cfg::MultMod64 = u64m4): rvv::SetVl<V>, rvv::Load<V>,
-  //   rvv::MulModBarrett, rvv::Store.
-  //   Expect ~1 element/cycle from the e64 multiplier on K3: compare against
-  //   the native path (HEXL_DISABLE_RVV=1) before assuming RVV wins here.
-  HEXL_NOT_IMPLEMENTED();
+  const uint64_t shift = MSB(modulus) - 1;
+  const uint64_t mu = MultiplyFactor(uint64_t{1} << shift, 64, modulus).BarrettFactor();
+  for(size_t vl; n > 0; n-=vl, result+=vl, operand1+=vl, operand2+=vl){
+    vl = rvv::SetVl<V>(n);
+    V v1 = rvv::Load<V>(operand1, vl);
+    V v2 = rvv::Load<V>(operand2, vl);
+    if constexpr (InputModFactor >= 4) { 
+      v1 = rvv::ReduceFromTwice(v1, 2*modulus, vl);
+      v2 = rvv::ReduceFromTwice(v2, 2*modulus, vl); 
+    }
+    if constexpr (InputModFactor >= 2) { 
+	v1 = rvv::ReduceFromTwice(v1, modulus, vl);
+	v2 = rvv::ReduceFromTwice(v2, modulus, vl);
+    } 
+    V vr = rvv::MulModBarrett<V>(v1, v2, modulus, mu, shift, vl);
+    rvv::Store<V>(result, vr, vl);
+  }
 }
 
 template void EltwiseMultModRVV32<uint64_t, 1>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);

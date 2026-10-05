@@ -21,7 +21,8 @@ namespace hexl {
 
 template <typename Word, class V>
 void EltwiseReduceModRVV(Word* result, const Word* operand, uint64_t n, uint64_t modulus, uint64_t input_mod_factor, uint64_t output_mod_factor) {
-  // TODO(port-rvv): the 2q/4q cases are vminu chains (rvv::ReduceFromTwice);
+  // TODO(port-rvv): the 2q/4q cases are vminu chains (rvv::ReduceFromTwice, e32:
+  //   rvv::ReduceFromTwice32);
   //   the "input_mod_factor == modulus" case is a vectorised Barrett:
   //   rvv::BarrettReduce<output_mod_factor> (e64, q_barr =
   //   MultiplyFactor(1, 64, q).BarrettFactor()) for Word = uint64_t, and
