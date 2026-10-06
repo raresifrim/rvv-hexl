@@ -108,15 +108,45 @@ uint64_t InverseMod(uint64_t x, uint64_t modulus);
 /// @brief Returns (x * y) mod modulus. Assumes x, y < modulus < 2^61.
 /// (rvv-hexl computes it with upstream HEXL's pre-shift Barrett, exact for
 /// moduli of up to 61 bits; OpenFHE uses <= 60 bits, SEAL <= 61.)
-uint64_t MultiplyMod(uint64_t x, uint64_t y, uint64_t modulus);
+inline uint64_t MultiplyMod(uint64_t x, uint64_t y, uint64_t modulus) {
+  // 128-bit product (MultiplyUInt64 -> hi, lo) then
+  // BarrettReduce128(hi, lo, modulus). Assumes x, y < modulus.
+  //SEAL and OpenFHE guarantee moduli under 2^61 otherwise we might need to perform 2 final subtractions to get the putput in [0,modulus) 
+  HEXL_CHECK(modulus < (1ULL << 61), "Require modulus < (1ULL << 61)"); 
+  const uint8_t n = MSB(modulus) + 1;
+  
+  //compute raw x*y
+  uint64_t hi, lo;
+  asm("mulhu %0, %1, %2" : "=r"(hi) : "r"(x), "r"(y));
+  asm("mul %0, %1, %2" : "=r"(lo) : "r"(x), "r"(y));
+
+  //compute the multiplication factor optimized for less multiplication
+  uint64_t m = MultiplyFactor(uint64_t(1U) << (n-2), 64, modulus).BarrettFactor();
+  uint64_t c = lo >> (n-2) | hi << (64-(n-2));
+  uint64_t q;
+  asm("mulhu %0, %1, %2" : "=r"(q) : "r"(c), "r"(m));
+
+  //get final result
+  uint64_t r = lo - (q * modulus);
+  return std::min(r, r - modulus);
+}
 
 /// @brief Returns (x * y) mod modulus, Shoup style.
 /// @param[in] y_precon floor(y * 2^64 / modulus), i.e.
 /// MultiplyFactor(y, 64, modulus).BarrettFactor(). (The upstream doxygen says
 /// "floor(2**64 / modulus)", which is wrong; the implementation and every
 /// caller use the y-dependent factor.)
-uint64_t MultiplyMod(uint64_t x, uint64_t y, uint64_t y_precon,
-                     uint64_t modulus);
+inline uint64_t MultiplyMod(uint64_t x, uint64_t y, uint64_t y_precon,
+                            uint64_t modulus) {
+  // Shoup's trick. y_precon = floor(y * 2^64 / q):
+  // Q = MultiplyUInt64Hi<64>(x, y_precon);   // approx. floor(x*y/q)
+  // r = x * y - Q * q;                       // wrapping 64-bit, in [0, 2q)
+  // return r >= q ? r - q : r; 
+  uint64_t Q;
+  asm("mulhu %0, %1, %2" : "=r"(Q) : "r"(x), "r"(y_precon));
+  uint64_t r = x * y - Q * modulus;
+  return std::min(r, r - modulus); 
+}
 
 /// @brief Returns (x + y) mod modulus. Assumes x, y < modulus <= 2^63.
 /// (The rvv-hexl implementation is the branch-free min(s, s - q), which needs

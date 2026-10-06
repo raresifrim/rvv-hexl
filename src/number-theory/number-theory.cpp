@@ -28,41 +28,6 @@ uint64_t InverseMod(uint64_t input, uint64_t modulus) {
   HEXL_NOT_IMPLEMENTED();
 }
 
-uint64_t MultiplyMod(uint64_t x, uint64_t y, uint64_t modulus) {
-  // 128-bit product (MultiplyUInt64 -> hi, lo) then
-  // BarrettReduce128(hi, lo, modulus). Assumes x, y < modulus.
-  //SEAL and OpenFHE guarantee moduli under 2^61 otherwise we might need to perform 2 final subtractions to get the putput in [0,modulus) 
-  HEXL_CHECK(modulus < (1ULL << 61), "Require modulus < (1ULL << 61)"); 
-  const uint8_t n = MSB(modulus) + 1;
-  
-  //compute raw x*y
-  uint64_t hi, lo;
-  asm("mulhu %0, %1, %2" : "=r"(hi) : "r"(x), "r"(y));
-  asm("mul %0, %1, %2" : "=r"(lo) : "r"(x), "r"(y));
-
-  //compute the multiplication factor optimized for less multiplication
-  uint64_t m = MultiplyFactor(uint64_t(1U) << (n-2), 64, modulus).BarrettFactor();
-  uint64_t c = lo >> (n-2) | hi << (64-(n-2));
-  uint64_t q;
-  asm("mulhu %0, %1, %2" : "=r"(q) : "r"(c), "r"(m));
-
-  //get final result
-  uint64_t r = lo - (q * modulus);
-  return std::min(r, r - modulus);
-}
-
-uint64_t MultiplyMod(uint64_t x, uint64_t y, uint64_t y_precon,
-                     uint64_t modulus) {
-  // Shoup's trick. y_precon = floor(y * 2^64 / q):
-  // Q = MultiplyUInt64Hi<64>(x, y_precon);   // approx. floor(x*y/q)
-  // r = x * y - Q * q;                       // wrapping 64-bit, in [0, 2q)
-  // return r >= q ? r - q : r; 
-  uint64_t Q;
-  asm("mulhu %0, %1, %2" : "=r"(Q) : "r"(x), "r"(y_precon));
-  uint64_t r = x * y - Q * modulus;
-  return std::min(r, r - modulus); 
-}
-
 uint64_t AddUIntMod(uint64_t x, uint64_t y, uint64_t modulus) {
   //(x + y) mod modulus for x, y < modulus.
   uint64_t sum = x+y;
