@@ -9,7 +9,6 @@
 #include "hexl/number-theory/number-theory.hpp"
 #include "hexl/util/check.hpp"
 #include "util/cpu-features.hpp"
-#include "util/not-implemented.hpp"
 
 namespace intel {
 namespace hexl {
@@ -117,19 +116,28 @@ void EltwiseFMAMod(uint32_t* result, const uint32_t* arg1, uint64_t arg2,
 }
 
 // ---------------------------------------------------------------------------
-// Native (scalar) kernel.  TODO(port)
+// Native (scalar) kernel.
 // ---------------------------------------------------------------------------
 
 template <typename Word, int InputModFactor>
 void EltwiseFMAModNative(Word* result, const Word* arg1, uint64_t arg2, const Word* arg3, uint64_t n, uint64_t modulus) {
-  // TODO(port): result[i] = (arg1[i] * arg2 + arg3[i]) mod q, in [0, q).
-  //   arg2 is the SAME for every element, so reduce it once, precompute its
-  //   Shoup factor once (MultiplyFactor(arg2, 64, q)) and use
-  //   MultiplyMod(x, arg2, precon, q) per element. Reduce arg1[i] / arg3[i]
-  //   with ReduceMod<InputModFactor> first. arg3 == nullptr means no add.
-  //   result may alias arg1 and/or arg3. With Word = uint32_t the same 64-bit
-  //   helpers work unchanged: just read/write the uint32_t words.
-  HEXL_NOT_IMPLEMENTED();
+   uint64_t w = arg2;
+   if constexpr (InputModFactor == 8) w = std::min(w, w - 4 * modulus);
+   if constexpr (InputModFactor >= 4) w = std::min(w, w - 2 * modulus);
+   if constexpr (InputModFactor >= 2) w = std::min(w, w - modulus);
+   const uint64_t w_precon = MultiplyFactor(w, 64, modulus).BarrettFactor();
+   if(arg3 != nullptr){
+#pragma GCC novector
+     for(uint64_t i=0; i<n; ++i){
+	result[i] = MultiplyAddMod<InputModFactor>(arg1[i], w, w_precon, arg3[i], modulus);
+     }
+   }
+   else{
+#pragma GCC novector
+     for(uint64_t i=0; i<n; ++i){
+	result[i] = MultiplyMod(arg1[i], w, w_precon, modulus);
+     }
+   }
 }
 
 }  // namespace hexl

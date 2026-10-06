@@ -279,6 +279,43 @@ TEST(RvvUtil_MulModShoupLazyScalar) {
   }
 }
 
+// Fused Shoup multiply-add: (x*w + y) mod q for ANY x, scalar w < q and y in
+// [0, InputModFactor * q), at every InputModFactor, at m1 and m4.
+namespace {
+template <int Imf>
+void CheckMulAddModShoup(uint64_t q) {
+  for (uint64_t w : {q - 1, uint64_t{1}, uint64_t{0}, O::Random(1, q)[0]}) {
+    const uint64_t wp = ShoupPrecon(w, q, 64);
+    for (size_t n : O::EltwiseSizes()) {
+      auto x = WithEdges(n, O::AnyWord<uint64_t>(), {~0ULL, ~0ULL, q - 1, 0});
+      auto y = WithEdges(n, Imf * q, {Imf * q - 1, 0, Imf * q - 1, q});
+      std::vector<uint64_t> want(n), got1(n), got4(n);
+      for (size_t i = 0; i < n; ++i) want[i] = (O::MulMod(x[i] % q, w, q) + y[i] % q) % q;
+      Strips64(n, [&](size_t i, size_t vl) {
+        auto r = rvv::MulAddModShoup<Imf>(__riscv_vle64_v_u64m1(&x[i], vl), w, wp, __riscv_vle64_v_u64m1(&y[i], vl), q, vl);
+        __riscv_vse64_v_u64m1(&got1[i], r, vl);
+      });
+      for (size_t i = 0, vl; i < n; i += vl) {
+        vl = __riscv_vsetvl_e64m4(n - i);
+        auto r = rvv::MulAddModShoup<Imf>(__riscv_vle64_v_u64m4(&x[i], vl), w, wp, __riscv_vle64_v_u64m4(&y[i], vl), q, vl);
+        __riscv_vse64_v_u64m4(&got4[i], r, vl);
+      }
+      CHECK_VEC_EQ(want, got1, << "rvv::MulAddModShoup<" << Imf << "><u64m1> n=" << n << " q=" << q << " w=" << w);
+      CHECK_VEC_EQ(want, got4, << "rvv::MulAddModShoup<" << Imf << "><u64m4> n=" << n << " q=" << q << " w=" << w);
+    }
+  }
+}
+}  // namespace
+
+TEST(RvvUtil_MulAddModShoup) {
+  for (uint64_t q : Moduli64(1ULL << 61)) {  // header: q < 2^61, so 8q fits
+    CheckMulAddModShoup<1>(q);
+    CheckMulAddModShoup<2>(q);
+    CheckMulAddModShoup<4>(q);
+    CheckMulAddModShoup<8>(q);
+  }
+}
+
 TEST(RvvUtil_MulModBarrett) {
   for (uint64_t q : Moduli64(1ULL << 61)) {  // header: e64 path, q < 2^61
     uint64_t mu, shift;
@@ -475,6 +512,73 @@ TEST(RvvUtil_MulModShoupLazy32) {
         CHECK(got[i] < 2 * q);
       }
     }
+  }
+}
+
+// Shoup lazy, 32-bit lanes, scalar multiplier: r = x*y mod q in [0, 2q) for
+// any 32-bit x and a fixed y < q. At m1 and m4.
+TEST(RvvUtil_MulModShoupLazy32Scalar) {
+  for (uint64_t q : Moduli32()) {
+    const uint32_t q32 = static_cast<uint32_t>(q);
+    for (uint64_t ys : {q - 1, uint64_t{1}, uint64_t{0}, O::Random(1, q)[0]}) {
+      const uint32_t y32 = static_cast<uint32_t>(ys), yp = static_cast<uint32_t>(ShoupPrecon(ys, q, 32));
+      for (size_t n : O::EltwiseSizes()) {
+        auto x = To32(WithEdges(n, 1ULL << 32, {(1ULL << 32) - 1, 4 * q - 1, q - 1, 0}));
+        std::vector<uint32_t> got1(n), got4(n);
+        Strips32(n, [&](size_t i, size_t vl) {
+          __riscv_vse32_v_u32m1(&got1[i], rvv::MulModShoupLazy32(__riscv_vle32_v_u32m1(&x[i], vl), y32, yp, q32, vl), vl);
+        });
+        for (size_t i = 0, vl; i < n; i += vl) {
+          vl = __riscv_vsetvl_e32m4(n - i);
+          __riscv_vse32_v_u32m4(&got4[i], rvv::MulModShoupLazy32(__riscv_vle32_v_u32m4(&x[i], vl), y32, yp, q32, vl), vl);
+        }
+        for (size_t i = 0; i < n; ++i) {
+          CHECK_EQ(got1[i] % q, O::MulMod(x[i] % q, ys, q),
+                   << "rvv::MulModShoupLazy32 (scalar y) residue at [" << i << "] x=" << x[i] << " y=" << ys << " q=" << q);
+          CHECK(got1[i] < 2 * q);
+          CHECK_EQ(got4[i], got1[i], << "rvv::MulModShoupLazy32<u32m4> (scalar y) at [" << i << "] q=" << q);
+        }
+      }
+    }
+  }
+}
+
+// Fused Shoup multiply-add, 32-bit lanes: any 32-bit x, scalar w < q, y in
+// [0, InputModFactor * q) with InputModFactor * q <= 2^32. At m1 and m4.
+namespace {
+template <int Imf>
+void CheckMulAddModShoup32(uint64_t q) {
+  if (Imf * q > (1ULL << 32)) return;  // outside the contract (e.g. imf 8 needs q < 2^29)
+  const uint32_t q32 = static_cast<uint32_t>(q);
+  for (uint64_t w : {q - 1, uint64_t{1}, uint64_t{0}, O::Random(1, q)[0]}) {
+    const uint32_t w32 = static_cast<uint32_t>(w), wp = static_cast<uint32_t>(ShoupPrecon(w, q, 32));
+    for (size_t n : O::EltwiseSizes()) {
+      auto x = To32(WithEdges(n, 1ULL << 32, {(1ULL << 32) - 1, (1ULL << 32) - 1, q - 1, 0}));
+      auto y = To32(WithEdges(n, Imf * q, {Imf * q - 1, 0, Imf * q - 1, q}));
+      std::vector<uint32_t> want(n), got1(n), got4(n);
+      for (size_t i = 0; i < n; ++i) want[i] = static_cast<uint32_t>((O::MulMod(x[i] % q, w, q) + y[i] % q) % q);
+      Strips32(n, [&](size_t i, size_t vl) {
+        auto r = rvv::MulAddModShoup32<Imf>(__riscv_vle32_v_u32m1(&x[i], vl), w32, wp, __riscv_vle32_v_u32m1(&y[i], vl), q32, vl);
+        __riscv_vse32_v_u32m1(&got1[i], r, vl);
+      });
+      for (size_t i = 0, vl; i < n; i += vl) {
+        vl = __riscv_vsetvl_e32m4(n - i);
+        auto r = rvv::MulAddModShoup32<Imf>(__riscv_vle32_v_u32m4(&x[i], vl), w32, wp, __riscv_vle32_v_u32m4(&y[i], vl), q32, vl);
+        __riscv_vse32_v_u32m4(&got4[i], r, vl);
+      }
+      CHECK_VEC_EQ(want, got1, << "rvv::MulAddModShoup32<" << Imf << "><u32m1> n=" << n << " q=" << q << " w=" << w);
+      CHECK_VEC_EQ(want, got4, << "rvv::MulAddModShoup32<" << Imf << "><u32m4> n=" << n << " q=" << q << " w=" << w);
+    }
+  }
+}
+}  // namespace
+
+TEST(RvvUtil_MulAddModShoup32) {
+  for (uint64_t q : Moduli32()) {
+    CheckMulAddModShoup32<1>(q);
+    CheckMulAddModShoup32<2>(q);
+    CheckMulAddModShoup32<4>(q);
+    CheckMulAddModShoup32<8>(q);
   }
 }
 

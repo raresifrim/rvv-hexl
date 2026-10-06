@@ -22,6 +22,7 @@
 #include "eltwise/eltwise-add-mod-internal.hpp"
 #include "eltwise/eltwise-cmp-add-internal.hpp"
 #include "eltwise/eltwise-cmp-sub-mod-internal.hpp"
+#include "eltwise/eltwise-mult-mod-internal.hpp"
 #include "eltwise/eltwise-sub-mod-internal.hpp"
 #endif
 #endif
@@ -109,6 +110,36 @@ void BM_Lanes_CmpSubModNLE(benchmark::State& state) {
   state.SetItemsProcessed(state.iterations() * kN);
 }
 
+/// MultMod, input_mod_factor 1. Word = uint64_t: EltwiseMultModRVV64 at a
+/// 60-bit q; Word = uint32_t: EltwiseMultModRVV32 at a 27-bit q.
+template <typename Word, class V>
+void BM_Lanes_MultMod(benchmark::State& state) {
+  const uint64_t q = LaneModulus<Word>();
+  auto a = hexlbench::RandomW<Word>(kN, q), b = hexlbench::RandomW<Word>(kN, q), r = a;
+  for (auto _ : state) {
+    if constexpr (std::is_same_v<Word, uint64_t>) {
+      intel::hexl::EltwiseMultModRVV64<1, V>(r.data(), a.data(), b.data(), kN, q);
+    } else {
+      intel::hexl::EltwiseMultModRVV32<Word, 1, V>(r.data(), a.data(), b.data(), kN, q);
+    }
+    benchmark::ClobberMemory();
+  }
+  state.SetItemsProcessed(state.iterations() * kN);
+}
+
+/// EltwiseMultModRVV32 on uint64_t storage (27-bit q, narrowing load and
+/// widening store): the path EltwiseMultMod(uint64_t*) takes for q < 2^30.
+template <class V>
+void BM_Lanes_MultMod32FromU64(benchmark::State& state) {
+  const uint64_t q = hexlbench::Prime(27, 1024);
+  auto a = hexlbench::RandomW<uint64_t>(kN, q), b = hexlbench::RandomW<uint64_t>(kN, q), r = a;
+  for (auto _ : state) {
+    intel::hexl::EltwiseMultModRVV32<uint64_t, 1, V>(r.data(), a.data(), b.data(), kN, q);
+    benchmark::ClobberMemory();
+  }
+  state.SetItemsProcessed(state.iterations() * kN);
+}
+
 }  // namespace
 
 #define HEXL_LANES(BM)                                  \
@@ -127,5 +158,9 @@ HEXL_LANES(BM_Lanes_SubModVV);
 HEXL_LANES(BM_Lanes_SubModVS);
 HEXL_LANES(BM_Lanes_CmpAddNLE);
 HEXL_LANES(BM_Lanes_CmpSubModNLE);
+HEXL_LANES(BM_Lanes_MultMod);
+BENCHMARK_TEMPLATE(BM_Lanes_MultMod32FromU64, vuint32m1_t);
+BENCHMARK_TEMPLATE(BM_Lanes_MultMod32FromU64, vuint32m2_t);
+BENCHMARK_TEMPLATE(BM_Lanes_MultMod32FromU64, vuint32m4_t);
 
 #endif  // HEXL_HAS_RVV

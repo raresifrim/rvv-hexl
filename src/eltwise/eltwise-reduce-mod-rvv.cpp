@@ -13,7 +13,6 @@
 #include <type_traits>
 
 #include "hexl/number-theory/number-theory.hpp"
-#include "util/not-implemented.hpp"
 #include "util/rvv-util.hpp"
 
 namespace intel {
@@ -21,17 +20,80 @@ namespace hexl {
 
 template <typename Word, class V>
 void EltwiseReduceModRVV(Word* result, const Word* operand, uint64_t n, uint64_t modulus, uint64_t input_mod_factor, uint64_t output_mod_factor) {
-  // TODO(port-rvv): the 2q/4q cases are vminu chains (rvv::ReduceFromTwice, e32:
-  //   rvv::ReduceFromTwice32);
-  //   the "input_mod_factor == modulus" case is a vectorised Barrett:
-  //   rvv::BarrettReduce<output_mod_factor> (e64, q_barr =
-  //   MultiplyFactor(1, 64, q).BarrettFactor()) for Word = uint64_t, and
-  //   rvv::BarrettReduce32<...> (q_barr = MultiplyFactor(1, 32, q).BarrettFactor())
-  //   for Word = uint32_t (q < 2^30 there). Compute q_barr once, before the
-  //   loop. Hoist the branch on the mod factors out of the loop.
-  //   Lane type V (default rvv::cfg::ReduceMod64 / ReduceMod32, m4):
-  //   vl = rvv::SetVl<V>(n), rvv::Load<V>, rvv::Store.
-  HEXL_NOT_IMPLEMENTED();
+  
+  if (input_mod_factor == modulus && output_mod_factor == 1){
+      uint64_t q_barr; 
+      if constexpr (std::is_same_v<Word, uint64_t>) 
+	q_barr = MultiplyFactor(1, 64, modulus).BarrettFactor();
+      else	
+        q_barr = MultiplyFactor(1, 32, modulus).BarrettFactor();
+      for(size_t vl; n>0; n-=vl, operand+=vl, result+=vl){
+	  vl = rvv::SetVl<V>(n);
+	  V vs = rvv::Load<V>(operand, vl);
+	  V vd;
+	  if constexpr (std::is_same_v<Word,uint64_t>)
+	    vd = rvv::BarrettReduce<1>(vs, modulus, q_barr, vl);
+	  else
+	    vd = rvv::BarrettReduce32<1>(vs, static_cast<uint32_t>(modulus), static_cast<uint32_t>(q_barr), vl);
+	  rvv::Store<V>(result, vd, vl);
+      }
+  }
+  else if (input_mod_factor == modulus && output_mod_factor == 2){
+      uint64_t q_barr; 
+      if constexpr (std::is_same_v<Word, uint64_t>) 
+	q_barr = MultiplyFactor(1, 64, modulus).BarrettFactor();
+      else	
+        q_barr = MultiplyFactor(1, 32, modulus).BarrettFactor();
+      for(size_t vl; n>0; n-=vl, operand+=vl, result+=vl){
+	  vl = rvv::SetVl<V>(n);
+	  V vs = rvv::Load<V>(operand, vl);
+	  V vd;
+	  if constexpr (std::is_same_v<Word,uint64_t>)
+            vd = rvv::BarrettReduce<2>(vs, modulus, q_barr, vl);
+	  else
+	    vd = rvv::BarrettReduce32<2>(vs, static_cast<uint32_t>(modulus), static_cast<uint32_t>(q_barr), vl);
+	  rvv::Store<V>(result, vd, vl);
+      }  
+  }
+  else if (input_mod_factor == 4 && output_mod_factor == 1) { 
+      for(size_t vl; n>0; n-=vl, operand+=vl, result+=vl){
+	  vl = rvv::SetVl<V>(n);
+	  V vs = rvv::Load<V>(operand, vl);
+	  V vd;
+	  if constexpr (std::is_same_v<Word,uint64_t>) {
+	    vd = rvv::ReduceFromTwice(vs, 2*modulus, vl);
+	    vd = rvv::ReduceFromTwice(vd, modulus, vl);
+	  } else {
+    	    vd = rvv::ReduceFromTwice32(vs, static_cast<uint32_t>(2*modulus), vl);
+	    vd = rvv::ReduceFromTwice32(vd, static_cast<uint32_t>(modulus), vl);
+	  }
+	  rvv::Store<V>(result, vd, vl);
+      }
+  }
+  else if (input_mod_factor == 4 && output_mod_factor == 2) { 
+      for(size_t vl; n>0; n-=vl, operand+=vl, result+=vl){
+	  vl = rvv::SetVl<V>(n);
+	  V vs = rvv::Load<V>(operand, vl);
+	  V vd;
+	  if constexpr (std::is_same_v<Word,uint64_t>)
+	    vd = rvv::ReduceFromTwice(vs, 2*modulus, vl);
+	  else
+	    vd = rvv::ReduceFromTwice32(vs, static_cast<uint32_t>(2*modulus), vl);
+	  rvv::Store<V>(result, vd, vl);
+      } 
+  }
+  else if (input_mod_factor == 2 && output_mod_factor == 1) { 
+      for(size_t vl; n>0; n-=vl, operand+=vl, result+=vl){
+	  vl = rvv::SetVl<V>(n);
+	  V vs = rvv::Load<V>(operand, vl);
+	  V vd;
+	  if constexpr (std::is_same_v<Word,uint64_t>)
+	    vd = rvv::ReduceFromTwice(vs, modulus, vl);
+	  else
+	    vd = rvv::ReduceFromTwice32(vs, static_cast<uint32_t>(modulus), vl);
+	  rvv::Store<V>(result, vd, vl);
+      }  
+  }
 }
 
 template void EltwiseReduceModRVV<uint64_t>(uint64_t*, const uint64_t*, uint64_t, uint64_t, uint64_t, uint64_t);

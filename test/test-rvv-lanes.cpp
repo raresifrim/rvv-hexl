@@ -25,6 +25,7 @@
 #include "eltwise/eltwise-add-mod-internal.hpp"
 #include "eltwise/eltwise-cmp-add-internal.hpp"
 #include "eltwise/eltwise-cmp-sub-mod-internal.hpp"
+#include "eltwise/eltwise-mult-mod-internal.hpp"
 #include "eltwise/eltwise-sub-mod-internal.hpp"
 #include "util/rvv-util.hpp"
 #include "util/util-internal.hpp"
@@ -129,6 +130,45 @@ void CheckCmpSubMod(const char* lane) {
   }
 }
 
+/// MultMod at input_mod_factor 1, 2, 4 (inputs anywhere in [0, imf * q)).
+/// Word = uint64_t with e64 lanes runs EltwiseMultModRVV64 (q < 2^61, incl.
+/// q = 3 where the pre-shift is 0); Word = uint32_t runs EltwiseMultModRVV32
+/// (q < 2^30, incl. the 30-bit double-correction case).
+template <typename Word, int Imf, class V>
+void CheckMultModImf(const char* lane, uint64_t q) {
+  for (size_t n : kSizes) {
+    auto a64 = O::Random(n, Imf * q), b64 = O::Random(n, Imf * q);
+    a64[0] = Imf * q - 1;
+    b64[0] = Imf * q - 1;
+    const auto a = AsWord<Word>(a64), b = AsWord<Word>(b64);
+    std::vector<Word> got(n);
+    if constexpr (std::is_same_v<V, vuint64m1_t> || std::is_same_v<V, vuint64m2_t> ||
+                  std::is_same_v<V, vuint64m4_t> || std::is_same_v<V, vuint64m8_t>) {
+      intel::hexl::EltwiseMultModRVV64<Imf, V>(got.data(), a.data(), b.data(), n, q);
+    } else {
+      intel::hexl::EltwiseMultModRVV32<Word, Imf, V>(got.data(), a.data(), b.data(), n, q);
+    }
+    for (size_t i = 0; i < n; ++i) {
+      CHECK_EQ(static_cast<uint64_t>(got[i]), O::MulMod(a64[i] % q, b64[i] % q, q),
+               << "MultMod " << lane << " imf=" << Imf << " n=" << n << " q=" << q << " i=" << i);
+    }
+  }
+}
+
+template <typename Word, class V>
+void CheckMultMod(const char* lane) {
+  constexpr bool kE64 = std::is_same_v<Word, uint64_t> && !std::is_same_v<V, vuint32m1_t> &&
+                        !std::is_same_v<V, vuint32m2_t> && !std::is_same_v<V, vuint32m4_t>;
+  const std::vector<uint64_t> moduli =
+      kE64 ? std::vector<uint64_t>{3, 17, O::NttPrime(27, 1), O::NttPrime(49, 1), O::NttPrime(60, 1), O::PrimeBelow(1ULL << 61)}
+           : std::vector<uint64_t>{3, 17, O::NttPrime(20, 1), O::NttPrime(27, 1), O::PrimeBelow(1ULL << 30)};
+  for (uint64_t q : moduli) {
+    CheckMultModImf<Word, 1, V>(lane, q);
+    CheckMultModImf<Word, 2, V>(lane, q);
+    CheckMultModImf<Word, 4, V>(lane, q);
+  }
+}
+
 /// SetVl<V> must equal the matching vsetvl; Load<V>/Store must round-trip
 /// exactly vl elements per strip (guard words past n stay untouched).
 template <class V, typename Word>
@@ -175,5 +215,12 @@ TEST(RvvLanes_SetVlLoadStore) {
 TEST(RvvLanes_AddSubMod) { HEXL_FOR_EACH_LANE(CheckAddSub); }
 TEST(RvvLanes_CmpAdd) { HEXL_FOR_EACH_LANE(CheckCmpAdd); }
 TEST(RvvLanes_CmpSubMod) { HEXL_FOR_EACH_LANE(CheckCmpSubMod); }
+TEST(RvvLanes_MultMod) {
+  HEXL_FOR_EACH_LANE(CheckMultMod);
+  // EltwiseMultModRVV32 on uint64_t storage (narrowing load): u32m1..m4
+  CheckMultMod<uint64_t, vuint32m1_t>("u64->u32m1");
+  CheckMultMod<uint64_t, vuint32m2_t>("u64->u32m2");
+  CheckMultMod<uint64_t, vuint32m4_t>("u64->u32m4");
+}
 
 #endif  // HEXL_HAS_RVV

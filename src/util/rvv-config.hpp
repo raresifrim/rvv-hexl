@@ -8,10 +8,15 @@
 // and benchmarks (bench-hexl BM_Lanes_*) instantiate the same kernels at
 // m1/m2/m4/m8 to compare them.
 //
-// Defaults: m4 everywhere. Measured on the K3 (n = 4096), m4 is the best LMUL
-// on the X100 for every kernel and helper measured so far; the A100 is 5-20%
-// faster at m8 for some, but m8 leaves only 4 register groups, so kernels that
-// keep more values live (NTT butterflies, MultMod with input reduction) spill.
+// Defaults: m4, except MultMod at m8. Measured on the K3 (n = 4096), m4 is the
+// best LMUL on the X100 for every kernel and helper measured so far; the A100
+// is 5-20% faster at m8 for some, but m8 leaves only 4 register groups, so
+// kernels that keep many values live can spill. MultMod does not (checked in
+// the disassembly): at m8 it ties m4 on the X100 (6.40 vs 6.37 cycles/elem
+// e64, 1.67 vs 1.64 e32) and is 6-10% faster on the A100 (5.37 vs 5.72 e64,
+// 1.13 vs 1.25 e32), so it runs at m8. With input_mod_factor 4 the e64
+// kernel is ~4% slower at m8 on the X100 (8.6 vs 8.25) and 6% faster on the
+// A100 (6.34 vs 6.77).
 // Constraints:
 //   * e64 lanes: vuint64m1_t..m8_t; e32 lanes: vuint32mf2_t..m8_t.
 //   * e32 lanes on uint64_t storage (Load32/Store32): at most vuint32m4_t.
@@ -44,8 +49,9 @@ using CmpSubMod64 = vuint64m4_t;
 using CmpSubMod32 = vuint32m4_t;
 using ReduceMod64 = vuint64m4_t;
 using ReduceMod32 = vuint32m4_t;
-using MultMod64 = vuint64m4_t;  // RVV64: 64-bit storage, q >= 2^30
-using MultMod32 = vuint32m4_t;  // RVV32: both storage words, q < 2^30 (<= m4)
+using MultMod64 = vuint64m8_t;     // RVV64: 64-bit storage, q >= 2^30
+using MultMod32 = vuint32m8_t;     // RVV32 on uint32_t storage, q < 2^30
+using MultMod32U64 = vuint32m4_t;  // RVV32 on uint64_t storage, q < 2^30 (<= m4)
 using FMAMod64 = vuint64m4_t;
 using FMAMod32 = vuint32m4_t;   // <= m4
 using Ntt64 = vuint64m4_t;

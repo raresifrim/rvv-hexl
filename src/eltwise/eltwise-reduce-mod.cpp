@@ -3,13 +3,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "hexl/eltwise/eltwise-reduce-mod.hpp"
-
+#include <algorithm>
 #include "eltwise/eltwise-reduce-mod-internal.hpp"
 #include "hexl/logging/logging.hpp"
 #include "hexl/number-theory/number-theory.hpp"
 #include "hexl/util/check.hpp"
 #include "util/cpu-features.hpp"
-#include "util/not-implemented.hpp"
 #include "util/util-internal.hpp"
 
 namespace intel {
@@ -96,23 +95,36 @@ void EltwiseReduceMod(uint32_t* result, const uint32_t* operand, uint64_t n,
 
 template <typename Word>
 void EltwiseReduceModNative(Word* result, const Word* operand, uint64_t n, uint64_t modulus, uint64_t input_mod_factor, uint64_t output_mod_factor) {
-  // TODO(port): three cases.
-  //   input_mod_factor == modulus: arbitrary Word x -> Barrett with
-  //     q_barr = MultiplyFactor(1, 64, q).BarrettFactor();
-  //     BarrettReduce64<1> (output [0,q)) or BarrettReduce64<2> ([0,2q)).
-  //   input_mod_factor == 2: x in [0,2q) -> ReduceMod<2>.
-  //   input_mod_factor == 4: x in [0,4q) -> ReduceMod<4> (to [0,q)) or one
-  //     conditional subtract of 2q (to [0,2q)).
-  //   Any output congruent to x mod q inside [0, output_mod_factor * q) is
-  //   accepted by the tests (and by OpenFHE).
-  //   Put "#pragma GCC novector" right before each element loop that calls
-  //   BarrettReduce64: the library builds at -O3 with V enabled, and GCC
-  //   auto-vectorizes such loops into RVV code that is 3-4x SLOWER than the
-  //   scalar loop on the K3 (X100 15 vs 3.9 cycles/elem, A100 49 vs 18.7).
-  //   Keep conditional steps branch-free: select a value, e.g.
-  //   "sub = c ? diff : 0U", rather than a ternary between two results, which
-  //   GCC turned into a mispredicting branch in EltwiseCmpSubModNative.
-  HEXL_NOT_IMPLEMENTED();
+    
+  if (input_mod_factor == modulus && output_mod_factor == 1){
+      const uint64_t q_barr = MultiplyFactor(1, 64, modulus).BarrettFactor();
+      #pragma GCC novector
+      for(uint64_t i=0; i<n; ++i)
+	  result[i] = static_cast<Word>(BarrettReduce64<1>(operand[i], modulus, q_barr)); 
+  }
+  else if (input_mod_factor == modulus && output_mod_factor == 2){
+      const uint64_t q_barr = MultiplyFactor(1, 64, modulus).BarrettFactor();
+      #pragma GCC novector
+      for(uint64_t i=0; i<n; ++i)
+	  result[i] = static_cast<Word>(BarrettReduce64<2>(operand[i], modulus, q_barr)); 
+  }
+  else if (input_mod_factor == 4 && output_mod_factor == 1) { 
+      #pragma GCC novector
+      for(uint64_t i=0; i<n; ++i){
+            uint64_t a = std::min(static_cast<uint64_t>(operand[i]), static_cast<uint64_t>(operand[i]) - 2*modulus);
+	    result[i] = static_cast<Word>(std::min(a, a - modulus));
+      }
+  }
+  else if (input_mod_factor == 4 && output_mod_factor == 2) { 
+      #pragma GCC novector
+      for(uint64_t i=0; i<n; ++i)
+	    result[i] = static_cast<Word>(std::min(static_cast<uint64_t>(operand[i]), static_cast<uint64_t>(operand[i]) - 2*modulus)); 
+  }
+  else if (input_mod_factor == 2 && output_mod_factor == 1) { 
+      #pragma GCC novector
+      for(uint64_t i=0; i<n; ++i)
+	    result[i] = static_cast<Word>(std::min(static_cast<uint64_t>(operand[i]), static_cast<uint64_t>(operand[i]) - modulus)); 
+  } 
 }
 
 }  // namespace hexl

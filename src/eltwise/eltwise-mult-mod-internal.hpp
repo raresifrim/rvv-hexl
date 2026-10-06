@@ -29,7 +29,10 @@ void EltwiseMultModNative(Word* result, const Word* operand1, const Word* operan
 /// @brief RVV, 32-bit lanes, modulus < kMaxModulusRVV32 (2^30), so every
 /// input fits in 32 bits. Word = uint64_t narrows on load / widens on store
 /// (rvv::Load32 / rvv::Store32); Word = uint32_t loads and stores directly.
-template <typename Word, int InputModFactor, class V = rvv::cfg::MultMod32>
+/// Default lane: rvv::cfg::MultMod32 (uint32_t) or MultMod32U64 (uint64_t,
+/// at most u32m4 because of the narrowing load).
+template <typename Word, int InputModFactor,
+          class V = rvv::LaneFor<Word, rvv::cfg::MultMod32U64, rvv::cfg::MultMod32>>
 void EltwiseMultModRVV32(Word* result, const Word* operand1, const Word* operand2, uint64_t n, uint64_t modulus);
 
 /// @brief RVV, 64-bit lanes: every other modulus (BFV's 60-bit primes).

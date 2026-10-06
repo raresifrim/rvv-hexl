@@ -24,7 +24,7 @@ headers, same namespace, same signatures and same semantics** is a drop-in repla
    src/*/<op>.cpp  argument checks + dispatch ─ HEXL_HAS_RVV && has_rvv ?          [DONE]
                    │                                    │
                    ▼                                    ▼
-          <Op>Native (portable C++)          <Op>RVV / RVV32 / RVV64 (intrinsics)  [TODO]
+          <Op>Native (portable C++)          <Op>RVV / RVV32 / RVV64 (intrinsics)  [eltwise done, NTT TODO]
           = "no RVV" path, = reference       = the port proper
 ```
 
@@ -72,14 +72,14 @@ HEXL 1.2.6.
 | Layer | Files | State |
 |---|---|---|
 | Public API declarations | `include/hexl/**` | **done**: exact upstream signatures, checked at compile time by `test/test-api-compat.cpp` |
-| Header-inline helpers | `number-theory.hpp` (MultiplyFactor, ReduceMod, BarrettReduce64, MultiplyModLazy, …), `util/*.hpp` | **done**: part of the upstream header API |
+| Header-inline helpers | `number-theory.hpp` (MultiplyFactor, ReduceMod, BarrettReduce64, MultiplyModLazy, MultiplyAddMod, …), `util/*.hpp` | **done**: part of the upstream header API |
 | Entry points + dispatch | `src/eltwise/<op>.cpp` (top half), `src/ntt/ntt.cpp` (except one method) | **done** |
 | CPU detection, port info, allocator | `src/util/cpu-features.*`, `aligned-allocator.cpp` | **done** |
-| Scalar number theory | `src/number-theory/number-theory.cpp` | **TODO**: 11 functions |
-| Native kernels | `src/eltwise/<op>.cpp` (bottom half), `src/ntt/ntt-radix-2.cpp` | **TODO** |
+| Scalar number theory | `src/number-theory/number-theory.cpp` | **partly done**: `MultiplyMod` (Barrett and Shoup forms), `AddUIntMod`, `SubUIntMod`; **TODO**: `InverseMod`, `PowMod`, `IsPrimitiveRoot`, `GeneratePrimitiveRoot`, `MinimalPrimitiveRoot`, `ReverseBits`, `IsPrime`, `GeneratePrimes` |
+| Native kernels | `src/eltwise/<op>.cpp` (bottom half), `src/ntt/ntt-radix-2.cpp` | **done** for all 7 eltwise ops; **TODO**: `ntt-radix-2.cpp` |
 | Twiddle precomputation | `NTT::ComputeRootOfUnityPowers` in `src/ntt/ntt.cpp` | **TODO** |
-| RVV kernels | `src/eltwise/<op>-rvv.cpp`, `src/ntt/ntt-rvv.cpp` | **TODO** |
-| RVV helpers | `src/util/rvv-util.hpp` | **TODO** (signatures fixed, bodies empty) |
+| RVV kernels | `src/eltwise/<op>-rvv.cpp`, `src/ntt/ntt-rvv.cpp` | **done** for all 7 eltwise ops (e64 and e32, every lane m1-m8); **TODO**: `ntt-rvv.cpp` |
+| RVV helpers | `src/util/rvv-util.hpp` | **done**, each with a test (`hexl-tests RvvUtil`) |
 
 Every TODO body is `HEXL_NOT_IMPLEMENTED();`. It throws `std::logic_error("[rvv-hexl TODO] <fn>
 (<file>:<line>)")`, so:
@@ -142,9 +142,9 @@ polynomials apart from the NTT itself. Each op has three pieces:
 
 ```
 src/eltwise/eltwise-<op>.cpp           public entry: HEXL_CHECKs, dispatch      [done]
-                                       + <Op>Native kernel(s)                    [TODO]
+                                       + <Op>Native kernel(s)                    [done]
 src/eltwise/eltwise-<op>-internal.hpp  kernel declarations                      [done]
-src/eltwise/eltwise-<op>-rvv.cpp       <Op>RVV (or RVV32/RVV64) kernel(s)       [TODO]
+src/eltwise/eltwise-<op>-rvv.cpp       <Op>RVV (or RVV32/RVV64) kernel(s)       [done]
 ```
 
 Every kernel is a **template on the storage word** (`Word = uint64_t` for the upstream API,
@@ -263,8 +263,8 @@ pattern, and 8 threads sharing one object.
 | File | Purpose | State |
 |---|---|---|
 | `cpu-features.hpp/.cpp` | `HEXL_HAS_RVV` (compile time: TU built with V), `has_rvv` (runtime: `AT_HWCAP` has V and `HEXL_DISABLE_RVV` unset), `CurrentVLenBits()`, `kMaxModulusRVV32` | done |
-| `rvv-util.hpp` | the RVV vocabulary: `AddMod`, `SubMod`, `ReduceFromTwice`, `BarrettReduce` (any 64-bit x mod q, factor `MultiplyFactor(1, 64, q)`), `MulModShoupLazy`, `MulModBarrett` (e64) and `Load32`, `Store32` (overloaded on `uint64_t*` = narrow/widen and `uint32_t*` = plain vle32/vse32, which is what lets one e32 kernel serve both storage widths), `AddMod32`, `SubMod32`, `ReduceFromTwice32`, `BarrettReduce32` (factor `MultiplyFactor(1, 32, q)`), `MulModShoupLazy32`, `MulModBarrett32` (e32). All helpers are LMUL-generic templates: the arithmetic ones deduce the LMUL from their arguments; `Load32<V32>(p, vl)` takes the lane type as a template argument (default `vuint32m1_t`) and `Store32` deduces it | **TODO**: write these first, then compose kernels from them. Each helper has its own test (`hexl-tests RvvUtil`, `test/test-rvv-util.cpp`), so it can be checked before any kernel uses it. The two Barrett helpers' factor convention is defined at the top of that file (`Barrett64Factors`, `Barrett32Factor`): edit it if you choose another. Change the signatures if a better decomposition emerges (and the matching test) |
-| `rvv-config.hpp` | the lane type (SEW + LMUL) of every RVV kernel (`rvv::cfg::AddMod64`, `…32`, `MultMod64`, `Ntt64`, …), m4 by default; each kernel takes it as its `V` template parameter | done: one line moves a kernel to another LMUL; `RvvLanes` tests and `BM_Lanes` benchmarks cover m1-m8 |
+| `rvv-util.hpp` | the RVV vocabulary: `AddMod`, `SubMod`, `ReduceFromTwice`, `BarrettReduce` (any 64-bit x mod q, factor `MultiplyFactor(1, 64, q)`), `MulModShoupLazy`, `MulAddModShoup<InputModFactor>` (fused (x·w + y) mod q, the FMA element), `MulModBarrett` (e64) and `Load32`, `Store32` (overloaded on `uint64_t*` = narrow/widen and `uint32_t*` = plain vle32/vse32, which is what lets one e32 kernel serve both storage widths), `AddMod32`, `SubMod32`, `ReduceFromTwice32`, `BarrettReduce32` (factor `MultiplyFactor(1, 32, q)`), `MulModShoupLazy32`, `MulAddModShoup32<InputModFactor>`, `MulModBarrett32` (e32). All helpers are LMUL-generic templates: the arithmetic ones deduce the LMUL from their arguments; `Load32<V32>(p, vl)` takes the lane type as a template argument (default `vuint32m1_t`) and `Store32` deduces it | **done**: compose kernels from them. Each helper has its own test (`hexl-tests RvvUtil`, `test/test-rvv-util.cpp`), so it can be checked before any kernel uses it. The two Barrett helpers' factor convention is defined at the top of that file (`Barrett64Factors`, `Barrett32Factor`): edit it if you choose another. Change the signatures if a better decomposition emerges (and the matching test) |
+| `rvv-config.hpp` | the lane type (SEW + LMUL) of every RVV kernel (`rvv::cfg::AddMod64`, `…32`, `MultMod64`, `Ntt64`, …), m4 by default (MultMod m8); each kernel takes it as its `V` template parameter | done: one line moves a kernel to another LMUL; `RvvLanes` tests and `BM_Lanes` benchmarks cover m1-m8 |
 | `not-implemented.hpp/.cpp` | `HEXL_NOT_IMPLEMENTED()` | done |
 | `util-internal.hpp` | scalar `Compare(CMPINT, a, b)` for the native Cmp kernels | done |
 | `aligned-allocator.cpp` | the global `mallocStrategy` | done |
@@ -291,10 +291,10 @@ Each milestone ends with a command that must pass.
 | # | Work | Done when |
 |---|---|---|
 | M0 | `number-theory.cpp` (11 functions) | `make test` → all `NumberTheory_*` PASS |
-| M1 | the 7 native eltwise kernels | `HEXL_DISABLE_RVV=1 build/rvv-release/bin/hexl-tests Eltwise` all PASS |
+| M1 | the 7 native eltwise kernels (**done**) | `HEXL_DISABLE_RVV=1 build/rvv-release/bin/hexl-tests Eltwise` all PASS |
 | M2 | `ComputeRootOfUnityPowers` (64-bit tables) + native radix-2 forward/inverse | `make ISA=scalar test` fully green, **0 TODO** |
 | M3 | integration with the native path only | `make ISA=scalar openfhe openfhe-check WITH_RVV_HEXL=ON`: OpenFHE's own tests pass on the port. Same for SEAL: `make ISA=scalar seal seal-check WITH_RVV_HEXL=ON` (section 7) |
-| M4 | `rvv-util.hpp` + RVV eltwise (e64 first, then e32 for Mult/FMA) | `hexl-tests RvvUtil` green for each helper as you write it, then `make test` green (both passes) |
+| M4 | `rvv-util.hpp` + RVV eltwise (e64 first, then e32 for Mult/FMA) (**done**) | `hexl-tests RvvUtil` green for each helper as you write it, then `make test` green (both passes) |
 | M5 | RVV32 NTT (+ `m_rvv32_*` tables): the binfhe path | `Ntt_*` green; `bench-hexl --benchmark_filter=NTT.*qbits:27` vs `HEXL_DISABLE_RVV=1` |
 | M6 | RVV64 NTT | green; honest comparison against native for 60-bit q |
 | M7 | full matrix on both K3 clusters | `bench/run.sh` |
@@ -313,19 +313,23 @@ Intrinsics reference: `docs/rvv_intrinsics/` (`make rvv-intrinsics-doc`; see the
 * **SEW=e32 whenever q < 2^30.** On both K3 clusters the multiplier retires 8× more bits per
   cycle at e32 than at e64 (the e64 multiplier does one element per cycle). binfhe's moduli are
   ≤ 28 bits, so the e32 path covers the whole TFHE side.
-* **LMUL=m4 for every kernel.** Light kernels (Add/Sub/CmpAdd/CmpSubMod) are bound by per-strip
+* **LMUL=m4 for every kernel except MultMod (m8).** Light kernels (Add/Sub/CmpAdd/CmpSubMod) are bound by per-strip
   overhead: on EltwiseAddMod at n = 1K-64K, m4 was 2.3-3.4× faster than m1 on the X100 and 2-3×
   on the A100. Multiply kernels gain too (n = 4096, cycles/element on the X100, m1 → m4):
   MulModBarrett32 3.51 → 1.59, MulModShoupLazy32 2.66 → 1.13, MulModBarrett 11.0 → 6.4, Shoup
   e64 7.6 → 5.2; m4 is the best LMUL there. m8 is slower than m4 on the X100; on the A100 it is
   5-20% faster, but it leaves only 4 register groups, so kernels that keep more values live (NTT
-  butterflies, MultMod with input reduction) will spill. All arithmetic helpers in
+  butterflies) may spill. EltwiseMultMod does not spill at m8 (checked in the disassembly) and
+  ties m4 on the X100 (e64 6.40 vs 6.37, e32 1.67 vs 1.64 cycles/element) while the A100 gains
+  6-10% (e64 5.72 → 5.37, e32 1.25 → 1.13); with input_mod_factor 4 the e64 kernel is ~4% slower
+  on the X100 (8.25 → 8.6) and 6% faster on the A100 (6.77 → 6.34). Its RVV64 and uint32_t-storage RVV32 lanes are m8;
+  RVV32 on uint64_t storage stays at u32m4, the maximum for the narrowing load. All arithmetic helpers in
   `rvv-util.hpp` are LMUL-generic templates (overloaded intrinsics), and the kernels name their
   lane type once (`rvv-config.hpp`) through `rvv::SetVl<V>` / `rvv::Load<V>` / `rvv::Store`. Fractional LMUL only exposes the low part of a register
   (verified on silicon). **mf2 is the smallest portable
   one**: X100 returns vl=0 and traps on e32/mf4 and mf8.
 * **Lane types per kernel.** `src/util/rvv-config.hpp` holds one lane type per kernel
-  (`rvv::cfg::AddMod64`, `…32`, …), m4 by default; each kernel is instantiated at m1/m2/m4/m8,
+  (`rvv::cfg::AddMod64`, `…32`, …), m4 by default (MultMod m8); each kernel is instantiated at m1/m2/m4/m8,
   `hexl-tests RvvLanes` checks every instantiation and `bench-hexl --benchmark_filter=BM_Lanes`
   times them. Measured on the finished kernels (n = 4096): m4 is the best LMUL on the X100
   (m8 within 3% only for CmpAdd/CmpSubMod); the A100 is 7-35% faster at m8 on every kernel

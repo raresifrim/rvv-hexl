@@ -13,7 +13,6 @@
 #include <type_traits>
 
 #include "hexl/number-theory/number-theory.hpp"
-#include "util/not-implemented.hpp"
 #include "util/rvv-util.hpp"
 
 namespace intel {

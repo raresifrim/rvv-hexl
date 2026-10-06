@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 
+#include <algorithm>
 #include <limits>
 #include <vector>
 
@@ -188,6 +189,40 @@ inline uint64_t MultiplyModLazy(uint64_t x, uint64_t y, uint64_t modulus) {
   return MultiplyModLazy<BitShift>(x, y, y_barrett, modulus);
 }
 
+/// @brief Fused Shoup multiply-add: returns (x * w + y) mod modulus in
+/// [0, modulus), the EltwiseFMAMod element (w = arg2, y = arg3).
+/// @param[in] x any 64-bit word (Shoup's quotient estimate is off by less than
+/// 2 for any x when w < modulus, so x needs no reduction)
+/// @param[in] w fixed multiplier, w < modulus
+/// @param[in] w_precon floor(w * 2^64 / modulus), i.e.
+/// MultiplyFactor(w, 64, modulus).BarrettFactor(); also for 32-bit storage
+/// (the scalar registers and mulhu are 64-bit)
+/// @param[in] y addend in [0, InputModFactor * modulus)
+/// @param[in] modulus < 2^61, so 8 * modulus fits in a word
+/// @details y is reduced to [0, 2q) (InputModFactor 4: one step, 8: two), then
+/// x * w + y - Q * q lies in [0, 2q + y) < 4q (exact in wrapping 64-bit
+/// arithmetic) and two conditional subtracts (2q, q) finish. Compared with
+/// MultiplyMod(x, w, w_precon, q) followed by an add, y needs one reduction
+/// step less, and for InputModFactor 2 none.
+template <int InputModFactor>
+inline uint64_t MultiplyAddMod(uint64_t x, uint64_t w, uint64_t w_precon,
+                               uint64_t y, uint64_t modulus) {
+  static_assert(InputModFactor == 1 || InputModFactor == 2 ||
+                    InputModFactor == 4 || InputModFactor == 8,
+                "InputModFactor must be 1, 2, 4 or 8");
+  HEXL_CHECK(modulus < (1ULL << 61), "Require modulus < 2^61");
+  HEXL_CHECK(w < modulus, "w " << w << " must be less than modulus " << modulus);
+  HEXL_CHECK(y < InputModFactor * modulus,
+             "y " << y << " exceeds bound " << InputModFactor * modulus);
+  if constexpr (InputModFactor == 8) y = std::min(y, y - 4 * modulus);  // [0, 8q) -> [0, 4q)
+  if constexpr (InputModFactor >= 4) y = std::min(y, y - 2 * modulus);  // [0, 4q) -> [0, 2q)
+  uint64_t Q;
+  asm("mulhu %0, %1, %2" : "=r"(Q) : "r"(x), "r"(w_precon));  // ~floor(x * w / q)
+  uint64_t r = x * w + y - Q * modulus;  // in [0, 2q + y) < 4q
+  r = std::min(r, r - 2 * modulus);      // [0, 4q) -> [0, 2q)
+  return std::min(r, r - modulus);       // [0, 2q) -> [0, q)
+}
+
 /// @brief Adds two unsigned 64-bit integers
 /// @return The carry bit
 inline unsigned char AddUInt64(uint64_t operand1, uint64_t operand2,
@@ -197,7 +232,7 @@ inline unsigned char AddUInt64(uint64_t operand1, uint64_t operand2,
 }
 
 // ===========================================================================
-// Implemented in src/number-theory/number-theory.cpp  (TODO: port)
+// Implemented in src/number-theory/number-theory.cpp (stubs left: make todo)
 // ===========================================================================
 
 /// @brief Returns whether or not the input is prime (must be deterministic and

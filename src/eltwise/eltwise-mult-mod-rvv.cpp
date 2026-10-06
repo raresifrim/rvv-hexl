@@ -12,7 +12,6 @@
 
 #include <type_traits>
 
-#include "util/not-implemented.hpp"
 #include "util/rvv-util.hpp"
 #include "hexl/number-theory/number-theory.hpp"
 
@@ -63,15 +62,39 @@ void EltwiseMultModRVV64(uint64_t* result, const uint64_t* operand1,
   }
 }
 
-template void EltwiseMultModRVV32<uint64_t, 1>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
-template void EltwiseMultModRVV32<uint64_t, 2>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
-template void EltwiseMultModRVV32<uint64_t, 4>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
-template void EltwiseMultModRVV32<uint32_t, 1>(uint32_t*, const uint32_t*, const uint32_t*, uint64_t, uint64_t);
-template void EltwiseMultModRVV32<uint32_t, 2>(uint32_t*, const uint32_t*, const uint32_t*, uint64_t, uint64_t);
-template void EltwiseMultModRVV32<uint32_t, 4>(uint32_t*, const uint32_t*, const uint32_t*, uint64_t, uint64_t);
-template void EltwiseMultModRVV64<1>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
-template void EltwiseMultModRVV64<2>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
-template void EltwiseMultModRVV64<4>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV32<uint64_t, 1, vuint32m1_t>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV32<uint64_t, 1, vuint32m2_t>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV32<uint64_t, 1, vuint32m4_t>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV32<uint64_t, 2, vuint32m1_t>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV32<uint64_t, 2, vuint32m2_t>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV32<uint64_t, 2, vuint32m4_t>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV32<uint64_t, 4, vuint32m1_t>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV32<uint64_t, 4, vuint32m2_t>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV32<uint64_t, 4, vuint32m4_t>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV32<uint32_t, 1, vuint32m1_t>(uint32_t*, const uint32_t*, const uint32_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV32<uint32_t, 1, vuint32m2_t>(uint32_t*, const uint32_t*, const uint32_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV32<uint32_t, 1, vuint32m4_t>(uint32_t*, const uint32_t*, const uint32_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV32<uint32_t, 1, vuint32m8_t>(uint32_t*, const uint32_t*, const uint32_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV32<uint32_t, 2, vuint32m1_t>(uint32_t*, const uint32_t*, const uint32_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV32<uint32_t, 2, vuint32m2_t>(uint32_t*, const uint32_t*, const uint32_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV32<uint32_t, 2, vuint32m4_t>(uint32_t*, const uint32_t*, const uint32_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV32<uint32_t, 2, vuint32m8_t>(uint32_t*, const uint32_t*, const uint32_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV32<uint32_t, 4, vuint32m1_t>(uint32_t*, const uint32_t*, const uint32_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV32<uint32_t, 4, vuint32m2_t>(uint32_t*, const uint32_t*, const uint32_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV32<uint32_t, 4, vuint32m4_t>(uint32_t*, const uint32_t*, const uint32_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV32<uint32_t, 4, vuint32m8_t>(uint32_t*, const uint32_t*, const uint32_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV64<1, vuint64m1_t>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV64<1, vuint64m2_t>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV64<1, vuint64m4_t>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV64<1, vuint64m8_t>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV64<2, vuint64m1_t>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV64<2, vuint64m2_t>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV64<2, vuint64m4_t>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV64<2, vuint64m8_t>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV64<4, vuint64m1_t>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV64<4, vuint64m2_t>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV64<4, vuint64m4_t>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
+template void EltwiseMultModRVV64<4, vuint64m8_t>(uint64_t*, const uint64_t*, const uint64_t*, uint64_t, uint64_t);
 
 }  // namespace hexl
 }  // namespace intel

@@ -8,7 +8,6 @@
 #include "hexl/logging/logging.hpp"
 #include "hexl/util/check.hpp"
 #include "util/cpu-features.hpp"
-#include "util/not-implemented.hpp"
 
 namespace intel {
 namespace hexl {

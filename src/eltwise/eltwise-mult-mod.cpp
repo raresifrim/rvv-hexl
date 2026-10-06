@@ -12,7 +12,6 @@
 #include "hexl/number-theory/number-theory.hpp"
 #include "hexl/util/check.hpp"
 #include "util/cpu-features.hpp"
-#include "util/not-implemented.hpp"
 
 namespace intel {
 namespace hexl {

@@ -12,7 +12,6 @@
 
 #include <type_traits>
 
-#include "util/not-implemented.hpp"
 #include "util/rvv-util.hpp"
 
 namespace intel {

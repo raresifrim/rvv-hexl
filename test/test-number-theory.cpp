@@ -105,6 +105,36 @@ TEST(NumberTheory_MultiplyModShoup) {
   }
 }
 
+namespace {
+// MultiplyAddMod<Imf>(x, w, w_precon, y, q) == (x * w + y) mod q for any x,
+// w < q, y < Imf * q, q < 2^61.
+template <int Imf>
+void CheckMultiplyAddMod(uint64_t q) {
+  auto x = O::Random(300, O::AnyWord<uint64_t>());
+  auto y = O::Random(300, Imf * q);
+  auto ws = O::Random(300, q);
+  x[0] = ~0ULL, y[0] = Imf * q - 1, ws[0] = q - 1;
+  x[1] = q - 1, y[1] = 0, ws[1] = 0;
+  x[2] = ~0ULL, y[2] = Imf * q - 1, ws[2] = 1;
+  for (size_t i = 0; i < x.size(); ++i) {
+    const uint64_t wp = MultiplyFactor(ws[i], 64, q).BarrettFactor();
+    const uint64_t want = (O::MulMod(x[i] % q, ws[i], q) + y[i] % q) % q;
+    CHECK_EQ(MultiplyAddMod<Imf>(x[i], ws[i], wp, y[i], q), want,
+             << "imf=" << Imf << " q=" << q << " x=" << x[i] << " w=" << ws[i] << " y=" << y[i]);
+  }
+}
+}  // namespace
+
+TEST(NumberTheory_MultiplyAddMod) {
+  for (uint64_t q : TestModuli()) {
+    if (q >= (1ULL << 61)) continue;  // contract: q < 2^61
+    CheckMultiplyAddMod<1>(q);
+    CheckMultiplyAddMod<2>(q);
+    CheckMultiplyAddMod<4>(q);
+    CheckMultiplyAddMod<8>(q);
+  }
+}
+
 TEST(NumberTheory_PowMod) {
   for (uint64_t q : TestModuli()) {
     auto base = O::Random(50, q), exp = O::Random(50, ~0ULL);
