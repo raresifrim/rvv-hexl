@@ -22,10 +22,20 @@ namespace intel {
 namespace hexl {
 
 uint64_t InverseMod(uint64_t input, uint64_t modulus) {
-  // TODO(port): extended Euclid on (input mod modulus, modulus). Work in
-  // signed 64-bit (moduli are < 2^62, so int64_t does not overflow), fold a
-  // negative result back with + modulus. HEXL_CHECK that input % modulus != 0.
-  HEXL_NOT_IMPLEMENTED();
+  // extended Euclid on (input mod modulus, modulus).
+  int64_t t_prev=0, t_cur=1;
+  uint64_t r_prev=modulus, r_cur=input%modulus;
+  while(r_cur != 0){
+    int64_t k = r_prev / r_cur;
+    uint64_t r_new = r_prev - k * r_cur;
+    int64_t t_new = t_prev - k * t_cur;
+    r_prev = r_cur;
+    t_prev = t_cur;
+    r_cur = r_new; 
+    t_cur = t_new; 
+  }
+  HEXL_CHECK(r_prev == 1, "Previous remainder must be 1!");
+  return static_cast<uint64_t>(t_prev + (t_prev < 0 ? modulus : 0U)); 
 }
 
 uint64_t AddUIntMod(uint64_t x, uint64_t y, uint64_t modulus) {
