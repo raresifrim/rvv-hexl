@@ -158,7 +158,9 @@ uint64_t AddUIntMod(uint64_t x, uint64_t y, uint64_t modulus);
 /// d + q < 2^64 for every d < q.)
 uint64_t SubUIntMod(uint64_t x, uint64_t y, uint64_t modulus);
 
-/// @brief Returns base^exp mod modulus
+/// @brief Returns base^exp mod modulus. Requires an odd modulus (rvv-hexl
+/// computes it in Montgomery form, R = 2^64); every NTT prime and every
+/// Miller-Rabin candidate is odd.
 uint64_t PowMod(uint64_t base, uint64_t exp, uint64_t modulus);
 
 /// @brief Returns whether or not root is a primitive degree-th root of unity

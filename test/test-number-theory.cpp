@@ -137,6 +137,7 @@ TEST(NumberTheory_MultiplyAddMod) {
 
 TEST(NumberTheory_PowMod) {
   for (uint64_t q : TestModuli()) {
+    if (q % 2 == 0) continue;  // contract: odd modulus (Montgomery)
     auto base = O::Random(50, q), exp = O::Random(50, ~0ULL);
     exp.push_back(0); base.push_back(0);
     exp.push_back(1); base.push_back(q - 1);

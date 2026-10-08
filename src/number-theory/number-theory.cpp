@@ -22,84 +22,131 @@ namespace intel {
 namespace hexl {
 
 uint64_t InverseMod(uint64_t input, uint64_t modulus) {
-  // extended Euclid on (input mod modulus, modulus).
-  int64_t t_prev=0, t_cur=1;
-  uint64_t r_prev=modulus, r_cur=input%modulus;
-  while(r_cur != 0){
-    int64_t k = r_prev / r_cur;
-    uint64_t r_new = r_prev - k * r_cur;
-    int64_t t_new = t_prev - k * t_cur;
-    r_prev = r_cur;
-    t_prev = t_cur;
-    r_cur = r_new; 
-    t_cur = t_new; 
-  }
-  HEXL_CHECK(r_prev == 1, "Previous remainder must be 1!");
-  return static_cast<uint64_t>(t_prev + (t_prev < 0 ? modulus : 0U)); 
+	// extended Euclid on (input mod modulus, modulus).
+	int64_t t_prev=0, t_cur=1;
+	uint64_t r_prev=modulus, r_cur=input%modulus;
+	while(r_cur != 0){
+		int64_t k = r_prev / r_cur;
+		uint64_t r_new = r_prev - k * r_cur;
+		int64_t t_new = t_prev - k * t_cur;
+		r_prev = r_cur;
+		t_prev = t_cur;
+		r_cur = r_new; 
+		t_cur = t_new; 
+	}
+	HEXL_CHECK(r_prev == 1, "Previous remainder must be 1!");
+	return static_cast<uint64_t>(t_prev + (t_prev < 0 ? modulus : 0U)); 
 }
 
 uint64_t AddUIntMod(uint64_t x, uint64_t y, uint64_t modulus) {
-  //(x + y) mod modulus for x, y < modulus.
-  uint64_t sum = x+y;
-  return std::min(sum, sum-modulus);
+	//(x + y) mod modulus for x, y < modulus.
+	uint64_t sum = x+y;
+	return std::min(sum, sum-modulus);
 }
 
 uint64_t SubUIntMod(uint64_t x, uint64_t y, uint64_t modulus) {
-  // (x - y) mod modulus for x, y < modulus.
-  uint64_t diff = x-y;
-  return std::min(diff, diff + modulus);
+	// (x - y) mod modulus for x, y < modulus.
+	uint64_t diff = x-y;
+	return std::min(diff, diff + modulus);
+}
+
+static inline uint64_t MontgomeryReduce(uint64_t x_hi, uint64_t x_lo, uint64_t n, uint64_t modulus){
+	uint64_t q = x_lo * n;
+	uint64_t m;
+	asm("mulhu %0, %1, %2" : "=r"(m) : "r"(q), "r"(modulus));
+	uint64_t val = x_hi - m;
+	return val + (x_hi < m ? modulus : 0U);
+}
+
+static inline uint64_t ComputeMontgomeryN(uint64_t n){
+	// Step 1: Base approximation (correct modulo 8)
+	uint64_t nr = n; 
+
+	// Step 2: Scale up to 64 bits via Newton-Raphson iterations
+	nr = nr * (2 - n * nr); // Correct to 6 bits
+	nr = nr * (2 - n * nr); // Correct to 12 bits
+	nr = nr * (2 - n * nr); // Correct to 24 bits
+	nr = nr * (2 - n * nr); // Correct to 48 bits
+	nr = nr * (2 - n * nr); // Correct to 96 bits (covers full 64-bit space)
+
+	return nr; 
+}
+
+static inline uint64_t ToMontgomery(uint64_t x, uint64_t modulus){
+	return static_cast<uint64_t>((static_cast<unsigned __int128>(x) << 64) % modulus);
+}
+
+static inline uint64_t FromMontgomery(uint64_t x, uint64_t n, uint64_t modulus) { 
+	return MontgomeryReduce(0, x, n, modulus); 
 }
 
 uint64_t PowMod(uint64_t base, uint64_t exp, uint64_t modulus) {
-  // TODO(port): square-and-multiply with MultiplyMod; reduce base first.
-  HEXL_NOT_IMPLEMENTED();
+	//square-and-multiply based on Montgomery; modulus has to be odd
+	if (exp == 0) return 1;
+	HEXL_CHECK(modulus & 1,"Modulus must be odd!");
+	base = ToMontgomery(base, modulus);
+	uint64_t n = ComputeMontgomeryN(modulus);	
+	uint64_t result = 1;
+	for(; exp!=0; exp>>=1){
+		uint64_t t_hi, t_lo;
+		if((exp & 0x1) == 1){
+			asm("mulhu %0, %1, %2" : "=r"(t_hi) : "r"(result), "r"(base));
+			asm("mul %0, %1, %2" : "=r"(t_lo) : "r"(result), "r"(base));
+			result = MontgomeryReduce(t_hi, t_lo, n, modulus);
+		}
+		asm("mulhu %0, %1, %2" : "=r"(t_hi) : "r"(base), "r"(base));
+		asm("mul %0, %1, %2" : "=r"(t_lo) : "r"(base), "r"(base));
+		base = MontgomeryReduce(t_hi, t_lo, n, modulus);
+
+	}
+	return result;
 }
 
 bool IsPrimitiveRoot(uint64_t root, uint64_t degree, uint64_t modulus) {
-  // TODO(port): root == 0 -> false; otherwise, for power-of-two degree,
-  // root is a primitive degree-th root iff root^(degree/2) == modulus - 1.
-  HEXL_NOT_IMPLEMENTED();
+	// TODO(port): root == 0 -> false; otherwise, for power-of-two degree,
+	// root is a primitive degree-th root iff root^(degree/2) == modulus - 1.
+	HEXL_NOT_IMPLEMENTED();
 }
 
 uint64_t GeneratePrimitiveRoot(uint64_t degree, uint64_t modulus) {
-  // TODO(port): pick random x in [0, q), set r = x^((q-1)/degree); r is a
-  // degree-th root of unity; return it if IsPrimitiveRoot(r, degree, q).
-  // Retry a bounded number of times (upstream: 200) and fail loudly.
-  // Tip: std::mt19937_64 with a fixed seed keeps runs reproducible.
-  HEXL_NOT_IMPLEMENTED();
+	// TODO(port): pick random x in [0, q), set r = x^((q-1)/degree); r is a
+	// degree-th root of unity; return it if IsPrimitiveRoot(r, degree, q).
+	// Retry a bounded number of times (upstream: 200) and fail loudly.
+	// Tip: std::mt19937_64 with a fixed seed keeps runs reproducible.
+	HEXL_NOT_IMPLEMENTED();
 }
 
 uint64_t MinimalPrimitiveRoot(uint64_t degree, uint64_t modulus) {
-  // TODO(port): r = GeneratePrimitiveRoot(degree, q). All primitive
-  // degree-th roots are r^k for odd k, so walk r, r^3, r^5, ... (multiply by
-  // r^2 each step, degree/2 steps) and return the smallest value seen.
-  HEXL_NOT_IMPLEMENTED();
+	// TODO(port): r = GeneratePrimitiveRoot(degree, q). All primitive
+	// degree-th roots are r^k for odd k, so walk r, r^3, r^5, ... (multiply by
+	// r^2 each step, degree/2 steps) and return the smallest value seen.
+	HEXL_NOT_IMPLEMENTED();
 }
 
 uint64_t ReverseBits(uint64_t x, uint64_t bit_width) {
-  // TODO(port): reverse the low bit_width bits of x; bit_width == 0 -> 0.
-  // (Only used when building twiddle tables; a simple loop is fine. With Zbb
-  // there is also rev8/brev8-based tricks, and Zvbb has vbrev.v for vectors.)
-  HEXL_NOT_IMPLEMENTED();
+	// TODO(port): reverse the low bit_width bits of x; bit_width == 0 -> 0.
+	// (Only used when building twiddle tables; a simple loop is fine. With Zbb
+	// there is also rev8/brev8-based tricks, and Zvbb has vbrev.v for vectors.)
+	HEXL_NOT_IMPLEMENTED();
 }
 
 bool IsPrime(uint64_t n) {
-  // TODO(port): deterministic Miller-Rabin. The witness set
-  // {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37} is exact for all n < 2^64.
-  // Trial-divide by those witnesses first (and return true when n equals one).
-  HEXL_NOT_IMPLEMENTED();
+	// TODO(port): deterministic Miller-Rabin. The witness set
+	// {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37} is exact for all n < 2^64.
+	// Trial-divide by those witnesses first (and return true when n equals one).
+	HEXL_NOT_IMPLEMENTED();
 }
 
 std::vector<uint64_t> GeneratePrimes(size_t num_primes, size_t bit_size,
-                                     bool prefer_small_primes,
-                                     size_t ntt_size) {
-  // TODO(port): candidates are q = 1 mod 2N inside [2^bit_size, 2^(bit_size+1)).
-  //   prefer_small_primes: start at 2^bit_size + 1, step +2N, go up.
-  //   otherwise:           start at the largest q = 1 mod 2N below
-  //                        2^(bit_size+1), step -2N, go down.
-  // Collect IsPrime() candidates in walk order until num_primes are found.
-  // The tests compare the exact list against an oracle walking the same way.
-  HEXL_NOT_IMPLEMENTED();
+		bool prefer_small_primes,
+		size_t ntt_size) {
+	// TODO(port): candidates are q = 1 mod 2N inside [2^bit_size, 2^(bit_size+1)).
+	//   prefer_small_primes: start at 2^bit_size + 1, step +2N, go up.
+	//   otherwise:           start at the largest q = 1 mod 2N below
+	//                        2^(bit_size+1), step -2N, go down.
+	// Collect IsPrime() candidates in walk order until num_primes are found.
+	// The tests compare the exact list against an oracle walking the same way.
+	HEXL_NOT_IMPLEMENTED();
 }
 
 }  // namespace hexl
