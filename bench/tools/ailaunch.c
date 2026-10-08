@@ -18,23 +18,23 @@
 static void emit(const char *s, long n) { syscall(SYS_write, 2, s, n); }
 
 int main(int argc, char **argv, char **envp) {
-    if (argc < 2) { emit("usage: ailaunch <program> [args...]\n", 36); return 2; }
+	if (argc < 2) { emit("usage: ailaunch <program> [args...]\n", 36); return 2; }
 
-    long pid = syscall(SYS_getpid);
-    char digits[24], out[26];
-    int t = 0, n = 0;
-    if (pid == 0) digits[t++] = '0';
-    while (pid > 0) { digits[t++] = (char)('0' + (pid % 10)); pid /= 10; }
-    while (t > 0) out[n++] = digits[--t];
-    out[n++] = '\n';
+	long pid = syscall(SYS_getpid);
+	char digits[24], out[26];
+	int t = 0, n = 0;
+	if (pid == 0) digits[t++] = '0';
+	while (pid > 0) { digits[t++] = (char)('0' + (pid % 10)); pid /= 10; }
+	while (t > 0) out[n++] = digits[--t];
+	out[n++] = '\n';
 
-    long fd = syscall(SYS_openat, AT_FDCWD, "/proc/set_ai_thread", O_WRONLY, 0);
-    if (fd < 0) { emit("ailaunch: cannot open /proc/set_ai_thread\n", 42); return 1; }
-    if (syscall(SYS_write, fd, out, n) != n) {
-        emit("ailaunch: write to /proc/set_ai_thread failed\n", 46); return 1; }
-    syscall(SYS_close, fd);
+	long fd = syscall(SYS_openat, AT_FDCWD, "/proc/set_ai_thread", O_WRONLY, 0);
+	if (fd < 0) { emit("ailaunch: cannot open /proc/set_ai_thread\n", 42); return 1; }
+	if (syscall(SYS_write, fd, out, n) != n) {
+		emit("ailaunch: write to /proc/set_ai_thread failed\n", 46); return 1; }
+	syscall(SYS_close, fd);
 
-    syscall(SYS_execve, argv[1], argv + 1, envp);
-    emit("ailaunch: execve failed\n", 24);
-    return 127;
+	syscall(SYS_execve, argv[1], argv + 1, envp);
+	emit("ailaunch: execve failed\n", 24);
+	return 127;
 }

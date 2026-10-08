@@ -16,20 +16,20 @@ namespace hexl {
 namespace rvv {
 
 struct PortInfo {
-  /// Library objects were compiled with the V extension (RVV kernels exist)
-  bool compiled_with_rvv;
-  /// The CPU/kernel reports V at runtime (Linux: AT_HWCAP)
-  bool rvv_available;
-  /// RVV kernels will actually be used: compiled && available && the
-  /// HEXL_DISABLE_RVV environment variable is not set
-  bool rvv_enabled;
-  /// VLEN in bits of the hart this was queried on (0 if no RVV). On the
-  /// SpaceMiT K3 this is 256 on the X100 cluster and 1024 on the A100 cluster.
-  size_t vlen_bits;
-  /// Compiler flags the library was built with (e.g. "-O3 -march=rva23u64")
-  const char* build_flags;
-  /// Compiler identification string
-  const char* compiler;
+	/// Library objects were compiled with the V extension (RVV kernels exist)
+	bool compiled_with_rvv;
+	/// The CPU/kernel reports V at runtime (Linux: AT_HWCAP)
+	bool rvv_available;
+	/// RVV kernels will actually be used: compiled && available && the
+	/// HEXL_DISABLE_RVV environment variable is not set
+	bool rvv_enabled;
+	/// VLEN in bits of the hart this was queried on (0 if no RVV). On the
+	/// SpaceMiT K3 this is 256 on the X100 cluster and 1024 on the A100 cluster.
+	size_t vlen_bits;
+	/// Compiler flags the library was built with (e.g. "-O3 -march=rva23u64")
+	const char* build_flags;
+	/// Compiler identification string
+	const char* compiler;
 };
 
 /// @brief Returns build/runtime information about this rvv-hexl library.

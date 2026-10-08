@@ -28,8 +28,8 @@ namespace hexl {
 ///   result[i] = cmp(operand1[i], bound) ? (r - diff) mod modulus : r
 /// Note the comparison is made on the ORIGINAL (unreduced) value.
 void EltwiseCmpSubMod(uint64_t* result, const uint64_t* operand1, uint64_t n,
-                      uint64_t modulus, CMPINT cmp, uint64_t bound,
-                      uint64_t diff);
+		uint64_t modulus, CMPINT cmp, uint64_t bound,
+		uint64_t diff);
 
 
 // ---- rvv-hexl extension: 32-bit storage (OpenFHE NATIVE_SIZE=32) -----------
@@ -39,8 +39,8 @@ void EltwiseCmpSubMod(uint64_t* result, const uint64_t* operand1, uint64_t n,
 // falls back to the native kernels. Not part of upstream Intel HEXL: guard uses
 // with #ifdef HEXL_RVV_HAS_32BIT_API.
 void EltwiseCmpSubMod(uint32_t* result, const uint32_t* operand1, uint64_t n,
-                      uint64_t modulus, CMPINT cmp, uint64_t bound,
-                      uint64_t diff);
+		uint64_t modulus, CMPINT cmp, uint64_t bound,
+		uint64_t diff);
 
 }  // namespace hexl
 }  // namespace intel

@@ -31,19 +31,19 @@ using Vec = intel::hexl::AlignedVector64<uint64_t>;
 /// NTT-friendly prime with `bits` bits (q = 1 mod 2N), computed by the test
 /// oracle so a benchmark never depends on a library function being ported.
 inline uint64_t Prime(size_t bits, uint64_t n) {
-  return hexltest::oracle::NttPrime(bits, n);
+	return hexltest::oracle::NttPrime(bits, n);
 }
 
 inline Vec Random(size_t n, uint64_t bound) {
-  auto v = hexltest::oracle::Random(n, bound);
-  return Vec(v.begin(), v.end());
+	auto v = hexltest::oracle::Random(n, bound);
+	return Vec(v.begin(), v.end());
 }
 
 /// Same, for any storage word (the 32-bit benches use uint32_t).
 template <typename Word>
 inline intel::hexl::AlignedVector64<Word> RandomW(size_t n, uint64_t bound) {
-  auto v = hexltest::oracle::Random(n, bound);
-  return intel::hexl::AlignedVector64<Word>(v.begin(), v.end());
+	auto v = hexltest::oracle::Random(n, bound);
+	return intel::hexl::AlignedVector64<Word>(v.begin(), v.end());
 }
 
 }  // namespace hexlbench
@@ -52,9 +52,9 @@ inline intel::hexl::AlignedVector64<Word> RandomW(size_t n, uint64_t bound) {
 /// any other reason) the benchmark is reported as skipped with the message,
 /// instead of aborting the whole run.
 #define HEXL_BENCH_PROBE(state, expr)          \
-  try {                                        \
-    expr;                                      \
-  } catch (const std::exception& hexl_e_) {    \
-    (state).SkipWithError(hexl_e_.what());     \
-    return;                                    \
-  }
+	try {                                        \
+		expr;                                      \
+	} catch (const std::exception& hexl_e_) {    \
+		(state).SkipWithError(hexl_e_.what());     \
+		return;                                    \
+	}

@@ -22,50 +22,50 @@ namespace hexl {
 
 bool DetectRVV() {
 #if !defined(HEXL_HAS_RVV)
-  return false;  // RVV kernels were not compiled in
+	return false;  // RVV kernels were not compiled in
 #elif defined(__linux__)
-  // Single-letter extensions are reported as bit ('X' - 'A') of AT_HWCAP.
-  // (For multi-letter extensions such as Zvbb use the riscv_hwprobe syscall.)
-  const unsigned long hwcap = getauxval(AT_HWCAP);
-  return (hwcap & (1UL << ('V' - 'A'))) != 0;
+	// Single-letter extensions are reported as bit ('X' - 'A') of AT_HWCAP.
+	// (For multi-letter extensions such as Zvbb use the riscv_hwprobe syscall.)
+	const unsigned long hwcap = getauxval(AT_HWCAP);
+	return (hwcap & (1UL << ('V' - 'A'))) != 0;
 #else
-  // Bare metal / proxy kernel (spike + pk): no auxv. Trust the -march the
-  // library was compiled with.
-  return true;
+	// Bare metal / proxy kernel (spike + pk): no auxv. Trust the -march the
+	// library was compiled with.
+	return true;
 #endif
 }
 
 size_t CurrentVLenBits() {
 #ifdef HEXL_HAS_RVV
-  if (!DetectRVV()) return 0;
-  // VLMAX for SEW=8, LMUL=1 is VLEN/8 = vlenb.
-  return __riscv_vsetvlmax_e8m1() * 8;
+	if (!DetectRVV()) return 0;
+	// VLMAX for SEW=8, LMUL=1 is VLEN/8 = vlenb.
+	return __riscv_vsetvlmax_e8m1() * 8;
 #else
-  return 0;
+	return 0;
 #endif
 }
 
 namespace rvv {
 
 PortInfo GetPortInfo() {
-  PortInfo info;
+	PortInfo info;
 #ifdef HEXL_HAS_RVV
-  info.compiled_with_rvv = true;
+	info.compiled_with_rvv = true;
 #else
-  info.compiled_with_rvv = false;
+	info.compiled_with_rvv = false;
 #endif
-  info.rvv_available = DetectRVV();
-  info.rvv_enabled = has_rvv;
-  info.vlen_bits = CurrentVLenBits();
-  info.build_flags = HEXL_BUILD_FLAGS;
+	info.rvv_available = DetectRVV();
+	info.rvv_enabled = has_rvv;
+	info.vlen_bits = CurrentVLenBits();
+	info.build_flags = HEXL_BUILD_FLAGS;
 #if defined(__clang__)
-  info.compiler = "clang " __clang_version__;
+	info.compiler = "clang " __clang_version__;
 #elif defined(__GNUC__)
-  info.compiler = "gcc " __VERSION__;
+	info.compiler = "gcc " __VERSION__;
 #else
-  info.compiler = "unknown";
+	info.compiler = "unknown";
 #endif
-  return info;
+	return info;
 }
 
 }  // namespace rvv

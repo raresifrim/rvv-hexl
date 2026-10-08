@@ -17,54 +17,54 @@ namespace intel {
 namespace hexl {
 
 void EltwiseCmpSubMod(uint64_t* result, const uint64_t* operand1, uint64_t n,
-                      uint64_t modulus, CMPINT cmp, uint64_t bound,
-                      uint64_t diff) {
-  HEXL_CHECK(result != nullptr, "Require result != nullptr");
-  HEXL_CHECK(operand1 != nullptr, "Require operand1 != nullptr");
-  HEXL_CHECK(n != 0, "Require n != 0");
-  HEXL_CHECK(modulus > 1, "Require modulus > 1");
-  // The branch-free conditional subtract, min(d, d + q), needs d + q < 2^64
-  // for every d < q. OpenFHE (<= 60 bits) and SEAL (<= 61 bits) are far below.
-  HEXL_CHECK(modulus <= (1ULL << 63), "Require modulus <= 2**63");
-  HEXL_CHECK(diff != 0, "Require diff != 0");
-  HEXL_CHECK(diff < modulus, "Diff " << diff << " >= modulus " << modulus);
+		uint64_t modulus, CMPINT cmp, uint64_t bound,
+		uint64_t diff) {
+	HEXL_CHECK(result != nullptr, "Require result != nullptr");
+	HEXL_CHECK(operand1 != nullptr, "Require operand1 != nullptr");
+	HEXL_CHECK(n != 0, "Require n != 0");
+	HEXL_CHECK(modulus > 1, "Require modulus > 1");
+	// The branch-free conditional subtract, min(d, d + q), needs d + q < 2^64
+	// for every d < q. OpenFHE (<= 60 bits) and SEAL (<= 61 bits) are far below.
+	HEXL_CHECK(modulus <= (1ULL << 63), "Require modulus <= 2**63");
+	HEXL_CHECK(diff != 0, "Require diff != 0");
+	HEXL_CHECK(diff < modulus, "Diff " << diff << " >= modulus " << modulus);
 
 #ifdef HEXL_HAS_RVV
-  if (has_rvv) {
-    HEXL_VLOG(3, "Calling EltwiseCmpSubModRVV<uint64_t>");
-    EltwiseCmpSubModRVV<uint64_t>(result, operand1, n, modulus, cmp, bound, diff);
-    return;
-  }
+	if (has_rvv) {
+		HEXL_VLOG(3, "Calling EltwiseCmpSubModRVV<uint64_t>");
+		EltwiseCmpSubModRVV<uint64_t>(result, operand1, n, modulus, cmp, bound, diff);
+		return;
+	}
 #endif
 
-  HEXL_VLOG(3, "Calling EltwiseCmpSubModNative<uint64_t>");
-  EltwiseCmpSubModNative<uint64_t>(result, operand1, n, modulus, cmp, bound, diff);
+	HEXL_VLOG(3, "Calling EltwiseCmpSubModNative<uint64_t>");
+	EltwiseCmpSubModNative<uint64_t>(result, operand1, n, modulus, cmp, bound, diff);
 }
 
 // ---- rvv-hexl extension: 32-bit storage ----------------------------------
 
 void EltwiseCmpSubMod(uint32_t* result, const uint32_t* operand1, uint64_t n,
-                      uint64_t modulus, CMPINT cmp, uint64_t bound,
-                      uint64_t diff) {
-  HEXL_CHECK(result != nullptr, "Require result != nullptr");
-  HEXL_CHECK(operand1 != nullptr, "Require operand1 != nullptr");
-  HEXL_CHECK(n != 0, "Require n != 0");
-  HEXL_CHECK(modulus > 1, "Require modulus > 1");
-  HEXL_CHECK(diff != 0, "Require diff != 0");
-  HEXL_CHECK(diff < modulus, "Diff " << diff << " >= modulus " << modulus);
-  HEXL_CHECK(modulus <= (1ULL << 32), "Require modulus <= 2**32");
-  HEXL_CHECK(bound < (1ULL << 32), "Require bound < 2**32");
+		uint64_t modulus, CMPINT cmp, uint64_t bound,
+		uint64_t diff) {
+	HEXL_CHECK(result != nullptr, "Require result != nullptr");
+	HEXL_CHECK(operand1 != nullptr, "Require operand1 != nullptr");
+	HEXL_CHECK(n != 0, "Require n != 0");
+	HEXL_CHECK(modulus > 1, "Require modulus > 1");
+	HEXL_CHECK(diff != 0, "Require diff != 0");
+	HEXL_CHECK(diff < modulus, "Diff " << diff << " >= modulus " << modulus);
+	HEXL_CHECK(modulus <= (1ULL << 32), "Require modulus <= 2**32");
+	HEXL_CHECK(bound < (1ULL << 32), "Require bound < 2**32");
 
 #ifdef HEXL_HAS_RVV
-  if (has_rvv && modulus < kMaxModulusRVV32) {
-    HEXL_VLOG(3, "Calling EltwiseCmpSubModRVV<uint32_t>");
-    EltwiseCmpSubModRVV<uint32_t>(result, operand1, n, modulus, cmp, bound, diff);
-    return;
-  }
+	if (has_rvv && modulus < kMaxModulusRVV32) {
+		HEXL_VLOG(3, "Calling EltwiseCmpSubModRVV<uint32_t>");
+		EltwiseCmpSubModRVV<uint32_t>(result, operand1, n, modulus, cmp, bound, diff);
+		return;
+	}
 #endif
 
-  HEXL_VLOG(3, "Calling EltwiseCmpSubModNative<uint32_t>");
-  EltwiseCmpSubModNative<uint32_t>(result, operand1, n, modulus, cmp, bound, diff);
+	HEXL_VLOG(3, "Calling EltwiseCmpSubModNative<uint32_t>");
+	EltwiseCmpSubModNative<uint32_t>(result, operand1, n, modulus, cmp, bound, diff);
 }
 
 // ---------------------------------------------------------------------------
@@ -80,10 +80,10 @@ void EltwiseCmpSubMod(uint32_t* result, const uint32_t* operand1, uint64_t n,
 // element.
 template <typename Word>
 static inline Word CmpSubModOne(uint64_t x, bool hit, uint64_t modulus, uint64_t q_barr,
-                                uint64_t diff) {
-  const uint64_t r = BarrettReduce64(x, modulus, q_barr);   // any value -> [0, q)
-  const uint64_t d = r - (hit ? diff : 0U);                 // r - diff (may wrap) or r -> this uses czero instruction to avoid branching
-  return (Word)std::min(d, d + modulus);                    // back into [0, q) -> this uses the minu instruction if present
+		uint64_t diff) {
+	const uint64_t r = BarrettReduce64(x, modulus, q_barr);   // any value -> [0, q)
+	const uint64_t d = r - (hit ? diff : 0U);                 // r - diff (may wrap) or r -> this uses czero instruction to avoid branching
+	return (Word)std::min(d, d + modulus);                    // back into [0, q) -> this uses the minu instruction if present
 }
 
 // One loop per comparison, so the switch runs once per call. Every loop has
@@ -92,66 +92,66 @@ static inline Word CmpSubModOne(uint64_t x, bool hit, uint64_t modulus, uint64_t
 template <typename Word>
 void EltwiseCmpSubModNative(Word* result, const Word* operand1, uint64_t n, uint64_t modulus, CMPINT cmp, uint64_t bound, uint64_t diff) {
 
-  const uint64_t q_barr = MultiplyFactor(1, 64, modulus).BarrettFactor();  // once per call
+	const uint64_t q_barr = MultiplyFactor(1, 64, modulus).BarrettFactor();  // once per call
 
-  switch (cmp) {
-    case CMPINT::EQ:
+	switch (cmp) {
+		case CMPINT::EQ:
 #pragma GCC novector
-      for (uint64_t i = 0; i < n; ++i) {
-        result[i] = CmpSubModOne<Word>(operand1[i], operand1[i] == bound, modulus, q_barr, diff);
-      }
-      break;
-    case CMPINT::LT:
+			for (uint64_t i = 0; i < n; ++i) {
+				result[i] = CmpSubModOne<Word>(operand1[i], operand1[i] == bound, modulus, q_barr, diff);
+			}
+			break;
+		case CMPINT::LT:
 #pragma GCC novector
-      for (uint64_t i = 0; i < n; ++i) {
-        result[i] = CmpSubModOne<Word>(operand1[i], operand1[i] < bound, modulus, q_barr, diff);
-      }
-      break;
-    case CMPINT::LE:
+			for (uint64_t i = 0; i < n; ++i) {
+				result[i] = CmpSubModOne<Word>(operand1[i], operand1[i] < bound, modulus, q_barr, diff);
+			}
+			break;
+		case CMPINT::LE:
 #pragma GCC novector
-      for (uint64_t i = 0; i < n; ++i) {
-        result[i] = CmpSubModOne<Word>(operand1[i], operand1[i] <= bound, modulus, q_barr, diff);
-      }
-      break;
-    case CMPINT::NE:
+			for (uint64_t i = 0; i < n; ++i) {
+				result[i] = CmpSubModOne<Word>(operand1[i], operand1[i] <= bound, modulus, q_barr, diff);
+			}
+			break;
+		case CMPINT::NE:
 #pragma GCC novector
-      for (uint64_t i = 0; i < n; ++i) {
-        result[i] = CmpSubModOne<Word>(operand1[i], operand1[i] != bound, modulus, q_barr, diff);
-      }
-      break;
-    case CMPINT::NLT:
+			for (uint64_t i = 0; i < n; ++i) {
+				result[i] = CmpSubModOne<Word>(operand1[i], operand1[i] != bound, modulus, q_barr, diff);
+			}
+			break;
+		case CMPINT::NLT:
 #pragma GCC novector
-      for (uint64_t i = 0; i < n; ++i) {
-        result[i] = CmpSubModOne<Word>(operand1[i], operand1[i] >= bound, modulus, q_barr, diff);
-      }
-      break;
-    case CMPINT::NLE:
+			for (uint64_t i = 0; i < n; ++i) {
+				result[i] = CmpSubModOne<Word>(operand1[i], operand1[i] >= bound, modulus, q_barr, diff);
+			}
+			break;
+		case CMPINT::NLE:
 #pragma GCC novector
-      for (uint64_t i = 0; i < n; ++i) {
-        result[i] = CmpSubModOne<Word>(operand1[i], operand1[i] > bound, modulus, q_barr, diff);
-      }
-      break;
-    case CMPINT::TRUE:
+			for (uint64_t i = 0; i < n; ++i) {
+				result[i] = CmpSubModOne<Word>(operand1[i], operand1[i] > bound, modulus, q_barr, diff);
+			}
+			break;
+		case CMPINT::TRUE:
 #pragma GCC novector
-      for (uint64_t i = 0; i < n; ++i) {
-        result[i] = CmpSubModOne<Word>(operand1[i], true, modulus, q_barr, diff);
-      }
-      break;
-    case CMPINT::FALSE:
-      // no element is shifted, but every element is still reduced
+			for (uint64_t i = 0; i < n; ++i) {
+				result[i] = CmpSubModOne<Word>(operand1[i], true, modulus, q_barr, diff);
+			}
+			break;
+		case CMPINT::FALSE:
+			// no element is shifted, but every element is still reduced
 #pragma GCC novector
-      for (uint64_t i = 0; i < n; ++i) {
-        result[i] = (Word)BarrettReduce64(operand1[i], modulus, q_barr);
-      }
-      break;
-    default:
-      // not a valid CMPINT; the scalar Compare() treats unknown values as TRUE
+			for (uint64_t i = 0; i < n; ++i) {
+				result[i] = (Word)BarrettReduce64(operand1[i], modulus, q_barr);
+			}
+			break;
+		default:
+			// not a valid CMPINT; the scalar Compare() treats unknown values as TRUE
 #pragma GCC novector
-      for (uint64_t i = 0; i < n; ++i) {
-        result[i] = CmpSubModOne<Word>(operand1[i], true, modulus, q_barr, diff);
-      }
-      break;
-  }
+			for (uint64_t i = 0; i < n; ++i) {
+				result[i] = CmpSubModOne<Word>(operand1[i], true, modulus, q_barr, diff);
+			}
+			break;
+	}
 }
 
 }  // namespace hexl

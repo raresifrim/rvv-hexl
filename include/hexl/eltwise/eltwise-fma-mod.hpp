@@ -27,8 +27,8 @@ namespace hexl {
 /// in [0, input_mod_factor * modulus). Must be 1, 2, 4, or 8.
 /// @details Output is fully reduced, in [0, modulus).
 void EltwiseFMAMod(uint64_t* result, const uint64_t* arg1, uint64_t arg2,
-                   const uint64_t* arg3, uint64_t n, uint64_t modulus,
-                   uint64_t input_mod_factor);
+		const uint64_t* arg3, uint64_t n, uint64_t modulus,
+		uint64_t input_mod_factor);
 
 
 // ---- rvv-hexl extension: 32-bit storage (OpenFHE NATIVE_SIZE=32) -----------
@@ -38,8 +38,8 @@ void EltwiseFMAMod(uint64_t* result, const uint64_t* arg1, uint64_t arg2,
 // falls back to the native kernels. Not part of upstream Intel HEXL: guard uses
 // with #ifdef HEXL_RVV_HAS_32BIT_API.
 void EltwiseFMAMod(uint32_t* result, const uint32_t* arg1, uint64_t arg2,
-                   const uint32_t* arg3, uint64_t n, uint64_t modulus,
-                   uint64_t input_mod_factor);
+		const uint32_t* arg3, uint64_t n, uint64_t modulus,
+		uint64_t input_mod_factor);
 
 }  // namespace hexl
 }  // namespace intel

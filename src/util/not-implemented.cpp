@@ -11,8 +11,8 @@ namespace hexl {
 namespace internal {
 
 void ThrowNotImplemented(const char* function, const char* file, int line) {
-  throw std::logic_error(std::string("[rvv-hexl TODO] ") + function + " (" +
-                         file + ":" + std::to_string(line) + ")");
+	throw std::logic_error(std::string("[rvv-hexl TODO] ") + function + " (" +
+			file + ":" + std::to_string(line) + ")");
 }
 
 }  // namespace internal

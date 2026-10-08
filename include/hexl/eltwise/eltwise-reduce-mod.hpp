@@ -27,8 +27,8 @@ namespace hexl {
 /// output_mod_factor * modulus). Must be 1 or 2. Any representative in that
 /// range congruent to the input mod p is correct.
 void EltwiseReduceMod(uint64_t* result, const uint64_t* operand, uint64_t n,
-                      uint64_t modulus, uint64_t input_mod_factor,
-                      uint64_t output_mod_factor);
+		uint64_t modulus, uint64_t input_mod_factor,
+		uint64_t output_mod_factor);
 
 
 // ---- rvv-hexl extension: 32-bit storage (OpenFHE NATIVE_SIZE=32) -----------
@@ -39,8 +39,8 @@ void EltwiseReduceMod(uint64_t* result, const uint64_t* operand, uint64_t n,
 // with #ifdef HEXL_RVV_HAS_32BIT_API.
 /// input_mod_factor == modulus means "any 32-bit value".
 void EltwiseReduceMod(uint32_t* result, const uint32_t* operand, uint64_t n,
-                      uint64_t modulus, uint64_t input_mod_factor,
-                      uint64_t output_mod_factor);
+		uint64_t modulus, uint64_t input_mod_factor,
+		uint64_t output_mod_factor);
 
 }  // namespace hexl
 }  // namespace intel

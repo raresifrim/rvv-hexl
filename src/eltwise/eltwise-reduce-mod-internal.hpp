@@ -23,13 +23,13 @@ namespace hexl {
 /// input_mod_factor is modulus (any Word value), 2 or 4; output_mod_factor is
 /// 1 or 2; never equal here (the public entry point handles the "copy" case).
 template <typename Word>
-void EltwiseReduceModNative(Word* result, const Word* operand, uint64_t n, uint64_t modulus, uint64_t input_mod_factor, uint64_t output_mod_factor);
+	void EltwiseReduceModNative(Word* result, const Word* operand, uint64_t n, uint64_t modulus, uint64_t input_mod_factor, uint64_t output_mod_factor);
 
 #ifdef HEXL_HAS_RVV
 /// @brief RVV variant, same contract. Word = uint32_t only reaches it with
 /// modulus < 2^30 (where a modulus applies).
 template <typename Word, class V = rvv::LaneFor<Word, rvv::cfg::ReduceMod64, rvv::cfg::ReduceMod32>>
-void EltwiseReduceModRVV(Word* result, const Word* operand, uint64_t n, uint64_t modulus, uint64_t input_mod_factor, uint64_t output_mod_factor);
+	void EltwiseReduceModRVV(Word* result, const Word* operand, uint64_t n, uint64_t modulus, uint64_t input_mod_factor, uint64_t output_mod_factor);
 #endif
 
 }  // namespace hexl

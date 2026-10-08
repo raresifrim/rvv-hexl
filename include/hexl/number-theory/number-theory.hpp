@@ -23,55 +23,55 @@ namespace hexl {
 /// @brief Pre-computes a Barrett factor with which modular multiplication can
 /// be performed more efficiently
 class MultiplyFactor {
- public:
-  MultiplyFactor() = default;
+	public:
+		MultiplyFactor() = default;
 
-  /// @brief Computes and stores the Barrett factor floor((operand << bit_shift)
-  /// / modulus). This is useful when modular multiplication of the form
-  /// (x * operand) mod modulus is performed with same modulus and operand
-  /// several times (Shoup's trick: NTT twiddles, FMA scalars). Passing
-  /// operand=1 pre-computes floor(2^bit_shift / modulus) for plain Barrett.
-  /// @details bit_shift 32 is the natural choice for the RVV e32 path
-  /// (SEW=32, modulus < 2^30); bit_shift 64 for the e64 path. 52 exists only
-  /// for upstream's AVX512-IFMA path and is kept for compatibility.
-  MultiplyFactor(uint64_t operand, uint64_t bit_shift, uint64_t modulus)
-      : m_operand(operand) {
-    HEXL_CHECK(operand <= modulus, "operand " << operand
-                                              << " must be less than modulus "
-                                              << modulus);
-    HEXL_CHECK(bit_shift == 32 || bit_shift == 52 || bit_shift == 64,
-               "Unsupported BitShift " << bit_shift);
-    uint64_t op_hi = operand >> (64 - bit_shift);
-    uint64_t op_lo = (bit_shift == 64) ? 0 : (operand << bit_shift);
+		/// @brief Computes and stores the Barrett factor floor((operand << bit_shift)
+		/// / modulus). This is useful when modular multiplication of the form
+		/// (x * operand) mod modulus is performed with same modulus and operand
+		/// several times (Shoup's trick: NTT twiddles, FMA scalars). Passing
+		/// operand=1 pre-computes floor(2^bit_shift / modulus) for plain Barrett.
+		/// @details bit_shift 32 is the natural choice for the RVV e32 path
+		/// (SEW=32, modulus < 2^30); bit_shift 64 for the e64 path. 52 exists only
+		/// for upstream's AVX512-IFMA path and is kept for compatibility.
+		MultiplyFactor(uint64_t operand, uint64_t bit_shift, uint64_t modulus)
+			: m_operand(operand) {
+				HEXL_CHECK(operand <= modulus, "operand " << operand
+						<< " must be less than modulus "
+						<< modulus);
+				HEXL_CHECK(bit_shift == 32 || bit_shift == 52 || bit_shift == 64,
+						"Unsupported BitShift " << bit_shift);
+				uint64_t op_hi = operand >> (64 - bit_shift);
+				uint64_t op_lo = (bit_shift == 64) ? 0 : (operand << bit_shift);
 
-    // RV64 has no 128-by-64 divide: the generic path below is a libgcc
-    // __udivti3 call (~50-70 cycles on the K3). The two common cases need
-    // only one 64-bit divu (4-8x faster, measured on the X100 and A100):
-    if (op_hi == 0) {
-      // The dividend fits in 64 bits: bit_shift 32/52 with operand 1, and the
-      // e32 Shoup factors floor(y * 2^32 / q) for y < q < 2^30.
-      m_barrett_factor = op_lo / modulus;
-    } else if ((op_hi == 1) && (op_lo == 0)) {
-      // 2^64 / modulus (operand 1, bit_shift 64: the plain Barrett factor):
-      // floor(2^64 / q) = floor((2^64 - 1) / q) + 1 if q divides 2^64, else + 0.
-      // q divides 2^64 exactly when (2^64 - 1) mod q == q - 1 (q a power of two).
-      const uint64_t all_ones = ~uint64_t{0};
-      m_barrett_factor =
-          (all_ones / modulus) + (((all_ones % modulus) == (modulus - 1)) ? 1 : 0);
-    } else {
-      m_barrett_factor = DivideUInt128UInt64Lo(op_hi, op_lo, modulus);
-    }
-  }
+				// RV64 has no 128-by-64 divide: the generic path below is a libgcc
+				// __udivti3 call (~50-70 cycles on the K3). The two common cases need
+				// only one 64-bit divu (4-8x faster, measured on the X100 and A100):
+				if (op_hi == 0) {
+					// The dividend fits in 64 bits: bit_shift 32/52 with operand 1, and the
+					// e32 Shoup factors floor(y * 2^32 / q) for y < q < 2^30.
+					m_barrett_factor = op_lo / modulus;
+				} else if ((op_hi == 1) && (op_lo == 0)) {
+					// 2^64 / modulus (operand 1, bit_shift 64: the plain Barrett factor):
+					// floor(2^64 / q) = floor((2^64 - 1) / q) + 1 if q divides 2^64, else + 0.
+					// q divides 2^64 exactly when (2^64 - 1) mod q == q - 1 (q a power of two).
+					const uint64_t all_ones = ~uint64_t{0};
+					m_barrett_factor =
+						(all_ones / modulus) + (((all_ones % modulus) == (modulus - 1)) ? 1 : 0);
+				} else {
+					m_barrett_factor = DivideUInt128UInt64Lo(op_hi, op_lo, modulus);
+				}
+			}
 
-  /// @brief Returns the pre-computed Barrett factor
-  inline uint64_t BarrettFactor() const { return m_barrett_factor; }
+		/// @brief Returns the pre-computed Barrett factor
+		inline uint64_t BarrettFactor() const { return m_barrett_factor; }
 
-  /// @brief Returns the operand corresponding to the Barrett factor
-  inline uint64_t Operand() const { return m_operand; }
+		/// @brief Returns the operand corresponding to the Barrett factor
+		inline uint64_t Operand() const { return m_operand; }
 
- private:
-  uint64_t m_operand;
-  uint64_t m_barrett_factor;
+	private:
+		uint64_t m_operand;
+		uint64_t m_barrett_factor;
 };
 
 /// @brief Returns whether or not num is a power of two
@@ -81,16 +81,16 @@ inline bool IsPowerOfTwo(uint64_t num) { return num && !(num & (num - 1)); }
 inline uint64_t Log2(uint64_t x) { return MSB(x); }
 
 inline bool IsPowerOfFour(uint64_t num) {
-  return IsPowerOfTwo(num) && (Log2(num) % 2 == 0);
+	return IsPowerOfTwo(num) && (Log2(num) % 2 == 0);
 }
 
 /// @brief Returns the maximum value that can be represented using \p bits bits
 inline uint64_t MaximumValue(uint64_t bits) {
-  HEXL_CHECK(bits <= 64, "MaximumValue requires bits <= 64; got " << bits);
-  if (bits == 64) {
-    return (std::numeric_limits<uint64_t>::max)();
-  }
-  return (1ULL << bits) - 1;
+	HEXL_CHECK(bits <= 64, "MaximumValue requires bits <= 64; got " << bits);
+	if (bits == 64) {
+		return (std::numeric_limits<uint64_t>::max)();
+	}
+	return (1ULL << bits) - 1;
 }
 
 // ===========================================================================
@@ -109,26 +109,26 @@ uint64_t InverseMod(uint64_t x, uint64_t modulus);
 /// (rvv-hexl computes it with upstream HEXL's pre-shift Barrett, exact for
 /// moduli of up to 61 bits; OpenFHE uses <= 60 bits, SEAL <= 61.)
 inline uint64_t MultiplyMod(uint64_t x, uint64_t y, uint64_t modulus) {
-  // 128-bit product (MultiplyUInt64 -> hi, lo) then
-  // BarrettReduce128(hi, lo, modulus). Assumes x, y < modulus.
-  //SEAL and OpenFHE guarantee moduli under 2^61 otherwise we might need to perform 2 final subtractions to get the putput in [0,modulus) 
-  HEXL_CHECK(modulus < (1ULL << 61), "Require modulus < (1ULL << 61)"); 
-  const uint8_t n = MSB(modulus) + 1;
-  
-  //compute raw x*y
-  uint64_t hi, lo;
-  asm("mulhu %0, %1, %2" : "=r"(hi) : "r"(x), "r"(y));
-  asm("mul %0, %1, %2" : "=r"(lo) : "r"(x), "r"(y));
+	// 128-bit product (MultiplyUInt64 -> hi, lo) then
+	// BarrettReduce128(hi, lo, modulus). Assumes x, y < modulus.
+	//SEAL and OpenFHE guarantee moduli under 2^61 otherwise we might need to perform 2 final subtractions to get the putput in [0,modulus) 
+	HEXL_CHECK(modulus < (1ULL << 61), "Require modulus < (1ULL << 61)"); 
+	const uint8_t n = MSB(modulus) + 1;
 
-  //compute the multiplication factor optimized for less multiplication
-  uint64_t m = MultiplyFactor(uint64_t(1U) << (n-2), 64, modulus).BarrettFactor();
-  uint64_t c = lo >> (n-2) | hi << (64-(n-2));
-  uint64_t q;
-  asm("mulhu %0, %1, %2" : "=r"(q) : "r"(c), "r"(m));
+	//compute raw x*y
+	uint64_t hi, lo;
+	asm("mulhu %0, %1, %2" : "=r"(hi) : "r"(x), "r"(y));
+	asm("mul %0, %1, %2" : "=r"(lo) : "r"(x), "r"(y));
 
-  //get final result
-  uint64_t r = lo - (q * modulus);
-  return std::min(r, r - modulus);
+	//compute the multiplication factor optimized for less multiplication
+	uint64_t m = MultiplyFactor(uint64_t(1U) << (n-2), 64, modulus).BarrettFactor();
+	uint64_t c = lo >> (n-2) | hi << (64-(n-2));
+	uint64_t q;
+	asm("mulhu %0, %1, %2" : "=r"(q) : "r"(c), "r"(m));
+
+	//get final result
+	uint64_t r = lo - (q * modulus);
+	return std::min(r, r - modulus);
 }
 
 /// @brief Returns (x * y) mod modulus, Shoup style.
@@ -137,15 +137,15 @@ inline uint64_t MultiplyMod(uint64_t x, uint64_t y, uint64_t modulus) {
 /// "floor(2**64 / modulus)", which is wrong; the implementation and every
 /// caller use the y-dependent factor.)
 inline uint64_t MultiplyMod(uint64_t x, uint64_t y, uint64_t y_precon,
-                            uint64_t modulus) {
-  // Shoup's trick. y_precon = floor(y * 2^64 / q):
-  // Q = MultiplyUInt64Hi<64>(x, y_precon);   // approx. floor(x*y/q)
-  // r = x * y - Q * q;                       // wrapping 64-bit, in [0, 2q)
-  // return r >= q ? r - q : r; 
-  uint64_t Q;
-  asm("mulhu %0, %1, %2" : "=r"(Q) : "r"(x), "r"(y_precon));
-  uint64_t r = x * y - Q * modulus;
-  return std::min(r, r - modulus); 
+		uint64_t modulus) {
+	// Shoup's trick. y_precon = floor(y * 2^64 / q):
+	// Q = MultiplyUInt64Hi<64>(x, y_precon);   // approx. floor(x*y/q)
+	// r = x * y - Q * q;                       // wrapping 64-bit, in [0, 2q)
+	// return r >= q ? r - q : r; 
+	uint64_t Q;
+	asm("mulhu %0, %1, %2" : "=r"(Q) : "r"(x), "r"(y_precon));
+	uint64_t r = x * y - Q * modulus;
+	return std::min(r, r - modulus); 
 }
 
 /// @brief Returns (x + y) mod modulus. Assumes x, y < modulus <= 2^63.
@@ -189,36 +189,36 @@ uint64_t MinimalPrimitiveRoot(uint64_t degree, uint64_t modulus);
 /// << BitShift) / modulus)
 template <int BitShift>
 inline uint64_t MultiplyModLazy(uint64_t x, uint64_t y_operand,
-                                uint64_t y_barrett_factor, uint64_t modulus) {
-  HEXL_CHECK(y_operand < modulus, "y_operand " << y_operand
-                                               << " must be less than modulus "
-                                               << modulus);
-  HEXL_CHECK(
-      modulus <= MaximumValue(BitShift),
-      "Modulus " << modulus << " exceeds bound " << MaximumValue(BitShift));
-  HEXL_CHECK(x <= MaximumValue(BitShift),
-             "Operand " << x << " exceeds bound " << MaximumValue(BitShift));
+		uint64_t y_barrett_factor, uint64_t modulus) {
+	HEXL_CHECK(y_operand < modulus, "y_operand " << y_operand
+			<< " must be less than modulus "
+			<< modulus);
+	HEXL_CHECK(
+			modulus <= MaximumValue(BitShift),
+			"Modulus " << modulus << " exceeds bound " << MaximumValue(BitShift));
+	HEXL_CHECK(x <= MaximumValue(BitShift),
+			"Operand " << x << " exceeds bound " << MaximumValue(BitShift));
 
-  uint64_t Q = MultiplyUInt64Hi<BitShift>(x, y_barrett_factor);
-  return y_operand * x - Q * modulus;
+	uint64_t Q = MultiplyUInt64Hi<BitShift>(x, y_barrett_factor);
+	return y_operand * x - Q * modulus;
 }
 
 /// @brief Computes (x * y) mod modulus, except that the output is in [0, 2 *
 /// modulus]
 template <int BitShift>
 inline uint64_t MultiplyModLazy(uint64_t x, uint64_t y, uint64_t modulus) {
-  HEXL_CHECK(BitShift == 64 || BitShift == 52,
-             "Unsupported BitShift " << BitShift);
-  HEXL_CHECK(x <= MaximumValue(BitShift),
-             "Operand " << x << " exceeds bound " << MaximumValue(BitShift));
-  HEXL_CHECK(y < modulus,
-             "y " << y << " must be less than modulus " << modulus);
-  HEXL_CHECK(
-      modulus <= MaximumValue(BitShift),
-      "Modulus " << modulus << " exceeds bound " << MaximumValue(BitShift));
+	HEXL_CHECK(BitShift == 64 || BitShift == 52,
+			"Unsupported BitShift " << BitShift);
+	HEXL_CHECK(x <= MaximumValue(BitShift),
+			"Operand " << x << " exceeds bound " << MaximumValue(BitShift));
+	HEXL_CHECK(y < modulus,
+			"y " << y << " must be less than modulus " << modulus);
+	HEXL_CHECK(
+			modulus <= MaximumValue(BitShift),
+			"Modulus " << modulus << " exceeds bound " << MaximumValue(BitShift));
 
-  uint64_t y_barrett = MultiplyFactor(y, BitShift, modulus).BarrettFactor();
-  return MultiplyModLazy<BitShift>(x, y, y_barrett, modulus);
+	uint64_t y_barrett = MultiplyFactor(y, BitShift, modulus).BarrettFactor();
+	return MultiplyModLazy<BitShift>(x, y, y_barrett, modulus);
 }
 
 /// @brief Fused Shoup multiply-add: returns (x * w + y) mod modulus in
@@ -238,29 +238,29 @@ inline uint64_t MultiplyModLazy(uint64_t x, uint64_t y, uint64_t modulus) {
 /// step less, and for InputModFactor 2 none.
 template <int InputModFactor>
 inline uint64_t MultiplyAddMod(uint64_t x, uint64_t w, uint64_t w_precon,
-                               uint64_t y, uint64_t modulus) {
-  static_assert(InputModFactor == 1 || InputModFactor == 2 ||
-                    InputModFactor == 4 || InputModFactor == 8,
-                "InputModFactor must be 1, 2, 4 or 8");
-  HEXL_CHECK(modulus < (1ULL << 61), "Require modulus < 2^61");
-  HEXL_CHECK(w < modulus, "w " << w << " must be less than modulus " << modulus);
-  HEXL_CHECK(y < InputModFactor * modulus,
-             "y " << y << " exceeds bound " << InputModFactor * modulus);
-  if constexpr (InputModFactor == 8) y = std::min(y, y - 4 * modulus);  // [0, 8q) -> [0, 4q)
-  if constexpr (InputModFactor >= 4) y = std::min(y, y - 2 * modulus);  // [0, 4q) -> [0, 2q)
-  uint64_t Q;
-  asm("mulhu %0, %1, %2" : "=r"(Q) : "r"(x), "r"(w_precon));  // ~floor(x * w / q)
-  uint64_t r = x * w + y - Q * modulus;  // in [0, 2q + y) < 4q
-  r = std::min(r, r - 2 * modulus);      // [0, 4q) -> [0, 2q)
-  return std::min(r, r - modulus);       // [0, 2q) -> [0, q)
+		uint64_t y, uint64_t modulus) {
+	static_assert(InputModFactor == 1 || InputModFactor == 2 ||
+			InputModFactor == 4 || InputModFactor == 8,
+			"InputModFactor must be 1, 2, 4 or 8");
+	HEXL_CHECK(modulus < (1ULL << 61), "Require modulus < 2^61");
+	HEXL_CHECK(w < modulus, "w " << w << " must be less than modulus " << modulus);
+	HEXL_CHECK(y < InputModFactor * modulus,
+			"y " << y << " exceeds bound " << InputModFactor * modulus);
+	if constexpr (InputModFactor == 8) y = std::min(y, y - 4 * modulus);  // [0, 8q) -> [0, 4q)
+	if constexpr (InputModFactor >= 4) y = std::min(y, y - 2 * modulus);  // [0, 4q) -> [0, 2q)
+	uint64_t Q;
+	asm("mulhu %0, %1, %2" : "=r"(Q) : "r"(x), "r"(w_precon));  // ~floor(x * w / q)
+	uint64_t r = x * w + y - Q * modulus;  // in [0, 2q + y) < 4q
+	r = std::min(r, r - 2 * modulus);      // [0, 4q) -> [0, 2q)
+	return std::min(r, r - modulus);       // [0, 2q) -> [0, q)
 }
 
 /// @brief Adds two unsigned 64-bit integers
 /// @return The carry bit
 inline unsigned char AddUInt64(uint64_t operand1, uint64_t operand2,
-                               uint64_t* result) {
-  *result = operand1 + operand2;
-  return static_cast<unsigned char>(*result < operand1);
+		uint64_t* result) {
+	*result = operand1 + operand2;
+	return static_cast<unsigned char>(*result < operand1);
 }
 
 // ===========================================================================
@@ -279,8 +279,8 @@ bool IsPrime(uint64_t n);
 /// list is the walk order (ascending resp. descending).
 /// @param[in] ntt_size N; power of two, log2(N) < bit_size.
 std::vector<uint64_t> GeneratePrimes(size_t num_primes, size_t bit_size,
-                                     bool prefer_small_primes,
-                                     size_t ntt_size = 1);
+		bool prefer_small_primes,
+		size_t ntt_size = 1);
 
 // ===========================================================================
 
@@ -288,14 +288,14 @@ std::vector<uint64_t> GeneratePrimes(size_t num_primes, size_t bit_size,
 /// @param[in] q_barr floor(2^64 / modulus)
 template <int OutputModFactor = 1>
 uint64_t BarrettReduce64(uint64_t input, uint64_t modulus, uint64_t q_barr) {
-  HEXL_CHECK(modulus != 0, "modulus == 0");
-  uint64_t q = MultiplyUInt64Hi<64>(input, q_barr);
-  uint64_t q_times_input = input - q * modulus;
-  if (OutputModFactor == 2) {
-    return q_times_input;
-  } else {
-    return (q_times_input >= modulus) ? q_times_input - modulus : q_times_input;
-  }
+	HEXL_CHECK(modulus != 0, "modulus == 0");
+	uint64_t q = MultiplyUInt64Hi<64>(input, q_barr);
+	uint64_t q_times_input = input - q * modulus;
+	if (OutputModFactor == 2) {
+		return q_times_input;
+	} else {
+		return (q_times_input >= modulus) ? q_times_input - modulus : q_times_input;
+	}
 }
 
 /// @brief Returns x mod modulus, assuming x < InputModFactor * modulus
@@ -305,48 +305,48 @@ uint64_t BarrettReduce64(uint64_t input, uint64_t modulus, uint64_t q_barr) {
 /// == 8
 template <int InputModFactor>
 uint64_t ReduceMod(uint64_t x, uint64_t modulus,
-                   const uint64_t* twice_modulus = nullptr,
-                   const uint64_t* four_times_modulus = nullptr) {
-  HEXL_CHECK(InputModFactor == 1 || InputModFactor == 2 ||
-                 InputModFactor == 4 || InputModFactor == 8,
-             "InputModFactor should be 1, 2, 4, or 8");
-  if (InputModFactor == 1) {
-    return x;
-  }
-  if (InputModFactor == 2) {
-    if (x >= modulus) {
-      x -= modulus;
-    }
-    return x;
-  }
-  if (InputModFactor == 4) {
-    HEXL_CHECK(twice_modulus != nullptr, "twice_modulus should not be nullptr");
-    if (x >= *twice_modulus) {
-      x -= *twice_modulus;
-    }
-    if (x >= modulus) {
-      x -= modulus;
-    }
-    return x;
-  }
-  if (InputModFactor == 8) {
-    HEXL_CHECK(twice_modulus != nullptr, "twice_modulus should not be nullptr");
-    HEXL_CHECK(four_times_modulus != nullptr,
-               "four_times_modulus should not be nullptr");
+		const uint64_t* twice_modulus = nullptr,
+		const uint64_t* four_times_modulus = nullptr) {
+	HEXL_CHECK(InputModFactor == 1 || InputModFactor == 2 ||
+			InputModFactor == 4 || InputModFactor == 8,
+			"InputModFactor should be 1, 2, 4, or 8");
+	if (InputModFactor == 1) {
+		return x;
+	}
+	if (InputModFactor == 2) {
+		if (x >= modulus) {
+			x -= modulus;
+		}
+		return x;
+	}
+	if (InputModFactor == 4) {
+		HEXL_CHECK(twice_modulus != nullptr, "twice_modulus should not be nullptr");
+		if (x >= *twice_modulus) {
+			x -= *twice_modulus;
+		}
+		if (x >= modulus) {
+			x -= modulus;
+		}
+		return x;
+	}
+	if (InputModFactor == 8) {
+		HEXL_CHECK(twice_modulus != nullptr, "twice_modulus should not be nullptr");
+		HEXL_CHECK(four_times_modulus != nullptr,
+				"four_times_modulus should not be nullptr");
 
-    if (x >= *four_times_modulus) {
-      x -= *four_times_modulus;
-    }
-    if (x >= *twice_modulus) {
-      x -= *twice_modulus;
-    }
-    if (x >= modulus) {
-      x -= modulus;
-    }
-    return x;
-  }
-  HEXL_CHECK(false, "Should be unreachable");
-  return x;
+		if (x >= *four_times_modulus) {
+			x -= *four_times_modulus;
+		}
+		if (x >= *twice_modulus) {
+			x -= *twice_modulus;
+		}
+		if (x >= modulus) {
+			x -= modulus;
+		}
+		return x;
+	}
+	HEXL_CHECK(false, "Should be unreachable");
+	return x;
 }
 
 /// @brief Returns Montgomery form of ab mod q, computed via the REDC algorithm,
@@ -356,71 +356,71 @@ uint64_t ReduceMod(uint64_t x, uint64_t modulus,
 /// @param[in] inv_mod q * inv_mod = -1 mod R (Hensel's lemma, see below).
 template <int BitShift>
 inline uint64_t MontgomeryReduce(uint64_t T_hi, uint64_t T_lo, uint64_t q,
-                                 int r, uint64_t mod_R_msk, uint64_t inv_mod) {
-  HEXL_CHECK(BitShift == 64 || BitShift == 52,
-             "Unsupported BitShift " << BitShift);
-  HEXL_CHECK((1ULL << r) > static_cast<uint64_t>(q),
-             "R value should be greater than q = " << static_cast<uint64_t>(q));
+		int r, uint64_t mod_R_msk, uint64_t inv_mod) {
+	HEXL_CHECK(BitShift == 64 || BitShift == 52,
+			"Unsupported BitShift " << BitShift);
+	HEXL_CHECK((1ULL << r) > static_cast<uint64_t>(q),
+			"R value should be greater than q = " << static_cast<uint64_t>(q));
 
-  uint64_t mq_hi;
-  uint64_t mq_lo;
+	uint64_t mq_hi;
+	uint64_t mq_lo;
 
-  uint64_t m = ((T_lo & mod_R_msk) * inv_mod) & mod_R_msk;
-  MultiplyUInt64(m, q, &mq_hi, &mq_lo);
+	uint64_t m = ((T_lo & mod_R_msk) * inv_mod) & mod_R_msk;
+	MultiplyUInt64(m, q, &mq_hi, &mq_lo);
 
-  if (BitShift == 52) {
-    mq_hi = (mq_hi << 12) | (mq_lo >> 52);
-    mq_lo &= (1ULL << 52) - 1;
-  }
+	if (BitShift == 52) {
+		mq_hi = (mq_hi << 12) | (mq_lo >> 52);
+		mq_lo &= (1ULL << 52) - 1;
+	}
 
-  uint64_t t_hi;
-  uint64_t t_lo;
+	uint64_t t_hi;
+	uint64_t t_lo;
 
-  // first 64bit block
-  t_lo = T_lo + mq_lo;
-  unsigned int carry = static_cast<unsigned int>(t_lo < T_lo);
-  t_hi = T_hi + mq_hi + carry;
+	// first 64bit block
+	t_lo = T_lo + mq_lo;
+	unsigned int carry = static_cast<unsigned int>(t_lo < T_lo);
+	t_hi = T_hi + mq_hi + carry;
 
-  t_hi = t_hi << (BitShift - r);
-  t_lo = t_lo >> r;
-  t_lo = t_hi + t_lo;
+	t_hi = t_hi << (BitShift - r);
+	t_lo = t_lo >> r;
+	t_lo = t_hi + t_lo;
 
-  return (t_lo >= q) ? (t_lo - q) : t_lo;
+	return (t_lo >= q) ? (t_lo - q) : t_lo;
 }
 
 /// @brief Hensel's Lemma for 2-adic numbers: find x such that q * x + 1 = 0
 /// mod 2^r. Used to precompute the Montgomery constant.
 inline uint64_t HenselLemma2adicRoot(uint32_t r, uint64_t q) {
-  uint64_t a_prev = 1;
-  uint64_t c = 2;
-  uint64_t mod_mask = 3;
+	uint64_t a_prev = 1;
+	uint64_t c = 2;
+	uint64_t mod_mask = 3;
 
-  // Root:
-  //    f(x) = qX + 1 and a_(0) = 1 then f(1) ≡ 0 mod 2
-  //    General Case:
-  //    - a_(n) ≡ a_(n-1) mod 2^(n)
-  //      => a_(n) = a_(n-1) + 2^(n)*t
-  //    - Find 't' such that f(a_(n)) = 0 mod  2^(n+1)
-  // First case in for:
-  //    - a_(1) ≡ 1 mod 2 or a_(1) = 1 + 2t
-  //    - Find 't' so f(a_(1)) ≡ 0 mod 4  => q(1 + 2t) + 1 ≡ 0 mod 4
-  for (uint64_t k = 2; k <= r; k++) {
-    uint64_t f = 0;
-    uint64_t t = 0;
-    uint64_t a = 0;
+	// Root:
+	//    f(x) = qX + 1 and a_(0) = 1 then f(1) ≡ 0 mod 2
+	//    General Case:
+	//    - a_(n) ≡ a_(n-1) mod 2^(n)
+	//      => a_(n) = a_(n-1) + 2^(n)*t
+	//    - Find 't' such that f(a_(n)) = 0 mod  2^(n+1)
+	// First case in for:
+	//    - a_(1) ≡ 1 mod 2 or a_(1) = 1 + 2t
+	//    - Find 't' so f(a_(1)) ≡ 0 mod 4  => q(1 + 2t) + 1 ≡ 0 mod 4
+	for (uint64_t k = 2; k <= r; k++) {
+		uint64_t f = 0;
+		uint64_t t = 0;
+		uint64_t a = 0;
 
-    do {
-      a = a_prev + c * t++;
-      f = q * a + 1ULL;
-    } while (f & mod_mask);  // f(a) ≡ 0 mod 2^(k)
+		do {
+			a = a_prev + c * t++;
+			f = q * a + 1ULL;
+		} while (f & mod_mask);  // f(a) ≡ 0 mod 2^(k)
 
-    // Update vars
-    mod_mask = mod_mask * 2 + 1ULL;
-    c *= 2;
-    a_prev = a;
-  }
+		// Update vars
+		mod_mask = mod_mask * 2 + 1ULL;
+		c *= 2;
+		a_prev = a;
+	}
 
-  return a_prev;
+	return a_prev;
 }
 
 }  // namespace hexl

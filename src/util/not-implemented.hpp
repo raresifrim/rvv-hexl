@@ -19,11 +19,11 @@ namespace hexl {
 namespace internal {
 
 [[noreturn]] void ThrowNotImplemented(const char* function, const char* file,
-                                      int line);
+		int line);
 
 }  // namespace internal
 }  // namespace hexl
 }  // namespace intel
 
 #define HEXL_NOT_IMPLEMENTED() \
-  ::intel::hexl::internal::ThrowNotImplemented(__func__, __FILE__, __LINE__)
+	::intel::hexl::internal::ThrowNotImplemented(__func__, __FILE__, __LINE__)

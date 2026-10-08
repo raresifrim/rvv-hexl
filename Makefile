@@ -358,8 +358,15 @@ reconfigure:
 	rm -rf $(ROOT)/build/config
 	@echo "RISC-V checks will run again on the next make"
 
+# Re-indent the C/C++ sources in the project style: Vim's C indenter (gg=G),
+# one tab per level, no extra indent inside namespaces (cinoptions N-s). Run
+# with --clean, so the result does not depend on a personal nvim config.
 format:
-	clang-format -i $$(find include src test bench/hexl bench/uarch -name '*.hpp' -o -name '*.cpp')
+	@for f in $$(find include src test bench \( -name '*.hpp' -o -name '*.cpp' -o -name '*.h' -o -name '*.c' \)); do \
+	  nvim --headless --clean -c 'filetype plugin indent on' -c "edit $$f" \
+	    -c 'setlocal cinoptions+=N-s noexpandtab tabstop=8 shiftwidth=8' \
+	    -c 'silent! keepjumps normal! gg=G' -c 'write' -c 'qa!' >/dev/null 2>&1 || { echo "format failed: $$f"; exit 1; }; \
+	done
 
 clean:
 	rm -rf $(BUILDDIR)

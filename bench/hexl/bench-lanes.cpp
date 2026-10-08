@@ -36,121 +36,121 @@ constexpr size_t kN = 4096;
 
 /// 60-bit modulus for 64-bit storage, 27-bit (binfhe-sized, RVV e32 path) for 32-bit.
 template <typename Word>
-uint64_t LaneModulus() {
-  return std::is_same_v<Word, uint64_t> ? hexlbench::Prime(60, 1024) : hexlbench::Prime(27, 1024);
-}
+	uint64_t LaneModulus() {
+		return std::is_same_v<Word, uint64_t> ? hexlbench::Prime(60, 1024) : hexlbench::Prime(27, 1024);
+	}
 
 template <typename Word, class V>
-void BM_Lanes_AddModVV(benchmark::State& state) {
-  const uint64_t q = LaneModulus<Word>();
-  auto a = hexlbench::RandomW<Word>(kN, q), b = hexlbench::RandomW<Word>(kN, q), r = a;
-  for (auto _ : state) {
-    intel::hexl::EltwiseAddModRVV<Word, V>(r.data(), a.data(), b.data(), kN, q);
-    benchmark::ClobberMemory();
-  }
-  state.SetItemsProcessed(state.iterations() * kN);
-}
+	void BM_Lanes_AddModVV(benchmark::State& state) {
+		const uint64_t q = LaneModulus<Word>();
+		auto a = hexlbench::RandomW<Word>(kN, q), b = hexlbench::RandomW<Word>(kN, q), r = a;
+		for (auto _ : state) {
+			intel::hexl::EltwiseAddModRVV<Word, V>(r.data(), a.data(), b.data(), kN, q);
+			benchmark::ClobberMemory();
+		}
+		state.SetItemsProcessed(state.iterations() * kN);
+	}
 
 template <typename Word, class V>
-void BM_Lanes_AddModVS(benchmark::State& state) {
-  const uint64_t q = LaneModulus<Word>(), s = q / 3;
-  auto a = hexlbench::RandomW<Word>(kN, q), r = a;
-  for (auto _ : state) {
-    intel::hexl::EltwiseAddModRVV<Word, V>(r.data(), a.data(), s, kN, q);
-    benchmark::ClobberMemory();
-  }
-  state.SetItemsProcessed(state.iterations() * kN);
-}
+	void BM_Lanes_AddModVS(benchmark::State& state) {
+		const uint64_t q = LaneModulus<Word>(), s = q / 3;
+		auto a = hexlbench::RandomW<Word>(kN, q), r = a;
+		for (auto _ : state) {
+			intel::hexl::EltwiseAddModRVV<Word, V>(r.data(), a.data(), s, kN, q);
+			benchmark::ClobberMemory();
+		}
+		state.SetItemsProcessed(state.iterations() * kN);
+	}
 
 template <typename Word, class V>
-void BM_Lanes_SubModVV(benchmark::State& state) {
-  const uint64_t q = LaneModulus<Word>();
-  auto a = hexlbench::RandomW<Word>(kN, q), b = hexlbench::RandomW<Word>(kN, q), r = a;
-  for (auto _ : state) {
-    intel::hexl::EltwiseSubModRVV<Word, V>(r.data(), a.data(), b.data(), kN, q);
-    benchmark::ClobberMemory();
-  }
-  state.SetItemsProcessed(state.iterations() * kN);
-}
+	void BM_Lanes_SubModVV(benchmark::State& state) {
+		const uint64_t q = LaneModulus<Word>();
+		auto a = hexlbench::RandomW<Word>(kN, q), b = hexlbench::RandomW<Word>(kN, q), r = a;
+		for (auto _ : state) {
+			intel::hexl::EltwiseSubModRVV<Word, V>(r.data(), a.data(), b.data(), kN, q);
+			benchmark::ClobberMemory();
+		}
+		state.SetItemsProcessed(state.iterations() * kN);
+	}
 
 template <typename Word, class V>
-void BM_Lanes_SubModVS(benchmark::State& state) {
-  const uint64_t q = LaneModulus<Word>(), s = q / 3;
-  auto a = hexlbench::RandomW<Word>(kN, q), r = a;
-  for (auto _ : state) {
-    intel::hexl::EltwiseSubModRVV<Word, V>(r.data(), a.data(), s, kN, q);
-    benchmark::ClobberMemory();
-  }
-  state.SetItemsProcessed(state.iterations() * kN);
-}
+	void BM_Lanes_SubModVS(benchmark::State& state) {
+		const uint64_t q = LaneModulus<Word>(), s = q / 3;
+		auto a = hexlbench::RandomW<Word>(kN, q), r = a;
+		for (auto _ : state) {
+			intel::hexl::EltwiseSubModRVV<Word, V>(r.data(), a.data(), s, kN, q);
+			benchmark::ClobberMemory();
+		}
+		state.SetItemsProcessed(state.iterations() * kN);
+	}
 
 /// OpenFHE's SwitchModulus shape: values below an old modulus, NLE against
 /// half of it (about half the lanes take the add).
 template <typename Word, class V>
-void BM_Lanes_CmpAddNLE(benchmark::State& state) {
-  const uint64_t om = std::is_same_v<Word, uint64_t> ? hexlbench::Prime(49, 1024) : hexlbench::Prime(24, 1024);
-  const uint64_t nm = std::is_same_v<Word, uint64_t> ? hexlbench::Prime(55, 1024) : hexlbench::Prime(27, 1024);
-  auto a = hexlbench::RandomW<Word>(kN, om), r = a;
-  for (auto _ : state) {
-    intel::hexl::EltwiseCmpAddRVV<Word, V>(r.data(), a.data(), kN, CMPINT::NLE, om >> 1, nm - om);
-    benchmark::ClobberMemory();
-  }
-  state.SetItemsProcessed(state.iterations() * kN);
-}
+	void BM_Lanes_CmpAddNLE(benchmark::State& state) {
+		const uint64_t om = std::is_same_v<Word, uint64_t> ? hexlbench::Prime(49, 1024) : hexlbench::Prime(24, 1024);
+		const uint64_t nm = std::is_same_v<Word, uint64_t> ? hexlbench::Prime(55, 1024) : hexlbench::Prime(27, 1024);
+		auto a = hexlbench::RandomW<Word>(kN, om), r = a;
+		for (auto _ : state) {
+			intel::hexl::EltwiseCmpAddRVV<Word, V>(r.data(), a.data(), kN, CMPINT::NLE, om >> 1, nm - om);
+			benchmark::ClobberMemory();
+		}
+		state.SetItemsProcessed(state.iterations() * kN);
+	}
 
 template <typename Word, class V>
-void BM_Lanes_CmpSubModNLE(benchmark::State& state) {
-  const uint64_t om = std::is_same_v<Word, uint64_t> ? hexlbench::Prime(49, 1024) : hexlbench::Prime(27, 1024);
-  const uint64_t nm = std::is_same_v<Word, uint64_t> ? hexlbench::Prime(27, 1024) : hexlbench::Prime(18, 1024);
-  auto a = hexlbench::RandomW<Word>(kN, om), r = a;
-  for (auto _ : state) {
-    intel::hexl::EltwiseCmpSubModRVV<Word, V>(r.data(), a.data(), kN, nm, CMPINT::NLE, om >> 1, om % nm);
-    benchmark::ClobberMemory();
-  }
-  state.SetItemsProcessed(state.iterations() * kN);
-}
+	void BM_Lanes_CmpSubModNLE(benchmark::State& state) {
+		const uint64_t om = std::is_same_v<Word, uint64_t> ? hexlbench::Prime(49, 1024) : hexlbench::Prime(27, 1024);
+		const uint64_t nm = std::is_same_v<Word, uint64_t> ? hexlbench::Prime(27, 1024) : hexlbench::Prime(18, 1024);
+		auto a = hexlbench::RandomW<Word>(kN, om), r = a;
+		for (auto _ : state) {
+			intel::hexl::EltwiseCmpSubModRVV<Word, V>(r.data(), a.data(), kN, nm, CMPINT::NLE, om >> 1, om % nm);
+			benchmark::ClobberMemory();
+		}
+		state.SetItemsProcessed(state.iterations() * kN);
+	}
 
 /// MultMod, input_mod_factor 1. Word = uint64_t: EltwiseMultModRVV64 at a
 /// 60-bit q; Word = uint32_t: EltwiseMultModRVV32 at a 27-bit q.
 template <typename Word, class V>
-void BM_Lanes_MultMod(benchmark::State& state) {
-  const uint64_t q = LaneModulus<Word>();
-  auto a = hexlbench::RandomW<Word>(kN, q), b = hexlbench::RandomW<Word>(kN, q), r = a;
-  for (auto _ : state) {
-    if constexpr (std::is_same_v<Word, uint64_t>) {
-      intel::hexl::EltwiseMultModRVV64<1, V>(r.data(), a.data(), b.data(), kN, q);
-    } else {
-      intel::hexl::EltwiseMultModRVV32<Word, 1, V>(r.data(), a.data(), b.data(), kN, q);
-    }
-    benchmark::ClobberMemory();
-  }
-  state.SetItemsProcessed(state.iterations() * kN);
-}
+	void BM_Lanes_MultMod(benchmark::State& state) {
+		const uint64_t q = LaneModulus<Word>();
+		auto a = hexlbench::RandomW<Word>(kN, q), b = hexlbench::RandomW<Word>(kN, q), r = a;
+		for (auto _ : state) {
+			if constexpr (std::is_same_v<Word, uint64_t>) {
+				intel::hexl::EltwiseMultModRVV64<1, V>(r.data(), a.data(), b.data(), kN, q);
+			} else {
+				intel::hexl::EltwiseMultModRVV32<Word, 1, V>(r.data(), a.data(), b.data(), kN, q);
+			}
+			benchmark::ClobberMemory();
+		}
+		state.SetItemsProcessed(state.iterations() * kN);
+	}
 
 /// EltwiseMultModRVV32 on uint64_t storage (27-bit q, narrowing load and
 /// widening store): the path EltwiseMultMod(uint64_t*) takes for q < 2^30.
 template <class V>
-void BM_Lanes_MultMod32FromU64(benchmark::State& state) {
-  const uint64_t q = hexlbench::Prime(27, 1024);
-  auto a = hexlbench::RandomW<uint64_t>(kN, q), b = hexlbench::RandomW<uint64_t>(kN, q), r = a;
-  for (auto _ : state) {
-    intel::hexl::EltwiseMultModRVV32<uint64_t, 1, V>(r.data(), a.data(), b.data(), kN, q);
-    benchmark::ClobberMemory();
-  }
-  state.SetItemsProcessed(state.iterations() * kN);
-}
+	void BM_Lanes_MultMod32FromU64(benchmark::State& state) {
+		const uint64_t q = hexlbench::Prime(27, 1024);
+		auto a = hexlbench::RandomW<uint64_t>(kN, q), b = hexlbench::RandomW<uint64_t>(kN, q), r = a;
+		for (auto _ : state) {
+			intel::hexl::EltwiseMultModRVV32<uint64_t, 1, V>(r.data(), a.data(), b.data(), kN, q);
+			benchmark::ClobberMemory();
+		}
+		state.SetItemsProcessed(state.iterations() * kN);
+	}
 
 }  // namespace
 
 #define HEXL_LANES(BM)                                  \
-  BENCHMARK_TEMPLATE(BM, uint64_t, vuint64m1_t);        \
-  BENCHMARK_TEMPLATE(BM, uint64_t, vuint64m2_t);        \
-  BENCHMARK_TEMPLATE(BM, uint64_t, vuint64m4_t);        \
-  BENCHMARK_TEMPLATE(BM, uint64_t, vuint64m8_t);        \
-  BENCHMARK_TEMPLATE(BM, uint32_t, vuint32m1_t);        \
-  BENCHMARK_TEMPLATE(BM, uint32_t, vuint32m2_t);        \
-  BENCHMARK_TEMPLATE(BM, uint32_t, vuint32m4_t);        \
-  BENCHMARK_TEMPLATE(BM, uint32_t, vuint32m8_t)
+	BENCHMARK_TEMPLATE(BM, uint64_t, vuint64m1_t);        \
+	BENCHMARK_TEMPLATE(BM, uint64_t, vuint64m2_t);        \
+	BENCHMARK_TEMPLATE(BM, uint64_t, vuint64m4_t);        \
+	BENCHMARK_TEMPLATE(BM, uint64_t, vuint64m8_t);        \
+	BENCHMARK_TEMPLATE(BM, uint32_t, vuint32m1_t);        \
+	BENCHMARK_TEMPLATE(BM, uint32_t, vuint32m2_t);        \
+	BENCHMARK_TEMPLATE(BM, uint32_t, vuint32m4_t);        \
+	BENCHMARK_TEMPLATE(BM, uint32_t, vuint32m8_t)
 
 HEXL_LANES(BM_Lanes_AddModVV);
 HEXL_LANES(BM_Lanes_AddModVS);

@@ -13,15 +13,15 @@
 #include <cstddef>
 
 struct FlagProofResult {
-    long   constraints;
-    int    public_inputs;
-    double setup_ms;     // one-time Groth16 setup
-    double prove_ms;     // per-round, averaged  -> END-ZONE impact
-    double verify_ms;    // per-round, averaged  -> CENTRAL impact
-    size_t proof_bytes;
-    size_t vk_bytes;
-    int    ok_count;
-    int    rounds;
+	long   constraints;
+	int    public_inputs;
+	double setup_ms;     // one-time Groth16 setup
+	double prove_ms;     // per-round, averaged  -> END-ZONE impact
+	double verify_ms;    // per-round, averaged  -> CENTRAL impact
+	size_t proof_bytes;
+	size_t vk_bytes;
+	int    ok_count;
+	int    rounds;
 };
 
 // Build the S x w-bit comparison circuit, run Groth16 setup once, then prove+verify

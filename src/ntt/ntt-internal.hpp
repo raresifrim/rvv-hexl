@@ -36,34 +36,34 @@ namespace hexl {
 /// @param root_of_unity_powers  NTT::GetRootOfUnityPowers() (bit-reversed)
 /// @param precon_root_of_unity_powers NTT::GetPrecon64RootOfUnityPowers()
 template <typename Word>
-void ForwardTransformToBitReverseRadix2(
-    Word* result, const Word* operand, uint64_t n, uint64_t modulus,
-    const uint64_t* root_of_unity_powers,
-    const uint64_t* precon_root_of_unity_powers, uint64_t input_mod_factor = 1,
-    uint64_t output_mod_factor = 1);
+	void ForwardTransformToBitReverseRadix2(
+			Word* result, const Word* operand, uint64_t n, uint64_t modulus,
+			const uint64_t* root_of_unity_powers,
+			const uint64_t* precon_root_of_unity_powers, uint64_t input_mod_factor = 1,
+			uint64_t output_mod_factor = 1);
 
 /// @brief Radix-2 Gentleman-Sande inverse NTT (Harvey butterflies), including
 /// the final multiplication by N^{-1}.
 /// @param inv_root_of_unity_powers NTT::GetInvRootOfUnityPowers()
 /// @param precon_inv_root_of_unity_powers NTT::GetPrecon64InvRootOfUnityPowers()
 template <typename Word>
-void InverseTransformFromBitReverseRadix2(
-    Word* result, const Word* operand, uint64_t n, uint64_t modulus,
-    const uint64_t* inv_root_of_unity_powers,
-    const uint64_t* precon_inv_root_of_unity_powers,
-    uint64_t input_mod_factor = 1, uint64_t output_mod_factor = 1);
+	void InverseTransformFromBitReverseRadix2(
+			Word* result, const Word* operand, uint64_t n, uint64_t modulus,
+			const uint64_t* inv_root_of_unity_powers,
+			const uint64_t* precon_inv_root_of_unity_powers,
+			uint64_t input_mod_factor = 1, uint64_t output_mod_factor = 1);
 
 /// @brief Textbook in-place forward NTT (plain MultiplyMod, fully reduced after
 /// every butterfly). Slow on purpose: a debugging aid to diff the fast kernels
 /// against, stage by stage. Same output order as the forward kernels.
 void ReferenceForwardTransformToBitReverse(uint64_t* operand, uint64_t n,
-                                           uint64_t modulus,
-                                           const uint64_t* root_of_unity_powers);
+		uint64_t modulus,
+		const uint64_t* root_of_unity_powers);
 
 /// @brief Textbook in-place inverse NTT, including the N^{-1} scaling.
 void ReferenceInverseTransformFromBitReverse(
-    uint64_t* operand, uint64_t n, uint64_t modulus,
-    const uint64_t* inv_root_of_unity_powers);
+		uint64_t* operand, uint64_t n, uint64_t modulus,
+		const uint64_t* inv_root_of_unity_powers);
 
 // ---------------------------------------------------------------------------
 // RVV path: src/ntt/ntt-rvv.cpp                               TODO(port-rvv)
@@ -77,37 +77,37 @@ void ReferenceInverseTransformFromBitReverse(
 /// GetRVV32PreconRootOfUnityPowers(); layout decided by YOU in
 /// NTT::ComputeRootOfUnityPowers.
 template <typename Word>
-void ForwardTransformToBitReverseRVV32(Word* result,
-                                       const Word* operand, uint64_t n,
-                                       uint64_t modulus, const uint32_t* w,
-                                       const uint32_t* w_precon,
-                                       uint64_t input_mod_factor,
-                                       uint64_t output_mod_factor);
+	void ForwardTransformToBitReverseRVV32(Word* result,
+			const Word* operand, uint64_t n,
+			uint64_t modulus, const uint32_t* w,
+			const uint32_t* w_precon,
+			uint64_t input_mod_factor,
+			uint64_t output_mod_factor);
 
 /// @brief RVV inverse NTT, 32-bit lanes (incl. N^{-1} scaling).
 template <typename Word>
-void InverseTransformFromBitReverseRVV32(Word* result,
-                                         const Word* operand, uint64_t n,
-                                         uint64_t modulus, const uint32_t* w_inv,
-                                         const uint32_t* w_inv_precon,
-                                         uint64_t input_mod_factor,
-                                         uint64_t output_mod_factor);
+	void InverseTransformFromBitReverseRVV32(Word* result,
+			const Word* operand, uint64_t n,
+			uint64_t modulus, const uint32_t* w_inv,
+			const uint32_t* w_inv_precon,
+			uint64_t input_mod_factor,
+			uint64_t output_mod_factor);
 
 /// @brief RVV forward NTT, 64-bit lanes. Every modulus >= 2^30 (the 49/60-bit
 /// BFV/CKKS primes). Uses the same tables as the native path. 64-bit storage
 /// only (32-bit storage with q >= 2^30 goes to the native path).
 void ForwardTransformToBitReverseRVV64(
-    uint64_t* result, const uint64_t* operand, uint64_t n, uint64_t modulus,
-    const uint64_t* root_of_unity_powers,
-    const uint64_t* precon_root_of_unity_powers, uint64_t input_mod_factor,
-    uint64_t output_mod_factor);
+		uint64_t* result, const uint64_t* operand, uint64_t n, uint64_t modulus,
+		const uint64_t* root_of_unity_powers,
+		const uint64_t* precon_root_of_unity_powers, uint64_t input_mod_factor,
+		uint64_t output_mod_factor);
 
 /// @brief RVV inverse NTT, 64-bit lanes (incl. N^{-1} scaling).
 void InverseTransformFromBitReverseRVV64(
-    uint64_t* result, const uint64_t* operand, uint64_t n, uint64_t modulus,
-    const uint64_t* inv_root_of_unity_powers,
-    const uint64_t* precon_inv_root_of_unity_powers, uint64_t input_mod_factor,
-    uint64_t output_mod_factor);
+		uint64_t* result, const uint64_t* operand, uint64_t n, uint64_t modulus,
+		const uint64_t* inv_root_of_unity_powers,
+		const uint64_t* precon_inv_root_of_unity_powers, uint64_t input_mod_factor,
+		uint64_t output_mod_factor);
 
 #endif  // HEXL_HAS_RVV
 

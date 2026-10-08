@@ -27,7 +27,7 @@ namespace hexl {
 /// diff : operand1[i] for all \f$i=0, ..., n-1\f$. The addition is a plain
 /// (wrapping) 64-bit add, no modular reduction.
 void EltwiseCmpAdd(uint64_t* result, const uint64_t* operand1, uint64_t n,
-                   CMPINT cmp, uint64_t bound, uint64_t diff);
+		CMPINT cmp, uint64_t bound, uint64_t diff);
 
 
 // ---- rvv-hexl extension: 32-bit storage (OpenFHE NATIVE_SIZE=32) -----------
@@ -38,7 +38,7 @@ void EltwiseCmpAdd(uint64_t* result, const uint64_t* operand1, uint64_t n,
 // with #ifdef HEXL_RVV_HAS_32BIT_API.
 /// The addition wraps modulo 2^32.
 void EltwiseCmpAdd(uint32_t* result, const uint32_t* operand1, uint64_t n,
-                   CMPINT cmp, uint64_t bound, uint64_t diff);
+		CMPINT cmp, uint64_t bound, uint64_t diff);
 
 }  // namespace hexl
 }  // namespace intel

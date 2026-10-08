@@ -22,30 +22,30 @@ namespace intel {
 namespace hexl {
 namespace internal {
 inline int VlogLevel() {
-  static const int level = [] {
-    const char* s = std::getenv("HEXL_VLOG");
-    return s ? std::atoi(s) : 0;
-  }();
-  return level;
+	static const int level = [] {
+		const char* s = std::getenv("HEXL_VLOG");
+		return s ? std::atoi(s) : 0;
+	}();
+	return level;
 }
 }  // namespace internal
 }  // namespace hexl
 }  // namespace intel
 
 #define HEXL_VLOG(N, rest)                                   \
-  do {                                                       \
-    if (::intel::hexl::internal::VlogLevel() >= (N)) {       \
-      std::cerr << "[hexl] " << rest << std::endl;           \
-    }                                                        \
-  } while (0);
+	do {                                                       \
+		if (::intel::hexl::internal::VlogLevel() >= (N)) {       \
+			std::cerr << "[hexl] " << rest << std::endl;           \
+		}                                                        \
+	} while (0);
 
 #else
 
 #define HEXL_VLOG(N, rest) \
-  {}
+{}
 
 #endif  // HEXL_DEBUG
 
 // Upstream test/bench mains call this; it is a no-op here.
 #define START_EASYLOGGINGPP(X, Y) \
-  {}
+{}

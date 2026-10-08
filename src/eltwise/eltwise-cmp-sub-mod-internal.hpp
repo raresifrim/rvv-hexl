@@ -24,13 +24,13 @@ namespace hexl {
 ///   result[i] = cmp(operand1[i], bound) ? (r - diff) mod modulus : r
 ///   (the comparison uses the ORIGINAL value, before reduction)
 template <typename Word>
-void EltwiseCmpSubModNative(Word* result, const Word* operand1, uint64_t n, uint64_t modulus, CMPINT cmp, uint64_t bound, uint64_t diff);
+	void EltwiseCmpSubModNative(Word* result, const Word* operand1, uint64_t n, uint64_t modulus, CMPINT cmp, uint64_t bound, uint64_t diff);
 
 #ifdef HEXL_HAS_RVV
 /// @brief RVV variant, same contract. Word = uint32_t only reaches it with
 /// modulus < 2^30 (where a modulus applies).
 template <typename Word, class V = rvv::LaneFor<Word, rvv::cfg::CmpSubMod64, rvv::cfg::CmpSubMod32>>
-void EltwiseCmpSubModRVV(Word* result, const Word* operand1, uint64_t n, uint64_t modulus, CMPINT cmp, uint64_t bound, uint64_t diff);
+	void EltwiseCmpSubModRVV(Word* result, const Word* operand1, uint64_t n, uint64_t modulus, CMPINT cmp, uint64_t bound, uint64_t diff);
 #endif
 
 }  // namespace hexl

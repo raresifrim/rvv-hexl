@@ -28,8 +28,8 @@ namespace hexl {
 /// @details Computes \p result[i] = (\p operand1[i] * \p operand2[i]) mod \p
 /// modulus for i=0, ..., \p n - 1. Output is fully reduced, in [0, modulus).
 void EltwiseMultMod(uint64_t* result, const uint64_t* operand1,
-                    const uint64_t* operand2, uint64_t n, uint64_t modulus,
-                    uint64_t input_mod_factor);
+		const uint64_t* operand2, uint64_t n, uint64_t modulus,
+		uint64_t input_mod_factor);
 
 
 // ---- rvv-hexl extension: 32-bit storage (OpenFHE NATIVE_SIZE=32) -----------
@@ -39,8 +39,8 @@ void EltwiseMultMod(uint64_t* result, const uint64_t* operand1,
 // falls back to the native kernels. Not part of upstream Intel HEXL: guard uses
 // with #ifdef HEXL_RVV_HAS_32BIT_API.
 void EltwiseMultMod(uint32_t* result, const uint32_t* operand1,
-                    const uint32_t* operand2, uint64_t n, uint64_t modulus,
-                    uint64_t input_mod_factor);
+		const uint32_t* operand2, uint64_t n, uint64_t modulus,
+		uint64_t input_mod_factor);
 
 }  // namespace hexl
 }  // namespace intel

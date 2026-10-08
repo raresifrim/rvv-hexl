@@ -63,12 +63,12 @@ namespace rvv {
 /// from the overloaded vmv.x.s. Used to keep the e64 and e32 helper families
 /// apart at compile time.
 template <class V>
-using ElemT = decltype(__riscv_vmv_x(std::declval<V>()));
+	using ElemT = decltype(__riscv_vmv_x(std::declval<V>()));
 
 template <class V>
-constexpr bool IsE64 = std::is_same_v<ElemT<V>, uint64_t>;
+	constexpr bool IsE64 = std::is_same_v<ElemT<V>, uint64_t>;
 template <class V>
-constexpr bool IsE32 = std::is_same_v<ElemT<V>, uint32_t>;
+	constexpr bool IsE32 = std::is_same_v<ElemT<V>, uint32_t>;
 
 // ---------------------------------------------------------------------------
 // Type-driven vsetvl / load / store. A kernel names its lane type V once (the
@@ -79,71 +79,71 @@ constexpr bool IsE32 = std::is_same_v<ElemT<V>, uint32_t>;
 
 /// @brief vsetvl for lane type V: min(n, VLMAX of V).
 template <class V>
-inline size_t SetVl(size_t n) {
-  if constexpr (std::is_same_v<V, vuint64m1_t>) {
-    return __riscv_vsetvl_e64m1(n);
-  } else if constexpr (std::is_same_v<V, vuint64m2_t>) {
-    return __riscv_vsetvl_e64m2(n);
-  } else if constexpr (std::is_same_v<V, vuint64m4_t>) {
-    return __riscv_vsetvl_e64m4(n);
-  } else if constexpr (std::is_same_v<V, vuint64m8_t>) {
-    return __riscv_vsetvl_e64m8(n);
-  } else if constexpr (std::is_same_v<V, vuint32mf2_t>) {
-    return __riscv_vsetvl_e32mf2(n);
-  } else if constexpr (std::is_same_v<V, vuint32m1_t>) {
-    return __riscv_vsetvl_e32m1(n);
-  } else if constexpr (std::is_same_v<V, vuint32m2_t>) {
-    return __riscv_vsetvl_e32m2(n);
-  } else if constexpr (std::is_same_v<V, vuint32m4_t>) {
-    return __riscv_vsetvl_e32m4(n);
-  } else {
-    static_assert(std::is_same_v<V, vuint32m8_t>, "rvv::SetVl<V>: V must be vuint64m1_t..m8_t or vuint32mf2_t..m8_t");
-    return __riscv_vsetvl_e32m8(n);
-  }
-}
+	inline size_t SetVl(size_t n) {
+		if constexpr (std::is_same_v<V, vuint64m1_t>) {
+			return __riscv_vsetvl_e64m1(n);
+		} else if constexpr (std::is_same_v<V, vuint64m2_t>) {
+			return __riscv_vsetvl_e64m2(n);
+		} else if constexpr (std::is_same_v<V, vuint64m4_t>) {
+			return __riscv_vsetvl_e64m4(n);
+		} else if constexpr (std::is_same_v<V, vuint64m8_t>) {
+			return __riscv_vsetvl_e64m8(n);
+		} else if constexpr (std::is_same_v<V, vuint32mf2_t>) {
+			return __riscv_vsetvl_e32mf2(n);
+		} else if constexpr (std::is_same_v<V, vuint32m1_t>) {
+			return __riscv_vsetvl_e32m1(n);
+		} else if constexpr (std::is_same_v<V, vuint32m2_t>) {
+			return __riscv_vsetvl_e32m2(n);
+		} else if constexpr (std::is_same_v<V, vuint32m4_t>) {
+			return __riscv_vsetvl_e32m4(n);
+		} else {
+			static_assert(std::is_same_v<V, vuint32m8_t>, "rvv::SetVl<V>: V must be vuint64m1_t..m8_t or vuint32mf2_t..m8_t");
+			return __riscv_vsetvl_e32m8(n);
+		}
+	}
 
 /// @brief Unit-stride load of vl elements as lane type V (e64 from uint64_t).
 template <class V>
-inline V Load(const uint64_t* p, size_t vl) {
-  static_assert(IsE64<V>, "rvv::Load<V>(const uint64_t*): V must be vuint64m1_t..m8_t");
-  if constexpr (std::is_same_v<V, vuint64m1_t>) {
-    return __riscv_vle64_v_u64m1(p, vl);
-  } else if constexpr (std::is_same_v<V, vuint64m2_t>) {
-    return __riscv_vle64_v_u64m2(p, vl);
-  } else if constexpr (std::is_same_v<V, vuint64m4_t>) {
-    return __riscv_vle64_v_u64m4(p, vl);
-  } else {
-    return __riscv_vle64_v_u64m8(p, vl);
-  }
-}
+	inline V Load(const uint64_t* p, size_t vl) {
+		static_assert(IsE64<V>, "rvv::Load<V>(const uint64_t*): V must be vuint64m1_t..m8_t");
+		if constexpr (std::is_same_v<V, vuint64m1_t>) {
+			return __riscv_vle64_v_u64m1(p, vl);
+		} else if constexpr (std::is_same_v<V, vuint64m2_t>) {
+			return __riscv_vle64_v_u64m2(p, vl);
+		} else if constexpr (std::is_same_v<V, vuint64m4_t>) {
+			return __riscv_vle64_v_u64m4(p, vl);
+		} else {
+			return __riscv_vle64_v_u64m8(p, vl);
+		}
+	}
 /// @brief Unit-stride load of vl elements as lane type V (e32 from uint32_t).
 template <class V>
-inline V Load(const uint32_t* p, size_t vl) {
-  static_assert(IsE32<V>, "rvv::Load<V>(const uint32_t*): V must be vuint32mf2_t..m8_t");
-  if constexpr (std::is_same_v<V, vuint32mf2_t>) {
-    return __riscv_vle32_v_u32mf2(p, vl);
-  } else if constexpr (std::is_same_v<V, vuint32m1_t>) {
-    return __riscv_vle32_v_u32m1(p, vl);
-  } else if constexpr (std::is_same_v<V, vuint32m2_t>) {
-    return __riscv_vle32_v_u32m2(p, vl);
-  } else if constexpr (std::is_same_v<V, vuint32m4_t>) {
-    return __riscv_vle32_v_u32m4(p, vl);
-  } else {
-    return __riscv_vle32_v_u32m8(p, vl);
-  }
-}
+	inline V Load(const uint32_t* p, size_t vl) {
+		static_assert(IsE32<V>, "rvv::Load<V>(const uint32_t*): V must be vuint32mf2_t..m8_t");
+		if constexpr (std::is_same_v<V, vuint32mf2_t>) {
+			return __riscv_vle32_v_u32mf2(p, vl);
+		} else if constexpr (std::is_same_v<V, vuint32m1_t>) {
+			return __riscv_vle32_v_u32m1(p, vl);
+		} else if constexpr (std::is_same_v<V, vuint32m2_t>) {
+			return __riscv_vle32_v_u32m2(p, vl);
+		} else if constexpr (std::is_same_v<V, vuint32m4_t>) {
+			return __riscv_vle32_v_u32m4(p, vl);
+		} else {
+			return __riscv_vle32_v_u32m8(p, vl);
+		}
+	}
 
 /// @brief Unit-stride store of vl elements (lane type deduced from v).
 template <class V>
-inline void Store(uint64_t* p, V v, size_t vl) {
-  static_assert(IsE64<V>, "rvv::Store(uint64_t*, v): v must be an e64 vector");
-  __riscv_vse64(p, v, vl);
-}
+	inline void Store(uint64_t* p, V v, size_t vl) {
+		static_assert(IsE64<V>, "rvv::Store(uint64_t*, v): v must be an e64 vector");
+		__riscv_vse64(p, v, vl);
+	}
 template <class V>
-inline void Store(uint32_t* p, V v, size_t vl) {
-  static_assert(IsE32<V>, "rvv::Store(uint32_t*, v): v must be an e32 vector");
-  __riscv_vse32(p, v, vl);
-}
+	inline void Store(uint32_t* p, V v, size_t vl) {
+		static_assert(IsE32<V>, "rvv::Store(uint32_t*, v): v must be an e32 vector");
+		__riscv_vse32(p, v, vl);
+	}
 
 // ---------------------------------------------------------------------------
 // e64 path (any modulus up to 62 bits). V = vuint64m1_t ... vuint64m8_t.
@@ -152,59 +152,59 @@ inline void Store(uint32_t* p, V v, size_t vl) {
 /// @brief (a + b) mod q for a, b in [0, q), q < 2^63.
 /// s = a + b; r = vminu(s, s - q) (s - q wraps to a huge value when s < q).
 template <class V>
-inline V AddMod(V a, V b, uint64_t q, size_t vl) {
-	static_assert(IsE64<V>, "rvv::AddMod takes e64 vectors; use AddMod32 for e32");
-  	//add all elements inside the vectors
-	V sum = __riscv_vadd(a, b, vl);
-	//subtract the modulus from the element-wise sum
-	V remainder = __riscv_vsub(sum, q, vl);
-	//return the minimum between the sum and the modulus diff
-	return __riscv_vminu(sum, remainder, vl);
-}
+	inline V AddMod(V a, V b, uint64_t q, size_t vl) {
+		static_assert(IsE64<V>, "rvv::AddMod takes e64 vectors; use AddMod32 for e32");
+		//add all elements inside the vectors
+		V sum = __riscv_vadd(a, b, vl);
+		//subtract the modulus from the element-wise sum
+		V remainder = __riscv_vsub(sum, q, vl);
+		//return the minimum between the sum and the modulus diff
+		return __riscv_vminu(sum, remainder, vl);
+	}
 
 /// @brief (a - b) mod q for a, b in [0, q).
 template <class V>
-inline V SubMod(V a, V b, uint64_t q, size_t vl) {
-	static_assert(IsE64<V>, "rvv::SubMod takes e64 vectors; use SubMod32 for e32");
-  	//sub all elements inside the vectors
-	V diff = __riscv_vsub(a, b, vl);
-	//add the modulus from the element-wise sum
-	V remainder = __riscv_vadd(diff, q, vl);
-	//return the minimum between the diff and the modulus sum
-	return __riscv_vminu(diff, remainder, vl);
-}
+	inline V SubMod(V a, V b, uint64_t q, size_t vl) {
+		static_assert(IsE64<V>, "rvv::SubMod takes e64 vectors; use SubMod32 for e32");
+		//sub all elements inside the vectors
+		V diff = __riscv_vsub(a, b, vl);
+		//add the modulus from the element-wise sum
+		V remainder = __riscv_vadd(diff, q, vl);
+		//return the minimum between the diff and the modulus sum
+		return __riscv_vminu(diff, remainder, vl);
+	}
 
 /// @brief (a + b) mod q for a in [0, q), scalar b in [0, q), q < 2^63.
 /// s = a + b; r = vminu(s, s - q) (s - q wraps to a huge value when s < q).
 template <class V>
-inline V AddScalarMod(V a, uint64_t b, uint64_t q, size_t vl) {
-	static_assert(IsE64<V>, "rvv::AddScalarMod takes e64 vectors; use AddScalarMod32 for e32");
-  	//add all elements inside the vectors
-	V sum = __riscv_vadd(a, b, vl);
-	//subtract the modulus from the element-wise sum
-	V remainder = __riscv_vsub(sum, q, vl);
-	//return the minimum between the sum and the modulus diff
-	return __riscv_vminu(sum, remainder, vl);
-}
+	inline V AddScalarMod(V a, uint64_t b, uint64_t q, size_t vl) {
+		static_assert(IsE64<V>, "rvv::AddScalarMod takes e64 vectors; use AddScalarMod32 for e32");
+		//add all elements inside the vectors
+		V sum = __riscv_vadd(a, b, vl);
+		//subtract the modulus from the element-wise sum
+		V remainder = __riscv_vsub(sum, q, vl);
+		//return the minimum between the sum and the modulus diff
+		return __riscv_vminu(sum, remainder, vl);
+	}
 
 /// @brief (a - b) mod q for a in [0, q), scalar b in [0, q).
 template <class V>
-inline V SubScalarMod(V a, uint64_t b, uint64_t q, size_t vl) {
-	static_assert(IsE64<V>, "rvv::SubScalarMod takes e64 vectors; use SubScalarMod32 for e32");
-  	//sub all elements inside the vectors
-	V diff = __riscv_vsub(a, b, vl);
-	//add the modulus from the element-wise sum
-	V remainder = __riscv_vadd(diff, q, vl);
-	//return the minimum between the diff and the modulus sum
-	return __riscv_vminu(diff, remainder, vl);
-}
+	inline V SubScalarMod(V a, uint64_t b, uint64_t q, size_t vl) {
+		static_assert(IsE64<V>, "rvv::SubScalarMod takes e64 vectors; use SubScalarMod32 for e32");
+		//sub all elements inside the vectors
+		V diff = __riscv_vsub(a, b, vl);
+		//add the modulus from the element-wise sum
+		V remainder = __riscv_vadd(diff, q, vl);
+		//return the minimum between the diff and the modulus sum
+		return __riscv_vminu(diff, remainder, vl);
+	}
 
 /// @brief Maps x in [0, 2q) to [0, q) (the "vminu" conditional subtract).
 template <class V>
-inline V ReduceFromTwice(V x, uint64_t q, size_t vl) {
-	static_assert(IsE64<V>, "rvv::ReduceFromTwice takes e64 vectors; use ReduceFromTwice32 for e32");
-	return __riscv_vminu(x, __riscv_vsub(x, q, vl), vl);
-}
+	inline V ReduceFromTwice(V x, uint64_t q, size_t vl) {
+		static_assert(IsE64<V>, "rvv::ReduceFromTwice takes e64 vectors; use ReduceFromTwice32 for e32");
+		return __riscv_vminu(x, __riscv_vsub(x, q, vl), vl);
+	}
 
 /// @brief x mod q for ANY 64-bit x (Barrett reduction), q >= 2. LMUL-generic.
 /// q_barr = floor(2^64 / q) = MultiplyFactor(1, 64, q).BarrettFactor();
@@ -213,42 +213,42 @@ inline V ReduceFromTwice(V x, uint64_t q, size_t vl) {
 /// final correction), like the scalar BarrettReduce64<OutputModFactor>.
 /// Used by EltwiseCmpSubMod, EltwiseReduceMod (input_mod_factor == q).
 template <int OutputModFactor = 1, class V>
-inline V BarrettReduce(V x, uint64_t q, uint64_t q_barr, size_t vl) {
-	static_assert(IsE64<V>, "rvv::BarrettReduce takes e64 vectors; use BarrettReduce32 for e32");
-	static_assert(OutputModFactor == 1 || OutputModFactor == 2, "OutputModFactor must be 1 or 2");
-	//we already have q_barr as 2^k/q, we just need to multiply it by x and shift it by k bits
-	//the trick is that mulhu already perform the multiplication + the shift so we can use that
-	V Q = __riscv_vmulhu(x, q_barr, vl);
-	//now we can compute Q*q using the standar vmul as we know this will never overflow the data type
-	//Q = __riscv_vmul(Q, q, vl);
-	//Q = __riscv_vsub(x, Q, vl);
-	Q = __riscv_vnmsac(x, q, Q, vl); //= x - q*Q in one instruction with better measured performance 
-	if constexpr (OutputModFactor == 1){
-		return ReduceFromTwice(Q, q, vl);
+	inline V BarrettReduce(V x, uint64_t q, uint64_t q_barr, size_t vl) {
+		static_assert(IsE64<V>, "rvv::BarrettReduce takes e64 vectors; use BarrettReduce32 for e32");
+		static_assert(OutputModFactor == 1 || OutputModFactor == 2, "OutputModFactor must be 1 or 2");
+		//we already have q_barr as 2^k/q, we just need to multiply it by x and shift it by k bits
+		//the trick is that mulhu already perform the multiplication + the shift so we can use that
+		V Q = __riscv_vmulhu(x, q_barr, vl);
+		//now we can compute Q*q using the standar vmul as we know this will never overflow the data type
+		//Q = __riscv_vmul(Q, q, vl);
+		//Q = __riscv_vsub(x, Q, vl);
+		Q = __riscv_vnmsac(x, q, Q, vl); //= x - q*Q in one instruction with better measured performance 
+		if constexpr (OutputModFactor == 1){
+			return ReduceFromTwice(Q, q, vl);
+		}
+		return Q;
 	}
-	return Q;
-}
 
 /// @brief Shoup multiplication by a precomputed operand, LAZY: returns
 /// x * y mod q in [0, 2q). y_precon = floor(y * 2^64 / q).
 /// This is the NTT butterfly multiply and the EltwiseFMAMod scalar multiply.
 template <class V>
-inline V MulModShoupLazy(V x, V y, V y_precon, uint64_t q, size_t vl) {
-  static_assert(IsE64<V>, "rvv::MulModShoupLazy takes e64 vectors; use MulModShoupLazy32 for e32");
-  V Q = __riscv_vmulhu(x, y_precon, vl);
-  V r = __riscv_vnmsac(__riscv_vmul(x, y, vl), q, Q, vl);  // x*y - q*Q: the multiply-subtract in one instruction
-  return r; 
-}
+	inline V MulModShoupLazy(V x, V y, V y_precon, uint64_t q, size_t vl) {
+		static_assert(IsE64<V>, "rvv::MulModShoupLazy takes e64 vectors; use MulModShoupLazy32 for e32");
+		V Q = __riscv_vmulhu(x, y_precon, vl);
+		V r = __riscv_vnmsac(__riscv_vmul(x, y, vl), q, Q, vl);  // x*y - q*Q: the multiply-subtract in one instruction
+		return r; 
+	}
 
 
 /// @brief Same, with a scalar multiplier broadcast to every lane.
 template <class V>
-inline V MulModShoupLazy(V x, uint64_t y, uint64_t y_precon, uint64_t q, size_t vl) {
-  static_assert(IsE64<V>, "rvv::MulModShoupLazy takes e64 vectors; use MulModShoupLazy32 for e32");
-  V Q = __riscv_vmulhu(x, y_precon, vl);
-  V r = __riscv_vnmsac(__riscv_vmul(x, y, vl), q, Q, vl);  // x*y - q*Q: the multiply-subtract in one instruction
-  return r; 
-}
+	inline V MulModShoupLazy(V x, uint64_t y, uint64_t y_precon, uint64_t q, size_t vl) {
+		static_assert(IsE64<V>, "rvv::MulModShoupLazy takes e64 vectors; use MulModShoupLazy32 for e32");
+		V Q = __riscv_vmulhu(x, y_precon, vl);
+		V r = __riscv_vnmsac(__riscv_vmul(x, y, vl), q, Q, vl);  // x*y - q*Q: the multiply-subtract in one instruction
+		return r; 
+	}
 
 
 /// @brief Fused Shoup multiply-add: (x * w + y) mod q in [0, q), the whole
@@ -263,18 +263,18 @@ inline V MulModShoupLazy(V x, uint64_t y, uint64_t y_precon, uint64_t q, size_t 
 /// MulModShoupLazy -> ReduceFromTwice -> AddMod: 5-14% faster on the X100,
 /// 2-6% on the A100.
 template <int InputModFactor, class V>
-inline V MulAddModShoup(V x, uint64_t w, uint64_t w_precon, V y, uint64_t q, size_t vl) {
-  static_assert(IsE64<V>, "rvv::MulAddModShoup takes e64 vectors; use MulAddModShoup32 for e32");
-  static_assert(InputModFactor == 1 || InputModFactor == 2 || InputModFactor == 4 || InputModFactor == 8,
-                "InputModFactor must be 1, 2, 4 or 8");
-  if constexpr (InputModFactor == 8) y = ReduceFromTwice(y, 4 * q, vl);  // [0, 8q) -> [0, 4q)
-  if constexpr (InputModFactor >= 4) y = ReduceFromTwice(y, 2 * q, vl);  // [0, 4q) -> [0, 2q)
-  V Q = __riscv_vmulhu(x, w_precon, vl);
-  V r = __riscv_vmacc(y, w, x, vl);    // x*w + y (low word) in one instruction
-  r = __riscv_vnmsac(r, q, Q, vl);     // x*w + y - q*Q, in [0, 2q + y) < 4q
-  r = ReduceFromTwice(r, 2 * q, vl);   // [0, 4q) -> [0, 2q)
-  return ReduceFromTwice(r, q, vl);    // [0, 2q) -> [0, q)
-}
+	inline V MulAddModShoup(V x, uint64_t w, uint64_t w_precon, V y, uint64_t q, size_t vl) {
+		static_assert(IsE64<V>, "rvv::MulAddModShoup takes e64 vectors; use MulAddModShoup32 for e32");
+		static_assert(InputModFactor == 1 || InputModFactor == 2 || InputModFactor == 4 || InputModFactor == 8,
+				"InputModFactor must be 1, 2, 4 or 8");
+		if constexpr (InputModFactor == 8) y = ReduceFromTwice(y, 4 * q, vl);  // [0, 8q) -> [0, 4q)
+		if constexpr (InputModFactor >= 4) y = ReduceFromTwice(y, 2 * q, vl);  // [0, 4q) -> [0, 2q)
+		V Q = __riscv_vmulhu(x, w_precon, vl);
+		V r = __riscv_vmacc(y, w, x, vl);    // x*w + y (low word) in one instruction
+		r = __riscv_vnmsac(r, q, Q, vl);     // x*w + y - q*Q, in [0, 2q + y) < 4q
+		r = ReduceFromTwice(r, 2 * q, vl);   // [0, 4q) -> [0, 2q)
+		return ReduceFromTwice(r, q, vl);    // [0, 2q) -> [0, q)
+	}
 
 
 /// @brief Full modular product of two VECTORS (no precomputed operand), as
@@ -289,27 +289,27 @@ inline V MulAddModShoup(V x, uint64_t w, uint64_t w_precon, V y, uint64_t q, siz
 /// short for 62-bit q, measured), so one final correction suffices. shift == 0
 /// only for q < 4, where hi == 0 (vsll by 64 shifts by 0 in RVV: harmless).
 template <class V>
-inline V MulModBarrett(V a, V b, uint64_t q, uint64_t mu, uint64_t shift, size_t vl) {
-  static_assert(IsE64<V>, "rvv::MulModBarrett takes e64 vectors; use MulModBarrett32 for e32");
-  V hi, lo;
-  hi = __riscv_vmulhu(a, b, vl);
-  lo = __riscv_vmul(a, b, vl);
-  
-  V c = __riscv_vor(
-		   __riscv_vsrl(lo, shift, vl),
-		   __riscv_vsll(hi, 64-shift, vl),
-		   vl
-		 ); 
-  
-  V Q = __riscv_vmulhu(c, mu, vl);
-  
-  V r = __riscv_vnmsac(lo, q, Q, vl);  // lo - q*Q in one instruction (8-33% faster than vmul + vsub, measured)
-  
-  return __riscv_vminu(
-		  r, 
-		  __riscv_vsub(r, q, vl),
-		  vl);
-}
+	inline V MulModBarrett(V a, V b, uint64_t q, uint64_t mu, uint64_t shift, size_t vl) {
+		static_assert(IsE64<V>, "rvv::MulModBarrett takes e64 vectors; use MulModBarrett32 for e32");
+		V hi, lo;
+		hi = __riscv_vmulhu(a, b, vl);
+		lo = __riscv_vmul(a, b, vl);
+
+		V c = __riscv_vor(
+				__riscv_vsrl(lo, shift, vl),
+				__riscv_vsll(hi, 64-shift, vl),
+				vl
+				); 
+
+		V Q = __riscv_vmulhu(c, mu, vl);
+
+		V r = __riscv_vnmsac(lo, q, Q, vl);  // lo - q*Q in one instruction (8-33% faster than vmul + vsub, measured)
+
+		return __riscv_vminu(
+				r, 
+				__riscv_vsub(r, q, vl),
+				vl);
+	}
 
 
 // ---------------------------------------------------------------------------
@@ -328,151 +328,151 @@ inline V MulModBarrett(V a, V b, uint64_t q, uint64_t mu, uint64_t shift, size_t
 /// narrowing load reaches about 2x the bandwidth at u64m8 -> u32m4 than at
 /// u64m2 -> u32m1 (X100 L1: 12.4 vs 5.8 B/cycle; A100: 17.0 vs 8.2).
 template <class V32 = vuint32m1_t>
-inline V32 Load32(const uint64_t* p, size_t vl) {
-  static_assert(IsE32<V32>, "rvv::Load32<V32>: V32 must be an e32 vector type");
-	//nice trick to load 32-bit lanes from wide 64-bit pointer, narrowing the values to fit
-  if constexpr (std::is_same_v<V32, vuint32mf2_t>) {
-    return __riscv_vncvt_x(__riscv_vle64_v_u64m1(p, vl), vl);
-  } else if constexpr (std::is_same_v<V32, vuint32m1_t>) {
-    return __riscv_vncvt_x(__riscv_vle64_v_u64m2(p, vl), vl);
-  } else if constexpr (std::is_same_v<V32, vuint32m2_t>) {
-    return __riscv_vncvt_x(__riscv_vle64_v_u64m4(p, vl), vl);
-  } else {
-    static_assert(std::is_same_v<V32, vuint32m4_t>,
-                  "rvv::Load32 from uint64_t storage: V32 must be u32mf2..u32m4 (the e64 load needs twice the LMUL)");
-    return __riscv_vncvt_x(__riscv_vle64_v_u64m8(p, vl), vl);
-  }
-}
+	inline V32 Load32(const uint64_t* p, size_t vl) {
+		static_assert(IsE32<V32>, "rvv::Load32<V32>: V32 must be an e32 vector type");
+		//nice trick to load 32-bit lanes from wide 64-bit pointer, narrowing the values to fit
+		if constexpr (std::is_same_v<V32, vuint32mf2_t>) {
+			return __riscv_vncvt_x(__riscv_vle64_v_u64m1(p, vl), vl);
+		} else if constexpr (std::is_same_v<V32, vuint32m1_t>) {
+			return __riscv_vncvt_x(__riscv_vle64_v_u64m2(p, vl), vl);
+		} else if constexpr (std::is_same_v<V32, vuint32m2_t>) {
+			return __riscv_vncvt_x(__riscv_vle64_v_u64m4(p, vl), vl);
+		} else {
+			static_assert(std::is_same_v<V32, vuint32m4_t>,
+					"rvv::Load32 from uint64_t storage: V32 must be u32mf2..u32m4 (the e64 load needs twice the LMUL)");
+			return __riscv_vncvt_x(__riscv_vle64_v_u64m8(p, vl), vl);
+		}
+	}
 template <class V32 = vuint32m1_t>
-inline V32 Load32(const uint32_t* p, size_t vl) {
-  static_assert(IsE32<V32>, "rvv::Load32<V32>: V32 must be an e32 vector type");
-  if constexpr (std::is_same_v<V32, vuint32mf2_t>) {
-    return __riscv_vle32_v_u32mf2(p, vl);
-  } else if constexpr (std::is_same_v<V32, vuint32m1_t>) {
-    return __riscv_vle32_v_u32m1(p, vl);
-  } else if constexpr (std::is_same_v<V32, vuint32m2_t>) {
-    return __riscv_vle32_v_u32m2(p, vl);
-  } else if constexpr (std::is_same_v<V32, vuint32m4_t>) {
-    return __riscv_vle32_v_u32m4(p, vl);
-  } else {
-    return __riscv_vle32_v_u32m8(p, vl);
-  }
-}
+	inline V32 Load32(const uint32_t* p, size_t vl) {
+		static_assert(IsE32<V32>, "rvv::Load32<V32>: V32 must be an e32 vector type");
+		if constexpr (std::is_same_v<V32, vuint32mf2_t>) {
+			return __riscv_vle32_v_u32mf2(p, vl);
+		} else if constexpr (std::is_same_v<V32, vuint32m1_t>) {
+			return __riscv_vle32_v_u32m1(p, vl);
+		} else if constexpr (std::is_same_v<V32, vuint32m2_t>) {
+			return __riscv_vle32_v_u32m2(p, vl);
+		} else if constexpr (std::is_same_v<V32, vuint32m4_t>) {
+			return __riscv_vle32_v_u32m4(p, vl);
+		} else {
+			return __riscv_vle32_v_u32m8(p, vl);
+		}
+	}
 
 /// @brief Stores vl 32-bit lanes into the storage type (see Load32). The lane
 /// type is deduced from v:
 ///   uint64_t*: widen with vzext.vf2 to twice the LMUL, then vse64 (V32 up to m4).
 ///   uint32_t*: plain vse32.
 template <class V32>
-inline void Store32(uint64_t* p, V32 v, size_t vl) {
-  static_assert(IsE32<V32>, "rvv::Store32: v must be an e32 vector");
-  static_assert(!std::is_same_v<V32, vuint32m8_t>,
-                "rvv::Store32 to uint64_t storage: at most u32m4 (the e64 store needs twice the LMUL)");
-  __riscv_vse64(p, __riscv_vzext_vf2(v, vl), vl);
-}
+	inline void Store32(uint64_t* p, V32 v, size_t vl) {
+		static_assert(IsE32<V32>, "rvv::Store32: v must be an e32 vector");
+		static_assert(!std::is_same_v<V32, vuint32m8_t>,
+				"rvv::Store32 to uint64_t storage: at most u32m4 (the e64 store needs twice the LMUL)");
+		__riscv_vse64(p, __riscv_vzext_vf2(v, vl), vl);
+	}
 template <class V32>
-inline void Store32(uint32_t* p, V32 v, size_t vl) {
-  static_assert(IsE32<V32>, "rvv::Store32: v must be an e32 vector");
-  __riscv_vse32(p, v, vl);
-}
+	inline void Store32(uint32_t* p, V32 v, size_t vl) {
+		static_assert(IsE32<V32>, "rvv::Store32: v must be an e32 vector");
+		__riscv_vse32(p, v, vl);
+	}
 
 // The Add/Sub helpers below are LMUL-generic: V = vuint32mf2_t ... vuint32m8_t.
 
 /// @brief (a + b) mod q, 32-bit lanes.
 template <class V>
-inline V AddMod32(V a, V b, uint32_t q, size_t vl) {
-	static_assert(IsE32<V>, "rvv::AddMod32 takes e32 vectors; use AddMod for e64");
-  	//add all elements inside the vectors
-	V sum = __riscv_vadd(a, b, vl);
-	//subtract the modulus from the element-wise sum
-	V remainder = __riscv_vsub(sum, q, vl);
-	//return the minimum between the sum and the modulus diff
-	return __riscv_vminu(sum, remainder, vl);
-}
+	inline V AddMod32(V a, V b, uint32_t q, size_t vl) {
+		static_assert(IsE32<V>, "rvv::AddMod32 takes e32 vectors; use AddMod for e64");
+		//add all elements inside the vectors
+		V sum = __riscv_vadd(a, b, vl);
+		//subtract the modulus from the element-wise sum
+		V remainder = __riscv_vsub(sum, q, vl);
+		//return the minimum between the sum and the modulus diff
+		return __riscv_vminu(sum, remainder, vl);
+	}
 
 /// @brief (a - b) mod q, 32-bit lanes.
 template <class V>
-inline V SubMod32(V a, V b, uint32_t q, size_t vl) {
-	static_assert(IsE32<V>, "rvv::SubMod32 takes e32 vectors; use SubMod for e64");
-  	//sub all elements inside the vectors
-	V diff = __riscv_vsub(a, b, vl);
-	//add the modulus from the element-wise sum
-	V remainder = __riscv_vadd(diff, q, vl);
-	//return the minimum between the diff and the modulus sum
-	return __riscv_vminu(diff, remainder, vl);
-}
+	inline V SubMod32(V a, V b, uint32_t q, size_t vl) {
+		static_assert(IsE32<V>, "rvv::SubMod32 takes e32 vectors; use SubMod for e64");
+		//sub all elements inside the vectors
+		V diff = __riscv_vsub(a, b, vl);
+		//add the modulus from the element-wise sum
+		V remainder = __riscv_vadd(diff, q, vl);
+		//return the minimum between the diff and the modulus sum
+		return __riscv_vminu(diff, remainder, vl);
+	}
 
 /// @brief (a + b) mod q, 32-bit lanes, scalar b.
 template <class V>
-inline V AddScalarMod32(V a, uint32_t b, uint32_t q, size_t vl) {
-	static_assert(IsE32<V>, "rvv::AddScalarMod32 takes e32 vectors; use AddScalarMod for e64");
-  	//add all elements inside the vectors
-	V sum = __riscv_vadd(a, b, vl);
-	//subtract the modulus from the element-wise sum
-	V remainder = __riscv_vsub(sum, q, vl);
-	//return the minimum between the sum and the modulus diff
-	return __riscv_vminu(sum, remainder, vl);
-}
+	inline V AddScalarMod32(V a, uint32_t b, uint32_t q, size_t vl) {
+		static_assert(IsE32<V>, "rvv::AddScalarMod32 takes e32 vectors; use AddScalarMod for e64");
+		//add all elements inside the vectors
+		V sum = __riscv_vadd(a, b, vl);
+		//subtract the modulus from the element-wise sum
+		V remainder = __riscv_vsub(sum, q, vl);
+		//return the minimum between the sum and the modulus diff
+		return __riscv_vminu(sum, remainder, vl);
+	}
 
 /// @brief (a - b) mod q, 32-bit lanes, scalar b.
 template <class V>
-inline V SubScalarMod32(V a, uint32_t b, uint32_t q, size_t vl) {
-	static_assert(IsE32<V>, "rvv::SubScalarMod32 takes e32 vectors; use SubScalarMod for e64");
-  	//sub all elements inside the vectors
-	V diff = __riscv_vsub(a, b, vl);
-	//add the modulus from the element-wise sum
-	V remainder = __riscv_vadd(diff, q, vl);
-	//return the minimum between the diff and the modulus sum
-	return __riscv_vminu(diff, remainder, vl);
-}
+	inline V SubScalarMod32(V a, uint32_t b, uint32_t q, size_t vl) {
+		static_assert(IsE32<V>, "rvv::SubScalarMod32 takes e32 vectors; use SubScalarMod for e64");
+		//sub all elements inside the vectors
+		V diff = __riscv_vsub(a, b, vl);
+		//add the modulus from the element-wise sum
+		V remainder = __riscv_vadd(diff, q, vl);
+		//return the minimum between the diff and the modulus sum
+		return __riscv_vminu(diff, remainder, vl);
+	}
 
 /// @brief Maps x in [0, 2q) to [0, q), 32-bit lanes (the "vminu" conditional subtract).
 template <class V>
-inline V ReduceFromTwice32(V x, uint32_t q, size_t vl) {
-	static_assert(IsE32<V>, "rvv::ReduceFromTwice32 takes e32 vectors; use ReduceFromTwice for e64");
-	return __riscv_vminu(x, __riscv_vsub(x, q, vl), vl);
-}
+	inline V ReduceFromTwice32(V x, uint32_t q, size_t vl) {
+		static_assert(IsE32<V>, "rvv::ReduceFromTwice32 takes e32 vectors; use ReduceFromTwice for e64");
+		return __riscv_vminu(x, __riscv_vsub(x, q, vl), vl);
+	}
 
 /// @brief x mod q for ANY 32-bit x (Barrett reduction), 32-bit lanes, q >= 2.
 /// LMUL-generic. q_barr = floor(2^32 / q) = MultiplyFactor(1, 32, q).BarrettFactor()
 /// (< 2^32 for q >= 2); compute it once per kernel call, before the strip loop.
 /// OutputModFactor 1 returns [0, q); 2 returns the lazy [0, 2q).
 template <int OutputModFactor = 1, class V>
-inline V BarrettReduce32(V x, uint32_t q, uint32_t q_barr, size_t vl) {
-	static_assert(IsE32<V>, "rvv::BarrettReduce32 takes e32 vectors; use BarrettReduce for e64");
-	static_assert(OutputModFactor == 1 || OutputModFactor == 2, "OutputModFactor must be 1 or 2");
-  	//we already have q_barr as 2^k/q, we just need to multiply it by x and shift it by k bits
-	//the trick is that mulhu already perform the multiplication + the shift so we can use that
-	V Q = __riscv_vmulhu(x, q_barr, vl);
-	//now we can compute Q*q using the standar vmul as we know this will never overflow the data type
-	//Q = __riscv_vmul(Q, q, vl);
-	//Q = __riscv_vsub(x, Q, vl);
-	Q = __riscv_vnmsac(x, q, Q, vl); 
-	if constexpr (OutputModFactor == 1){
-		return __riscv_vminu(Q, __riscv_vsub(Q, q, vl), vl);	
+	inline V BarrettReduce32(V x, uint32_t q, uint32_t q_barr, size_t vl) {
+		static_assert(IsE32<V>, "rvv::BarrettReduce32 takes e32 vectors; use BarrettReduce for e64");
+		static_assert(OutputModFactor == 1 || OutputModFactor == 2, "OutputModFactor must be 1 or 2");
+		//we already have q_barr as 2^k/q, we just need to multiply it by x and shift it by k bits
+		//the trick is that mulhu already perform the multiplication + the shift so we can use that
+		V Q = __riscv_vmulhu(x, q_barr, vl);
+		//now we can compute Q*q using the standar vmul as we know this will never overflow the data type
+		//Q = __riscv_vmul(Q, q, vl);
+		//Q = __riscv_vsub(x, Q, vl);
+		Q = __riscv_vnmsac(x, q, Q, vl); 
+		if constexpr (OutputModFactor == 1){
+			return __riscv_vminu(Q, __riscv_vsub(Q, q, vl), vl);	
+		}
+		return Q;
 	}
-	return Q;
-}
 
 /// @brief Shoup lazy multiply in 32-bit lanes: [0, 2q).
 /// y_precon = floor(y * 2^32 / q) (MultiplyFactor(y, 32, q)).
 template <class V>
-inline V MulModShoupLazy32(V x, V y, V y_precon, uint32_t q, size_t vl) {
-  static_assert(IsE32<V>, "rvv::MulModShoupLazy32 takes e32 vectors; use MulModShoupLazy for e64");
-  V Q = __riscv_vmulhu(x, y_precon, vl);
-  V r = __riscv_vnmsac(__riscv_vmul(x, y, vl), q, Q, vl);  // x*y - q*Q: the multiply-subtract in one instruction
-  return r; 
-}
+	inline V MulModShoupLazy32(V x, V y, V y_precon, uint32_t q, size_t vl) {
+		static_assert(IsE32<V>, "rvv::MulModShoupLazy32 takes e32 vectors; use MulModShoupLazy for e64");
+		V Q = __riscv_vmulhu(x, y_precon, vl);
+		V r = __riscv_vnmsac(__riscv_vmul(x, y, vl), q, Q, vl);  // x*y - q*Q: the multiply-subtract in one instruction
+		return r; 
+	}
 
 /// @brief Same, with a scalar multiplier broadcast to every lane (y < q,
 /// y_precon = floor(y * 2^32 / q)). The EltwiseFMAMod multiply without arg3.
 template <class V>
-inline V MulModShoupLazy32(V x, uint32_t y, uint32_t y_precon, uint32_t q, size_t vl) {
-  static_assert(IsE32<V>, "rvv::MulModShoupLazy32 takes e32 vectors; use MulModShoupLazy for e64");
-  V Q = __riscv_vmulhu(x, y_precon, vl);
-  V r = __riscv_vnmsac(__riscv_vmul(x, y, vl), q, Q, vl);  // x*y - q*Q: the multiply-subtract in one instruction
-  return r;
-}
+	inline V MulModShoupLazy32(V x, uint32_t y, uint32_t y_precon, uint32_t q, size_t vl) {
+		static_assert(IsE32<V>, "rvv::MulModShoupLazy32 takes e32 vectors; use MulModShoupLazy for e64");
+		V Q = __riscv_vmulhu(x, y_precon, vl);
+		V r = __riscv_vnmsac(__riscv_vmul(x, y, vl), q, Q, vl);  // x*y - q*Q: the multiply-subtract in one instruction
+		return r;
+	}
 
 
 /// @brief Fused Shoup multiply-add in 32-bit lanes: (x * w + y) mod q in [0, q).
@@ -484,18 +484,18 @@ inline V MulModShoupLazy32(V x, uint32_t y, uint32_t y_precon, uint32_t q, size_
 /// ReduceFromTwice32 -> AddMod32: 8-22% faster on the X100 (u32m4); on the
 /// A100 3-11% faster at u32m8, -3..+7% at u32m4.
 template <int InputModFactor, class V>
-inline V MulAddModShoup32(V x, uint32_t w, uint32_t w_precon, V y, uint32_t q, size_t vl) {
-  static_assert(IsE32<V>, "rvv::MulAddModShoup32 takes e32 vectors; use MulAddModShoup for e64");
-  static_assert(InputModFactor == 1 || InputModFactor == 2 || InputModFactor == 4 || InputModFactor == 8,
-                "InputModFactor must be 1, 2, 4 or 8");
-  if constexpr (InputModFactor == 8) y = ReduceFromTwice32(y, 4 * q, vl);  // [0, 8q) -> [0, 4q)
-  if constexpr (InputModFactor >= 4) y = ReduceFromTwice32(y, 2 * q, vl);  // [0, 4q) -> [0, 2q)
-  V Q = __riscv_vmulhu(x, w_precon, vl);
-  V r = __riscv_vmacc(y, w, x, vl);      // x*w + y (low word) in one instruction
-  r = __riscv_vnmsac(r, q, Q, vl);       // x*w + y - q*Q, in [0, 2q + y) < 4q
-  r = ReduceFromTwice32(r, 2 * q, vl);   // [0, 4q) -> [0, 2q)
-  return ReduceFromTwice32(r, q, vl);    // [0, 2q) -> [0, q)
-}
+	inline V MulAddModShoup32(V x, uint32_t w, uint32_t w_precon, V y, uint32_t q, size_t vl) {
+		static_assert(IsE32<V>, "rvv::MulAddModShoup32 takes e32 vectors; use MulAddModShoup for e64");
+		static_assert(InputModFactor == 1 || InputModFactor == 2 || InputModFactor == 4 || InputModFactor == 8,
+				"InputModFactor must be 1, 2, 4 or 8");
+		if constexpr (InputModFactor == 8) y = ReduceFromTwice32(y, 4 * q, vl);  // [0, 8q) -> [0, 4q)
+		if constexpr (InputModFactor >= 4) y = ReduceFromTwice32(y, 2 * q, vl);  // [0, 4q) -> [0, 2q)
+		V Q = __riscv_vmulhu(x, w_precon, vl);
+		V r = __riscv_vmacc(y, w, x, vl);      // x*w + y (low word) in one instruction
+		r = __riscv_vnmsac(r, q, Q, vl);       // x*w + y - q*Q, in [0, 2q + y) < 4q
+		r = ReduceFromTwice32(r, 2 * q, vl);   // [0, 4q) -> [0, 2q)
+		return ReduceFromTwice32(r, q, vl);    // [0, 2q) -> [0, q)
+	}
 
 
 /// @brief Full modular product of two 32-bit vectors, a, b < q < 2^30. Returns [0, q).
@@ -505,35 +505,35 @@ inline V MulAddModShoup32(V x, uint32_t w, uint32_t w_precon, V y, uint32_t q, s
 ///                       = MultiplyFactor(1 << shift, 32, q).BarrettFactor()
 /// The kernel computes both ONCE per call (a single 64-bit divu here).
 template <class V>
-inline V MulModBarrett32(V a, V b, uint32_t q, uint32_t mu, uint32_t shift, size_t vl) {
-  static_assert(IsE32<V>, "rvv::MulModBarrett32 takes e32 vectors; use MulModBarrett for e64");
-  V hi, lo;
-  hi = __riscv_vmulhu(a, b, vl);
-  lo = __riscv_vmul(a, b, vl);
-  
-  V c = __riscv_vor(
-		   __riscv_vsrl(lo, shift, vl),
-		   __riscv_vsll(hi, 32-shift, vl),
-		   vl
-		 ); 
-  
-  V Q = __riscv_vmulhu(c, mu, vl);
-  
-  V r = __riscv_vnmsac(lo, q, Q, vl);  // lo - q*Q in one instruction (8-33% faster than vmul + vsub, measured)
-  
-  r = __riscv_vminu(
-		  r, 
-		  __riscv_vsub(r, q, vl),
-		  vl);
-  
-  if ((q >> 29) == 0) //if moduli is 30-bits or higher we need a double correction
-    return r;
-  else
-    return __riscv_vminu(
-		  r, 
-		  __riscv_vsub(r, q, vl),
-		  vl);
-}
+	inline V MulModBarrett32(V a, V b, uint32_t q, uint32_t mu, uint32_t shift, size_t vl) {
+		static_assert(IsE32<V>, "rvv::MulModBarrett32 takes e32 vectors; use MulModBarrett for e64");
+		V hi, lo;
+		hi = __riscv_vmulhu(a, b, vl);
+		lo = __riscv_vmul(a, b, vl);
+
+		V c = __riscv_vor(
+				__riscv_vsrl(lo, shift, vl),
+				__riscv_vsll(hi, 32-shift, vl),
+				vl
+				); 
+
+		V Q = __riscv_vmulhu(c, mu, vl);
+
+		V r = __riscv_vnmsac(lo, q, Q, vl);  // lo - q*Q in one instruction (8-33% faster than vmul + vsub, measured)
+
+		r = __riscv_vminu(
+				r, 
+				__riscv_vsub(r, q, vl),
+				vl);
+
+		if ((q >> 29) == 0) //if moduli is 30-bits or higher we need a double correction
+			return r;
+		else
+			return __riscv_vminu(
+					r, 
+					__riscv_vsub(r, q, vl),
+					vl);
+	}
 
 
 }  // namespace rvv

@@ -23,7 +23,7 @@ namespace hexl {
 /// inputs in [0, InputModFactor * modulus) and output in [0, modulus).
 /// InputModFactor is 1, 2 or 4.
 template <typename Word, int InputModFactor>
-void EltwiseMultModNative(Word* result, const Word* operand1, const Word* operand2, uint64_t n, uint64_t modulus);
+	void EltwiseMultModNative(Word* result, const Word* operand1, const Word* operand2, uint64_t n, uint64_t modulus);
 
 #ifdef HEXL_HAS_RVV
 /// @brief RVV, 32-bit lanes, modulus < kMaxModulusRVV32 (2^30), so every
@@ -32,15 +32,15 @@ void EltwiseMultModNative(Word* result, const Word* operand1, const Word* operan
 /// Default lane: rvv::cfg::MultMod32 (uint32_t) or MultMod32U64 (uint64_t,
 /// at most u32m4 because of the narrowing load).
 template <typename Word, int InputModFactor,
-          class V = rvv::LaneFor<Word, rvv::cfg::MultMod32U64, rvv::cfg::MultMod32>>
-void EltwiseMultModRVV32(Word* result, const Word* operand1, const Word* operand2, uint64_t n, uint64_t modulus);
+	 class V = rvv::LaneFor<Word, rvv::cfg::MultMod32U64, rvv::cfg::MultMod32>>
+		 void EltwiseMultModRVV32(Word* result, const Word* operand1, const Word* operand2, uint64_t n, uint64_t modulus);
 
 /// @brief RVV, 64-bit lanes: every other modulus (BFV's 60-bit primes).
 /// 64-bit storage only.
 template <int InputModFactor, class V = rvv::cfg::MultMod64>
-void EltwiseMultModRVV64(uint64_t* result, const uint64_t* operand1,
-                         const uint64_t* operand2, uint64_t n,
-                         uint64_t modulus);
+	void EltwiseMultModRVV64(uint64_t* result, const uint64_t* operand1,
+			const uint64_t* operand2, uint64_t n,
+			uint64_t modulus);
 #endif
 
 }  // namespace hexl

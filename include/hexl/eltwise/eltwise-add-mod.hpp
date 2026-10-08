@@ -25,7 +25,7 @@ namespace hexl {
 /// @details Computes \f$ result[i] = (operand1[i] + operand2[i]) \mod modulus
 /// \f$ for \f$ i=0, ..., n-1\f$.
 void EltwiseAddMod(uint64_t* result, const uint64_t* operand1,
-                   const uint64_t* operand2, uint64_t n, uint64_t modulus);
+		const uint64_t* operand2, uint64_t n, uint64_t modulus);
 
 /// @brief Adds a vector and scalar elementwise with modular reduction
 /// @param[out] result Stores result. May alias operand1.
@@ -38,7 +38,7 @@ void EltwiseAddMod(uint64_t* result, const uint64_t* operand1,
 /// @details Computes \f$ result[i] = (operand1[i] + operand2) \mod modulus
 /// \f$ for \f$ i=0, ..., n-1\f$.
 void EltwiseAddMod(uint64_t* result, const uint64_t* operand1,
-                   uint64_t operand2, uint64_t n, uint64_t modulus);
+		uint64_t operand2, uint64_t n, uint64_t modulus);
 
 
 // ---- rvv-hexl extension: 32-bit storage (OpenFHE NATIVE_SIZE=32) -----------
@@ -48,9 +48,9 @@ void EltwiseAddMod(uint64_t* result, const uint64_t* operand1,
 // falls back to the native kernels. Not part of upstream Intel HEXL: guard uses
 // with #ifdef HEXL_RVV_HAS_32BIT_API.
 void EltwiseAddMod(uint32_t* result, const uint32_t* operand1,
-                   const uint32_t* operand2, uint64_t n, uint64_t modulus);
+		const uint32_t* operand2, uint64_t n, uint64_t modulus);
 void EltwiseAddMod(uint32_t* result, const uint32_t* operand1,
-                   uint64_t operand2, uint64_t n, uint64_t modulus);
+		uint64_t operand2, uint64_t n, uint64_t modulus);
 
 }  // namespace hexl
 }  // namespace intel
