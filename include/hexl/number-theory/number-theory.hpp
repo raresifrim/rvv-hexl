@@ -264,7 +264,7 @@ inline unsigned char AddUInt64(uint64_t operand1, uint64_t operand2,
 }
 
 // ===========================================================================
-// Implemented in src/number-theory/number-theory.cpp (stubs left: make todo)
+// Implemented in src/number-theory/number-theory.cpp
 // ===========================================================================
 
 /// @brief Returns whether or not the input is prime (must be deterministic and

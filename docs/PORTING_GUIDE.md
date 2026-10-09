@@ -75,7 +75,7 @@ HEXL 1.2.6.
 | Header-inline helpers | `number-theory.hpp` (MultiplyFactor, ReduceMod, BarrettReduce64, MultiplyModLazy, MultiplyAddMod, …), `util/*.hpp` | **done**: part of the upstream header API |
 | Entry points + dispatch | `src/eltwise/<op>.cpp` (top half), `src/ntt/ntt.cpp` (except one method) | **done** |
 | CPU detection, port info, allocator | `src/util/cpu-features.*`, `aligned-allocator.cpp` | **done** |
-| Scalar number theory | `src/number-theory/number-theory.cpp` | **partly done**: `MultiplyMod` (Barrett and Shoup forms), `AddUIntMod`, `SubUIntMod`; **TODO**: `InverseMod`, `PowMod`, `IsPrimitiveRoot`, `GeneratePrimitiveRoot`, `MinimalPrimitiveRoot`, `ReverseBits`, `IsPrime`, `GeneratePrimes` |
+| Scalar number theory | `src/number-theory/number-theory.cpp` | **done**: `PowMod` and `IsPrime` work in Montgomery form (odd moduli; `IsPrime` exact for every 64-bit input), `InverseMod` is extended Euclid, `MultiplyMod` is inline in the header |
 | Native kernels | `src/eltwise/<op>.cpp` (bottom half), `src/ntt/ntt-radix-2.cpp` | **done** for all 7 eltwise ops; **TODO**: `ntt-radix-2.cpp` |
 | Twiddle precomputation | `NTT::ComputeRootOfUnityPowers` in `src/ntt/ntt.cpp` | **TODO** |
 | RVV kernels | `src/eltwise/<op>-rvv.cpp`, `src/ntt/ntt-rvv.cpp` | **done** for all 7 eltwise ops (e64 and e32, every lane m1-m8); **TODO**: `ntt-rvv.cpp` |
@@ -290,7 +290,7 @@ Each milestone ends with a command that must pass.
 
 | # | Work | Done when |
 |---|---|---|
-| M0 | `number-theory.cpp` (11 functions) | `make test` → all `NumberTheory_*` PASS |
+| M0 | `number-theory.cpp` (11 functions) (**done**) | `make test` → all `NumberTheory_*` PASS |
 | M1 | the 7 native eltwise kernels (**done**) | `HEXL_DISABLE_RVV=1 build/rvv-release/bin/hexl-tests Eltwise` all PASS |
 | M2 | `ComputeRootOfUnityPowers` (64-bit tables) + native radix-2 forward/inverse | `make ISA=scalar test` fully green, **0 TODO** |
 | M3 | integration with the native path only | `make ISA=scalar openfhe openfhe-check WITH_RVV_HEXL=ON`: OpenFHE's own tests pass on the port. Same for SEAL: `make ISA=scalar seal seal-check WITH_RVV_HEXL=ON` (section 7) |
