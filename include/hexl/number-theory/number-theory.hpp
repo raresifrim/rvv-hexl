@@ -23,55 +23,55 @@ namespace hexl {
 /// @brief Pre-computes a Barrett factor with which modular multiplication can
 /// be performed more efficiently
 class MultiplyFactor {
-	public:
-		MultiplyFactor() = default;
+public:
+	MultiplyFactor() = default;
 
-		/// @brief Computes and stores the Barrett factor floor((operand << bit_shift)
-		/// / modulus). This is useful when modular multiplication of the form
-		/// (x * operand) mod modulus is performed with same modulus and operand
-		/// several times (Shoup's trick: NTT twiddles, FMA scalars). Passing
-		/// operand=1 pre-computes floor(2^bit_shift / modulus) for plain Barrett.
-		/// @details bit_shift 32 is the natural choice for the RVV e32 path
-		/// (SEW=32, modulus < 2^30); bit_shift 64 for the e64 path. 52 exists only
-		/// for upstream's AVX512-IFMA path and is kept for compatibility.
-		MultiplyFactor(uint64_t operand, uint64_t bit_shift, uint64_t modulus)
-			: m_operand(operand) {
-				HEXL_CHECK(operand <= modulus, "operand " << operand
-						<< " must be less than modulus "
-						<< modulus);
-				HEXL_CHECK(bit_shift == 32 || bit_shift == 52 || bit_shift == 64,
-						"Unsupported BitShift " << bit_shift);
-				uint64_t op_hi = operand >> (64 - bit_shift);
-				uint64_t op_lo = (bit_shift == 64) ? 0 : (operand << bit_shift);
+	/// @brief Computes and stores the Barrett factor floor((operand << bit_shift)
+	/// / modulus). This is useful when modular multiplication of the form
+	/// (x * operand) mod modulus is performed with same modulus and operand
+	/// several times (Shoup's trick: NTT twiddles, FMA scalars). Passing
+	/// operand=1 pre-computes floor(2^bit_shift / modulus) for plain Barrett.
+	/// @details bit_shift 32 is the natural choice for the RVV e32 path
+	/// (SEW=32, modulus < 2^30); bit_shift 64 for the e64 path. 52 exists only
+	/// for upstream's AVX512-IFMA path and is kept for compatibility.
+	MultiplyFactor(uint64_t operand, uint64_t bit_shift, uint64_t modulus)
+		: m_operand(operand) {
+			HEXL_CHECK(operand <= modulus, "operand " << operand
+					<< " must be less than modulus "
+					<< modulus);
+			HEXL_CHECK(bit_shift == 32 || bit_shift == 52 || bit_shift == 64,
+					"Unsupported BitShift " << bit_shift);
+			uint64_t op_hi = operand >> (64 - bit_shift);
+			uint64_t op_lo = (bit_shift == 64) ? 0 : (operand << bit_shift);
 
-				// RV64 has no 128-by-64 divide: the generic path below is a libgcc
-				// __udivti3 call (~50-70 cycles on the K3). The two common cases need
-				// only one 64-bit divu (4-8x faster, measured on the X100 and A100):
-				if (op_hi == 0) {
-					// The dividend fits in 64 bits: bit_shift 32/52 with operand 1, and the
-					// e32 Shoup factors floor(y * 2^32 / q) for y < q < 2^30.
-					m_barrett_factor = op_lo / modulus;
-				} else if ((op_hi == 1) && (op_lo == 0)) {
-					// 2^64 / modulus (operand 1, bit_shift 64: the plain Barrett factor):
-					// floor(2^64 / q) = floor((2^64 - 1) / q) + 1 if q divides 2^64, else + 0.
-					// q divides 2^64 exactly when (2^64 - 1) mod q == q - 1 (q a power of two).
-					const uint64_t all_ones = ~uint64_t{0};
-					m_barrett_factor =
-						(all_ones / modulus) + (((all_ones % modulus) == (modulus - 1)) ? 1 : 0);
-				} else {
-					m_barrett_factor = DivideUInt128UInt64Lo(op_hi, op_lo, modulus);
-				}
+			// RV64 has no 128-by-64 divide: the generic path below is a libgcc
+			// __udivti3 call (~50-70 cycles on the K3). The two common cases need
+			// only one 64-bit divu (4-8x faster, measured on the X100 and A100):
+			if (op_hi == 0) {
+				// The dividend fits in 64 bits: bit_shift 32/52 with operand 1, and the
+				// e32 Shoup factors floor(y * 2^32 / q) for y < q < 2^30.
+				m_barrett_factor = op_lo / modulus;
+			} else if ((op_hi == 1) && (op_lo == 0)) {
+				// 2^64 / modulus (operand 1, bit_shift 64: the plain Barrett factor):
+				// floor(2^64 / q) = floor((2^64 - 1) / q) + 1 if q divides 2^64, else + 0.
+				// q divides 2^64 exactly when (2^64 - 1) mod q == q - 1 (q a power of two).
+				const uint64_t all_ones = ~uint64_t{0};
+				m_barrett_factor =
+					(all_ones / modulus) + (((all_ones % modulus) == (modulus - 1)) ? 1 : 0);
+			} else {
+				m_barrett_factor = DivideUInt128UInt64Lo(op_hi, op_lo, modulus);
 			}
+		}
 
-		/// @brief Returns the pre-computed Barrett factor
-		inline uint64_t BarrettFactor() const { return m_barrett_factor; }
+	/// @brief Returns the pre-computed Barrett factor
+	inline uint64_t BarrettFactor() const { return m_barrett_factor; }
 
-		/// @brief Returns the operand corresponding to the Barrett factor
-		inline uint64_t Operand() const { return m_operand; }
+	/// @brief Returns the operand corresponding to the Barrett factor
+	inline uint64_t Operand() const { return m_operand; }
 
-	private:
-		uint64_t m_operand;
-		uint64_t m_barrett_factor;
+private:
+	uint64_t m_operand;
+	uint64_t m_barrett_factor;
 };
 
 /// @brief Returns whether or not num is a power of two

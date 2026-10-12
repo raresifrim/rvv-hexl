@@ -358,13 +358,12 @@ reconfigure:
 	rm -rf $(ROOT)/build/config
 	@echo "RISC-V checks will run again on the next make"
 
-# Re-indent the C/C++ sources in the project style: Vim's C indenter (gg=G),
-# one tab per level, no extra indent inside namespaces (cinoptions N-s). Run
-# with --clean, so the result does not depend on a personal nvim config.
+# Re-indent the C/C++ sources in the project style, defined in mk/format.lua
+# (Vim's C indenter, tabs, see the file). Runs nvim with --clean plus that file,
+# so the result does not depend on a personal nvim config.
 format:
 	@for f in $$(find include src test bench \( -name '*.hpp' -o -name '*.cpp' -o -name '*.h' -o -name '*.c' \)); do \
-	  nvim --headless --clean -c 'filetype plugin indent on' -c "edit $$f" \
-	    -c 'setlocal cinoptions+=N-s noexpandtab tabstop=8 shiftwidth=8' \
+	  nvim --headless --clean -c 'luafile $(ROOT)/mk/format.lua' -c "edit $$f" \
 	    -c 'silent! keepjumps normal! gg=G' -c 'write' -c 'qa!' >/dev/null 2>&1 || { echo "format failed: $$f"; exit 1; }; \
 	done
 

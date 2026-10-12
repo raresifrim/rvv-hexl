@@ -23,9 +23,9 @@ namespace O = hexltest::oracle;
 namespace {
 
 template <typename Word>
-	constexpr bool Is32() {
-		return std::is_same<Word, uint32_t>::value;
-	}
+constexpr bool Is32() {
+	return std::is_same<Word, uint32_t>::value;
+}
 
 /// Candidate moduli: every size class, both sides of the e32/e64 dispatch
 /// boundary (2^30) and of the 32-bit storage limit. Each test keeps the ones

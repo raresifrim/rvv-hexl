@@ -36,7 +36,7 @@ struct AllocatorInterface : public AllocatorBase {
 		static_cast<AllocatorImpl*>(this)->deallocate_impl(p, n);
 	}
 
-	private:
+private:
 	// in case AllocatorImpl doesn't provide implementations, use default null
 	// behavior
 	void* allocate_impl(size_t bytes_count) {

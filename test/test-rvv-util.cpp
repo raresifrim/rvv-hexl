@@ -283,28 +283,28 @@ TEST(RvvUtil_MulModShoupLazyScalar) {
 // [0, InputModFactor * q), at every InputModFactor, at m1 and m4.
 namespace {
 template <int Imf>
-	void CheckMulAddModShoup(uint64_t q) {
-		for (uint64_t w : {q - 1, uint64_t{1}, uint64_t{0}, O::Random(1, q)[0]}) {
-			const uint64_t wp = ShoupPrecon(w, q, 64);
-			for (size_t n : O::EltwiseSizes()) {
-				auto x = WithEdges(n, O::AnyWord<uint64_t>(), {~0ULL, ~0ULL, q - 1, 0});
-				auto y = WithEdges(n, Imf * q, {Imf * q - 1, 0, Imf * q - 1, q});
-				std::vector<uint64_t> want(n), got1(n), got4(n);
-				for (size_t i = 0; i < n; ++i) want[i] = (O::MulMod(x[i] % q, w, q) + y[i] % q) % q;
-				Strips64(n, [&](size_t i, size_t vl) {
-						auto r = rvv::MulAddModShoup<Imf>(__riscv_vle64_v_u64m1(&x[i], vl), w, wp, __riscv_vle64_v_u64m1(&y[i], vl), q, vl);
-						__riscv_vse64_v_u64m1(&got1[i], r, vl);
-						});
-				for (size_t i = 0, vl; i < n; i += vl) {
-					vl = __riscv_vsetvl_e64m4(n - i);
-					auto r = rvv::MulAddModShoup<Imf>(__riscv_vle64_v_u64m4(&x[i], vl), w, wp, __riscv_vle64_v_u64m4(&y[i], vl), q, vl);
-					__riscv_vse64_v_u64m4(&got4[i], r, vl);
-				}
-				CHECK_VEC_EQ(want, got1, << "rvv::MulAddModShoup<" << Imf << "><u64m1> n=" << n << " q=" << q << " w=" << w);
-				CHECK_VEC_EQ(want, got4, << "rvv::MulAddModShoup<" << Imf << "><u64m4> n=" << n << " q=" << q << " w=" << w);
+void CheckMulAddModShoup(uint64_t q) {
+	for (uint64_t w : {q - 1, uint64_t{1}, uint64_t{0}, O::Random(1, q)[0]}) {
+		const uint64_t wp = ShoupPrecon(w, q, 64);
+		for (size_t n : O::EltwiseSizes()) {
+			auto x = WithEdges(n, O::AnyWord<uint64_t>(), {~0ULL, ~0ULL, q - 1, 0});
+			auto y = WithEdges(n, Imf * q, {Imf * q - 1, 0, Imf * q - 1, q});
+			std::vector<uint64_t> want(n), got1(n), got4(n);
+			for (size_t i = 0; i < n; ++i) want[i] = (O::MulMod(x[i] % q, w, q) + y[i] % q) % q;
+			Strips64(n, [&](size_t i, size_t vl) {
+					auto r = rvv::MulAddModShoup<Imf>(__riscv_vle64_v_u64m1(&x[i], vl), w, wp, __riscv_vle64_v_u64m1(&y[i], vl), q, vl);
+					__riscv_vse64_v_u64m1(&got1[i], r, vl);
+					});
+			for (size_t i = 0, vl; i < n; i += vl) {
+				vl = __riscv_vsetvl_e64m4(n - i);
+				auto r = rvv::MulAddModShoup<Imf>(__riscv_vle64_v_u64m4(&x[i], vl), w, wp, __riscv_vle64_v_u64m4(&y[i], vl), q, vl);
+				__riscv_vse64_v_u64m4(&got4[i], r, vl);
 			}
+			CHECK_VEC_EQ(want, got1, << "rvv::MulAddModShoup<" << Imf << "><u64m1> n=" << n << " q=" << q << " w=" << w);
+			CHECK_VEC_EQ(want, got4, << "rvv::MulAddModShoup<" << Imf << "><u64m4> n=" << n << " q=" << q << " w=" << w);
 		}
 	}
+}
 }  // namespace
 
 TEST(RvvUtil_MulAddModShoup) {
@@ -547,30 +547,30 @@ TEST(RvvUtil_MulModShoupLazy32Scalar) {
 // [0, InputModFactor * q) with InputModFactor * q <= 2^32. At m1 and m4.
 namespace {
 template <int Imf>
-	void CheckMulAddModShoup32(uint64_t q) {
-		if (Imf * q > (1ULL << 32)) return;  // outside the contract (e.g. imf 8 needs q < 2^29)
-		const uint32_t q32 = static_cast<uint32_t>(q);
-		for (uint64_t w : {q - 1, uint64_t{1}, uint64_t{0}, O::Random(1, q)[0]}) {
-			const uint32_t w32 = static_cast<uint32_t>(w), wp = static_cast<uint32_t>(ShoupPrecon(w, q, 32));
-			for (size_t n : O::EltwiseSizes()) {
-				auto x = To32(WithEdges(n, 1ULL << 32, {(1ULL << 32) - 1, (1ULL << 32) - 1, q - 1, 0}));
-				auto y = To32(WithEdges(n, Imf * q, {Imf * q - 1, 0, Imf * q - 1, q}));
-				std::vector<uint32_t> want(n), got1(n), got4(n);
-				for (size_t i = 0; i < n; ++i) want[i] = static_cast<uint32_t>((O::MulMod(x[i] % q, w, q) + y[i] % q) % q);
-				Strips32(n, [&](size_t i, size_t vl) {
-						auto r = rvv::MulAddModShoup32<Imf>(__riscv_vle32_v_u32m1(&x[i], vl), w32, wp, __riscv_vle32_v_u32m1(&y[i], vl), q32, vl);
-						__riscv_vse32_v_u32m1(&got1[i], r, vl);
-						});
-				for (size_t i = 0, vl; i < n; i += vl) {
-					vl = __riscv_vsetvl_e32m4(n - i);
-					auto r = rvv::MulAddModShoup32<Imf>(__riscv_vle32_v_u32m4(&x[i], vl), w32, wp, __riscv_vle32_v_u32m4(&y[i], vl), q32, vl);
-					__riscv_vse32_v_u32m4(&got4[i], r, vl);
-				}
-				CHECK_VEC_EQ(want, got1, << "rvv::MulAddModShoup32<" << Imf << "><u32m1> n=" << n << " q=" << q << " w=" << w);
-				CHECK_VEC_EQ(want, got4, << "rvv::MulAddModShoup32<" << Imf << "><u32m4> n=" << n << " q=" << q << " w=" << w);
+void CheckMulAddModShoup32(uint64_t q) {
+	if (Imf * q > (1ULL << 32)) return;  // outside the contract (e.g. imf 8 needs q < 2^29)
+	const uint32_t q32 = static_cast<uint32_t>(q);
+	for (uint64_t w : {q - 1, uint64_t{1}, uint64_t{0}, O::Random(1, q)[0]}) {
+		const uint32_t w32 = static_cast<uint32_t>(w), wp = static_cast<uint32_t>(ShoupPrecon(w, q, 32));
+		for (size_t n : O::EltwiseSizes()) {
+			auto x = To32(WithEdges(n, 1ULL << 32, {(1ULL << 32) - 1, (1ULL << 32) - 1, q - 1, 0}));
+			auto y = To32(WithEdges(n, Imf * q, {Imf * q - 1, 0, Imf * q - 1, q}));
+			std::vector<uint32_t> want(n), got1(n), got4(n);
+			for (size_t i = 0; i < n; ++i) want[i] = static_cast<uint32_t>((O::MulMod(x[i] % q, w, q) + y[i] % q) % q);
+			Strips32(n, [&](size_t i, size_t vl) {
+					auto r = rvv::MulAddModShoup32<Imf>(__riscv_vle32_v_u32m1(&x[i], vl), w32, wp, __riscv_vle32_v_u32m1(&y[i], vl), q32, vl);
+					__riscv_vse32_v_u32m1(&got1[i], r, vl);
+					});
+			for (size_t i = 0, vl; i < n; i += vl) {
+				vl = __riscv_vsetvl_e32m4(n - i);
+				auto r = rvv::MulAddModShoup32<Imf>(__riscv_vle32_v_u32m4(&x[i], vl), w32, wp, __riscv_vle32_v_u32m4(&y[i], vl), q32, vl);
+				__riscv_vse32_v_u32m4(&got4[i], r, vl);
 			}
+			CHECK_VEC_EQ(want, got1, << "rvv::MulAddModShoup32<" << Imf << "><u32m1> n=" << n << " q=" << q << " w=" << w);
+			CHECK_VEC_EQ(want, got4, << "rvv::MulAddModShoup32<" << Imf << "><u32m4> n=" << n << " q=" << q << " w=" << w);
 		}
 	}
+}
 }  // namespace
 
 TEST(RvvUtil_MulAddModShoup32) {
@@ -702,40 +702,40 @@ TEST(RvvUtil_AddSub32_m4) {
 
 namespace {
 template <class V32>
-	size_t Vl32(size_t n) {
-		if constexpr (std::is_same_v<V32, vuint32mf2_t>) return __riscv_vsetvl_e32mf2(n);
-		else if constexpr (std::is_same_v<V32, vuint32m1_t>) return __riscv_vsetvl_e32m1(n);
-		else if constexpr (std::is_same_v<V32, vuint32m2_t>) return __riscv_vsetvl_e32m2(n);
-		else if constexpr (std::is_same_v<V32, vuint32m4_t>) return __riscv_vsetvl_e32m4(n);
-		else return __riscv_vsetvl_e32m8(n);
-	}
+size_t Vl32(size_t n) {
+	if constexpr (std::is_same_v<V32, vuint32mf2_t>) return __riscv_vsetvl_e32mf2(n);
+	else if constexpr (std::is_same_v<V32, vuint32m1_t>) return __riscv_vsetvl_e32m1(n);
+	else if constexpr (std::is_same_v<V32, vuint32m2_t>) return __riscv_vsetvl_e32m2(n);
+	else if constexpr (std::is_same_v<V32, vuint32m4_t>) return __riscv_vsetvl_e32m4(n);
+	else return __riscv_vsetvl_e32m8(n);
+}
 
 template <class V32, bool kWithU64>
-	void CheckLoadStore32(const char* lmul) {
-		constexpr uint64_t kGuard64 = 0xA5A5A5A5A5A5A5A5ULL;
-		constexpr uint32_t kGuard32 = 0xA5A5A5A5u;
-		for (size_t n : O::EltwiseSizes()) {
-			auto src64 = WithEdges(n, 1ULL << 32, {(1ULL << 32) - 1, 0, 1});  // values < 2^32
-			auto src32 = To32(src64);
-			std::vector<uint64_t> back64(n + 8, kGuard64), want64(src64);
-			std::vector<uint32_t> back32(n + 8, kGuard32), from64(n + 8, kGuard32), want32(src32);
-			want64.resize(n + 8, kGuard64);
-			want32.resize(n + 8, kGuard32);
-			for (size_t i = 0, vl; i < n; i += vl) {
-				vl = Vl32<V32>(n - i);
-				rvv::Store32(&back32[i], rvv::Load32<V32>(&src32[i], vl), vl);    // u32 -> e32 -> u32
-				if constexpr (kWithU64) {
-					rvv::Store32(&back64[i], rvv::Load32<V32>(&src64[i], vl), vl);  // u64 -> e32 -> u64
-					rvv::Store32(&from64[i], rvv::Load32<V32>(&src64[i], vl), vl);  // u64 -> e32 -> u32
-				}
-			}
-			CHECK_VEC_EQ(want32, back32, << "Load32/Store32 uint32_t round trip at " << lmul << " n=" << n);
+void CheckLoadStore32(const char* lmul) {
+	constexpr uint64_t kGuard64 = 0xA5A5A5A5A5A5A5A5ULL;
+	constexpr uint32_t kGuard32 = 0xA5A5A5A5u;
+	for (size_t n : O::EltwiseSizes()) {
+		auto src64 = WithEdges(n, 1ULL << 32, {(1ULL << 32) - 1, 0, 1});  // values < 2^32
+		auto src32 = To32(src64);
+		std::vector<uint64_t> back64(n + 8, kGuard64), want64(src64);
+		std::vector<uint32_t> back32(n + 8, kGuard32), from64(n + 8, kGuard32), want32(src32);
+		want64.resize(n + 8, kGuard64);
+		want32.resize(n + 8, kGuard32);
+		for (size_t i = 0, vl; i < n; i += vl) {
+			vl = Vl32<V32>(n - i);
+			rvv::Store32(&back32[i], rvv::Load32<V32>(&src32[i], vl), vl);    // u32 -> e32 -> u32
 			if constexpr (kWithU64) {
-				CHECK_VEC_EQ(want64, back64, << "Load32/Store32 uint64_t round trip at " << lmul << " n=" << n);
-				CHECK_VEC_EQ(want32, from64, << "Load32(uint64_t*) -> Store32(uint32_t*) at " << lmul << " n=" << n);
+				rvv::Store32(&back64[i], rvv::Load32<V32>(&src64[i], vl), vl);  // u64 -> e32 -> u64
+				rvv::Store32(&from64[i], rvv::Load32<V32>(&src64[i], vl), vl);  // u64 -> e32 -> u32
 			}
 		}
+		CHECK_VEC_EQ(want32, back32, << "Load32/Store32 uint32_t round trip at " << lmul << " n=" << n);
+		if constexpr (kWithU64) {
+			CHECK_VEC_EQ(want64, back64, << "Load32/Store32 uint64_t round trip at " << lmul << " n=" << n);
+			CHECK_VEC_EQ(want32, from64, << "Load32(uint64_t*) -> Store32(uint32_t*) at " << lmul << " n=" << n);
+		}
 	}
+}
 }  // namespace
 
 TEST(RvvUtil_Load32Store32_AllLmul) {
