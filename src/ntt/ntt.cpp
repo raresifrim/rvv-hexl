@@ -203,9 +203,9 @@ void NTT::ComputeForward(uint32_t* result, const uint32_t* operand,
 			"input_mod_factor must be 1, 2 or 4; got " << input_mod_factor);
 	HEXL_CHECK(output_mod_factor == 1 || output_mod_factor == 4,
 			"output_mod_factor must be 1 or 4; got " << output_mod_factor);
-	HEXL_CHECK(input_mod_factor * m_q <= (1ULL << 32) &&
-			output_mod_factor * m_q <= (1ULL << 32),
-			"32-bit storage needs mod_factor * q <= 2^32, q = " << m_q);
+	HEXL_CHECK(m_q < (1ULL << 30),
+			"32-bit storage needs q < 2^30 (the lazy [0, 4q) values must fit in 32 bits), q = "
+			<< m_q);
 	HEXL_CHECK_BOUNDS(
 			operand, m_degree, m_q * input_mod_factor,
 			"value in operand exceeds bound " << m_q * input_mod_factor);
@@ -237,9 +237,9 @@ void NTT::ComputeInverse(uint32_t* result, const uint32_t* operand,
 			"input_mod_factor must be 1 or 2; got " << input_mod_factor);
 	HEXL_CHECK(output_mod_factor == 1 || output_mod_factor == 2,
 			"output_mod_factor must be 1 or 2; got " << output_mod_factor);
-	HEXL_CHECK(input_mod_factor * m_q <= (1ULL << 32) &&
-			output_mod_factor * m_q <= (1ULL << 32),
-			"32-bit storage needs mod_factor * q <= 2^32, q = " << m_q);
+	HEXL_CHECK(m_q < (1ULL << 30),
+			"32-bit storage needs q < 2^30 (the lazy [0, 4q) values must fit in 32 bits), q = "
+			<< m_q);
 	HEXL_CHECK_BOUNDS(operand, m_degree, m_q * input_mod_factor,
 			"operand exceeds bound " << m_q * input_mod_factor);
 

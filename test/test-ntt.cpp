@@ -36,10 +36,11 @@ constexpr bool Is32() {
 
 /// Modulus sizes around every dispatch boundary: binfhe (27), last/first e32
 /// (29/30 vs 31), 32-bit, IPCEI NTT bench (49), BFV (60), maximum (62).
-/// 32-bit storage: up to 31 bits (q < 2^32).
+/// 32-bit storage requires q < 2^30: there "30" means the largest NTT prime
+/// below 2^30 (see TestModulus), the boundary of the 32-bit contract.
 template <typename Word>
 std::vector<size_t> ModBits() {
-	if (Is32<Word>()) return {20, 27, 29, 30, 31};
+	if (Is32<Word>()) return {20, 27, 28, 29, 30};
 	return {20, 27, 29, 30, 31, 32, 40, 49, 55, 60, 61};
 }
 
@@ -48,6 +49,14 @@ template <typename Word>
 std::vector<size_t> TypicalBits() {
 	if (Is32<Word>()) return {27, 30};
 	return {27, 49, 60};
+}
+
+/// O::NttPrime(bits, n) (the smallest NTT prime above 2^bits), except for
+/// 32-bit storage with bits >= 30: the largest NTT prime below 2^30.
+template <typename Word>
+uint64_t TestModulus(size_t bits, uint64_t n) {
+	if (Is32<Word>() && bits >= 30) return O::Primes(1, 29, false, n)[0];
+	return O::NttPrime(bits, n);
 }
 
 uint64_t MaxN() { return hexltest::g_quick ? 1024 : 32768; }
@@ -60,7 +69,7 @@ template <typename Word>
 void RunForwardMatchesDefinition() {
 	for (uint64_t n : Degrees(MaxOracleN())) {
 		for (size_t bits : ModBits<Word>()) {
-			const uint64_t q = O::NttPrime(bits, n);
+			const uint64_t q = TestModulus<Word>(bits, n);
 			const uint64_t w = O::PrimitiveRoot2N(n, q);
 			NTT ntt(n, q, w);
 			const auto x64 = O::Random(n, q);
@@ -78,7 +87,7 @@ template <typename Word>
 void RunDefaultRootIsMinimal() {
 	for (uint64_t n : {8ULL, 1024ULL}) {
 		for (size_t bits : TypicalBits<Word>()) {
-			const uint64_t q = O::NttPrime(bits, n);
+			const uint64_t q = TestModulus<Word>(bits, n);
 			NTT ntt(n, q);
 			const uint64_t w = O::MinimalPrimitiveRoot2N(n, q);
 			CHECK_EQ(ntt.GetMinimalRootOfUnity(), w);
@@ -100,7 +109,7 @@ template <typename Word>
 void RunRoundTrip() {
 	for (uint64_t n : Degrees(MaxN())) {
 		for (size_t bits : ModBits<Word>()) {
-			const uint64_t q = O::NttPrime(bits, n);
+			const uint64_t q = TestModulus<Word>(bits, n);
 			NTT ntt(n, q, O::PrimitiveRoot2N(n, q));
 			const auto x = O::As<Word>(O::Random(n, q));
 			std::vector<Word> y(n), z(n);
@@ -116,7 +125,7 @@ template <typename Word>
 void RunInPlaceEqualsOutOfPlace() {
 	for (uint64_t n : {16ULL, 1024ULL, 8192ULL}) {
 		for (size_t bits : TypicalBits<Word>()) {
-			const uint64_t q = O::NttPrime(bits, n);
+			const uint64_t q = TestModulus<Word>(bits, n);
 			NTT ntt(n, q, O::PrimitiveRoot2N(n, q));
 			const auto x = O::As<Word>(O::Random(n, q));
 			std::vector<Word> out(n), inplace = x;
@@ -159,7 +168,7 @@ void RunModFactors() {
 	};
 	for (uint64_t n : {4ULL, 64ULL, 2048ULL}) {
 		for (size_t bits : bits_list) {
-			const uint64_t q = O::NttPrime(bits, n);
+			const uint64_t q = TestModulus<Word>(bits, n);
 			NTT ntt(n, q, O::PrimitiveRoot2N(n, q));
 			const auto x64 = O::Random(n, q);
 			std::vector<Word> ref(n);
@@ -208,7 +217,7 @@ template <typename Word>
 void RunNegacyclicConvolution() {
 	for (uint64_t n : {8ULL, 256ULL}) {
 		for (size_t bits : {size_t{27}, Is32<Word>() ? size_t{30} : size_t{60}}) {
-			const uint64_t q = O::NttPrime(bits, n);
+			const uint64_t q = TestModulus<Word>(bits, n);
 			NTT ntt(n, q);
 			const auto a64 = O::Random(n, q), b64 = O::Random(n, q);
 			std::vector<uint64_t> want(n, 0);  // schoolbook a*b mod (X^n + 1)
@@ -261,7 +270,7 @@ void RunOpenFHEMapPattern() {
 	std::unordered_map<std::pair<uint64_t, uint64_t>, NTT, HashPair> cache;
 	for (uint64_t n : {1024ULL, 2048ULL}) {
 		for (size_t bits : {size_t{27}, Is32<Word>() ? size_t{28} : size_t{60}}) {
-			const uint64_t q = O::NttPrime(bits, n);
+			const uint64_t q = TestModulus<Word>(bits, n);
 			const uint64_t w = O::PrimitiveRoot2N(n, q);
 			NTT ntt(n, q, w);
 			cache[{n, q}] = std::move(ntt);
@@ -282,7 +291,7 @@ template <typename Word>
 void RunConcurrentUse() {
 	const uint64_t n = 4096;
 	for (size_t bits : {size_t{27}, Is32<Word>() ? size_t{30} : size_t{60}}) {
-		const uint64_t q = O::NttPrime(bits, n);
+		const uint64_t q = TestModulus<Word>(bits, n);
 		NTT ntt(n, q);
 		const unsigned kThreads = 8;
 		std::vector<std::vector<Word>> inputs, want(kThreads);

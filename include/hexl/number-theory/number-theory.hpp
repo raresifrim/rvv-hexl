@@ -187,9 +187,15 @@ uint64_t MinimalPrimitiveRoot(uint64_t degree, uint64_t modulus);
 /// @param[in] modulus
 /// @param[in] y_barrett_factor Pre-computed Barrett reduction factor floor((y
 /// << BitShift) / modulus)
+/// @details rvv-hexl is RISC-V only: BitShift must be 64 (the factor is
+/// scaled by 2^64 and Q is the high half of a 64x64 product, one mulhu).
+/// Upstream's 52-bit variant serves x86 AVX-512 IFMA and is rejected at
+/// compile time. The template parameter stays for upstream API compatibility.
 template <int BitShift>
 inline uint64_t MultiplyModLazy(uint64_t x, uint64_t y_operand,
 		uint64_t y_barrett_factor, uint64_t modulus) {
+	static_assert(BitShift == 64,
+			"rvv-hexl: only BitShift = 64 (the 52-bit path is for x86 AVX-512 IFMA)");
 	HEXL_CHECK(y_operand < modulus, "y_operand " << y_operand
 			<< " must be less than modulus "
 			<< modulus);
@@ -199,7 +205,12 @@ inline uint64_t MultiplyModLazy(uint64_t x, uint64_t y_operand,
 	HEXL_CHECK(x <= MaximumValue(BitShift),
 			"Operand " << x << " exceeds bound " << MaximumValue(BitShift));
 
-	uint64_t Q = MultiplyUInt64Hi<BitShift>(x, y_barrett_factor);
+	// Shoup's trick without the final correction. y_barrett_factor =
+	// floor(y * 2^64 / q):
+	// Q = high half of x * y_barrett_factor;   // approx. floor(x*y/q), short by at most 1
+	// r = y * x - Q * q;                       // wrapping 64-bit, in [0, 2q)
+	uint64_t Q;
+	asm("mulhu %0, %1, %2" : "=r"(Q) : "r"(x), "r"(y_barrett_factor));
 	return y_operand * x - Q * modulus;
 }
 
@@ -207,8 +218,8 @@ inline uint64_t MultiplyModLazy(uint64_t x, uint64_t y_operand,
 /// modulus]
 template <int BitShift>
 inline uint64_t MultiplyModLazy(uint64_t x, uint64_t y, uint64_t modulus) {
-	HEXL_CHECK(BitShift == 64 || BitShift == 52,
-			"Unsupported BitShift " << BitShift);
+	static_assert(BitShift == 64,
+			"rvv-hexl: only BitShift = 64 (the 52-bit path is for x86 AVX-512 IFMA)");
 	HEXL_CHECK(x <= MaximumValue(BitShift),
 			"Operand " << x << " exceeds bound " << MaximumValue(BitShift));
 	HEXL_CHECK(y < modulus,

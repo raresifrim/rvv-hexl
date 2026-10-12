@@ -22,7 +22,7 @@
 #pragma once
 
 #include <stdint.h>
-
+#include <algorithm>
 #include "util/cpu-features.hpp"
 
 namespace intel {

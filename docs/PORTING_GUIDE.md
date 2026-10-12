@@ -181,8 +181,10 @@ Dispatch rule (already written):
   32-bit storage.
 
 `kMaxModulusRVV32 = 2^30` lives in `src/util/cpu-features.hpp`. For `Word = uint32_t` the
-native kernels must still do their arithmetic in 64-bit: q can be up to 2^32 there, so sums
-and lazy `[0, 4q)` values do not fit in 32 bits.
+native eltwise kernels must still do their arithmetic in 64-bit: q can be up to 2^32 there, so
+sums and lazy `[0, 4q)` values do not fit in 32 bits. The NTT is stricter: with 32-bit storage
+it requires q < 2^30, because its lazy `[0, 4q)` values are stored back into the array between
+stages (OpenFHE's NATIVE_SIZE=32 moduli are at most 28 bits; SEAL has no 32-bit build).
 
 | Op | Semantics | Native: what to write | RVV: what to write |
 |---|---|---|---|

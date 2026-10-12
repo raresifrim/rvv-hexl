@@ -135,6 +135,24 @@ TEST(NumberTheory_MultiplyAddMod) {
 	}
 }
 
+// MultiplyModLazy<64>(x, y, y_precon, q): Shoup without the final correction,
+// congruent to x*y mod q and in [0, 2q), for ANY 64-bit x and y < q, q < 2^62.
+TEST(NumberTheory_MultiplyModLazy) {
+	for (uint64_t q : TestModuli()) {
+		if (q >= (1ULL << 62)) continue;
+		auto x = O::Random(300, O::AnyWord<uint64_t>()), y = O::Random(300, q);
+		x[0] = ~0ULL, y[0] = q - 1;
+		x[1] = q - 1, y[1] = 0;
+		x[2] = 4 * q - 1, y[2] = 1;
+		for (size_t i = 0; i < x.size(); ++i) {
+			const uint64_t precon = MultiplyFactor(y[i], 64, q).BarrettFactor();
+			const uint64_t r = MultiplyModLazy<64>(x[i], y[i], precon, q);
+			CHECK_EQ(r < 2 * q, true, << "q=" << q << " x=" << x[i] << " y=" << y[i] << " r=" << r);
+			CHECK_EQ(r % q, O::MulMod(x[i] % q, y[i], q), << "q=" << q << " x=" << x[i] << " y=" << y[i]);
+		}
+	}
+}
+
 TEST(NumberTheory_PowMod) {
 	for (uint64_t q : TestModuli()) {
 		if (q % 2 == 0) continue;  // contract: odd modulus (Montgomery)

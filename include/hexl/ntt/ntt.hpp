@@ -152,11 +152,11 @@ public:
 			uint64_t input_mod_factor, uint64_t output_mod_factor);
 
 	// ---- rvv-hexl extension: 32-bit storage (OpenFHE NATIVE_SIZE=32) ---------
-	/// Same transforms on uint32_t data. Every value, including the lazy ranges,
-	/// must fit in 32 bits: input_mod_factor * q <= 2^32, output_mod_factor * q
-	/// <= 2^32. q < s_max_fwd_32_modulus (2^30) runs the RVV e32 kernels directly
-	/// on the data, larger q the native kernels. OpenFHE's NATIVE_SIZE=32 moduli
-	/// are <= 28 bits, so from OpenFHE this is always the RVV path.
+	/// Same transforms on uint32_t data. Requires q < 2^30, so that every value,
+	/// including the lazy [0, 4q) range between stages, fits in 32 bits.
+	/// OpenFHE's NATIVE_SIZE=32 moduli are <= 28 bits (MAX_MODULUS_SIZE 28) and
+	/// SEAL has no 32-bit build, so no caller needs more. With RVV this always
+	/// runs the e32 kernels (q < s_max_fwd_32_modulus); without, the native ones.
 	/// Not in upstream Intel HEXL: guard uses with #ifdef HEXL_RVV_HAS_32BIT_API.
 	void ComputeForward(uint32_t* result, const uint32_t* operand,
 			uint64_t input_mod_factor, uint64_t output_mod_factor);
