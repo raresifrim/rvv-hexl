@@ -6,10 +6,6 @@
 //
 //   TEST(Suite_Name) { CHECK(...); CHECK_EQ(a, b); CHECK_VEC_EQ(exp, got); }
 //
-// A test that reaches a stub (an exception whose message starts with
-// "[rvv-hexl TODO]") is reported as TODO, not FAIL, together with the name of
-// the stub it hit. So the test binary is also the port's progress report.
-//
 // Tests only use the PUBLIC HEXL API (the same API upstream Intel HEXL exposes;
 // running them against upstream is how the oracles in oracle.hpp were validated).
 

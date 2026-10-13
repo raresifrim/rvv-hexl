@@ -33,7 +33,6 @@
 #include <type_traits>
 
 #include "hexl/number-theory/number-theory.hpp"
-#include "util/not-implemented.hpp"
 #include "util/rvv-util.hpp"
 
 namespace intel {
@@ -95,9 +94,61 @@ void InverseTransformFromBitReverseRVV32(Word* result,
 		const uint32_t* w_inv_precon,
 		uint64_t input_mod_factor,
 		uint64_t output_mod_factor) {
-	// TODO(port-rvv): mirror of the forward kernel. Here the SMALL-t stages come
-	// first, so step 2 of the plan applies to the first stages instead.
-	HEXL_NOT_IMPLEMENTED();
+	// Mirror of the RVV32 forward: Gentleman-Sande in 32-bit lanes, every load
+	// and store through rvv::Load32 / Store32 (both storage words), 32-bit
+	// twiddle tables in stage order, Harvey lazy butterflies in [0, 2q), and
+	// the N^{-1} scaling folded into the last stage.
+	const uint32_t modulus32 = static_cast<uint32_t>(modulus);
+	const uint32_t twice_mod32 = 2*modulus32;
+	if (result != operand){ //copy operand into result, then work in place.
+		Word *temp = result;
+		for (size_t vl, m=n; m>0; m-=vl, operand+=vl, temp+=vl){
+			vl = rvv::SetVl<V>(m);
+			V v = rvv::Load32<V>(operand, vl);   // plain vle32 or narrowing load, by Word
+			rvv::Store32(temp, v, vl);
+		}
+	}
+
+	uint64_t k = 1;                                                    // next inverse twiddle
+	for (uint64_t t = 1, m = n/2; m > 1; m >>= 1, t <<= 1){            // all stages but the last
+		for (uint64_t i = 0; i < m; i++, k++){                          // m blocks
+			uint32_t W = w_inv[k];
+			uint32_t Wp = w_inv_precon[k];
+			Word* x = result + 2*i*t;
+			for (size_t j = 0, vl; j < t; j += vl){                       // t butterflies
+				vl = rvv::SetVl<V>(t - j);
+				V X = rvv::Load32<V>(x + j, vl);                           // [0, 2q)
+				V Y = rvv::Load32<V>(x + j + t, vl);                       // [0, 2q)
+				V S = rvv::ReduceFromTwice32(__riscv_vadd(X, Y, vl), twice_mod32, vl);   // [0, 2q)
+				V D = __riscv_vadd(__riscv_vsub(X, Y, vl), twice_mod32, vl);             // [0, 4q)
+				rvv::Store32(x + j, S, vl);
+				rvv::Store32(x + j + t, rvv::MulModShoupLazy32(D, W, Wp, modulus32, vl), vl);  // [0, 2q)
+			}
+		}
+	}
+
+	// Last stage (one block, t = n/2) with the N^{-1} scaling folded in:
+	//   X' = (X + Y) * N^{-1},   Y' = (X - Y) * (W * N^{-1})
+	const uint64_t t = n/2;
+	const uint64_t n_inv = InverseMod(n, modulus);
+	const uint64_t Wn = MultiplyMod(w_inv[k], n_inv, MultiplyFactor(n_inv, 64, modulus).BarrettFactor(), modulus);
+	const uint32_t n_inv32 = static_cast<uint32_t>(n_inv);
+	const uint32_t n_inv_p32 = static_cast<uint32_t>(MultiplyFactor(n_inv, 32, modulus).BarrettFactor());
+	const uint32_t Wn32 = static_cast<uint32_t>(Wn);
+	const uint32_t Wn_p32 = static_cast<uint32_t>(MultiplyFactor(Wn, 32, modulus).BarrettFactor());
+	for (size_t j = 0, vl; j < t; j += vl){
+		vl = rvv::SetVl<V>(t - j);
+		V X = rvv::Load32<V>(result + j, vl);
+		V Y = rvv::Load32<V>(result + j + t, vl);
+		V Xr = rvv::MulModShoupLazy32(__riscv_vadd(X, Y, vl), n_inv32, n_inv_p32, modulus32, vl);                       // [0, 2q)
+		V Yr = rvv::MulModShoupLazy32(__riscv_vadd(__riscv_vsub(X, Y, vl), twice_mod32, vl), Wn32, Wn_p32, modulus32, vl);  // [0, 2q)
+		if (output_mod_factor == 1){
+			Xr = rvv::ReduceFromTwice32(Xr, modulus32, vl);
+			Yr = rvv::ReduceFromTwice32(Yr, modulus32, vl);
+		}
+		rvv::Store32(result + j, Xr, vl);
+		rvv::Store32(result + j + t, Yr, vl);
+	}
 }
 
 template <class V>
@@ -152,8 +203,57 @@ void InverseTransformFromBitReverseRVV64(
 		const uint64_t* inv_root_of_unity_powers,
 		const uint64_t* precon_inv_root_of_unity_powers, uint64_t input_mod_factor,
 		uint64_t output_mod_factor) {
-	// TODO(port-rvv): mirror of the 64-bit forward kernel.
-	HEXL_NOT_IMPLEMENTED();
+	// Mirror of the RVV64 forward: Gentleman-Sande, each block's t butterflies
+	// vectorized, twiddle table in stage order, Harvey lazy butterflies in
+	// [0, 2q), and the N^{-1} scaling folded into the last stage.
+	if (result != operand){ //copy operand into result, then work in place.
+		uint64_t *temp = result;
+		for (size_t vl, m=n; m>0; m-=vl, operand+=vl, temp+=vl){
+			vl = rvv::SetVl<V>(m);
+			V v = rvv::Load<V>(operand, vl);
+			rvv::Store(temp, v, vl);
+		}
+	}
+
+	const uint64_t twice_mod = 2*modulus;
+	uint64_t k = 1;                                                    // next inverse twiddle
+	for (uint64_t t = 1, m = n/2; m > 1; m >>= 1, t <<= 1){            // all stages but the last
+		for (uint64_t i = 0; i < m; i++, k++){                          // m blocks
+			uint64_t W = inv_root_of_unity_powers[k];
+			uint64_t Wp = precon_inv_root_of_unity_powers[k];
+			uint64_t* x = result + 2*i*t;
+			for (size_t j = 0, vl; j < t; j += vl){                       // t butterflies
+				vl = rvv::SetVl<V>(t - j);
+				V X = rvv::Load<V>(x + j, vl);                             // [0, 2q)
+				V Y = rvv::Load<V>(x + j + t, vl);                         // [0, 2q)
+				V S = rvv::ReduceFromTwice(__riscv_vadd(X, Y, vl), twice_mod, vl);    // [0, 2q)
+				V D = __riscv_vadd(__riscv_vsub(X, Y, vl), twice_mod, vl);            // [0, 4q)
+				rvv::Store(x + j, S, vl);
+				rvv::Store(x + j + t, rvv::MulModShoupLazy(D, W, Wp, modulus, vl), vl);  // [0, 2q)
+			}
+		}
+	}
+
+	// Last stage (one block, t = n/2) with the N^{-1} scaling folded in:
+	//   X' = (X + Y) * N^{-1},   Y' = (X - Y) * (W * N^{-1})
+	const uint64_t t = n/2;
+	const uint64_t n_inv = InverseMod(n, modulus);
+	const uint64_t n_inv_p = MultiplyFactor(n_inv, 64, modulus).BarrettFactor();
+	const uint64_t Wn = MultiplyMod(inv_root_of_unity_powers[k], n_inv, n_inv_p, modulus);   // k == n - 1 here
+	const uint64_t Wn_p = MultiplyFactor(Wn, 64, modulus).BarrettFactor();
+	for (size_t j = 0, vl; j < t; j += vl){
+		vl = rvv::SetVl<V>(t - j);
+		V X = rvv::Load<V>(result + j, vl);
+		V Y = rvv::Load<V>(result + j + t, vl);
+		V Xr = rvv::MulModShoupLazy(__riscv_vadd(X, Y, vl), n_inv, n_inv_p, modulus, vl);                        // [0, 2q)
+		V Yr = rvv::MulModShoupLazy(__riscv_vadd(__riscv_vsub(X, Y, vl), twice_mod, vl), Wn, Wn_p, modulus, vl); // [0, 2q)
+		if (output_mod_factor == 1){
+			Xr = rvv::ReduceFromTwice(Xr, modulus, vl);
+			Yr = rvv::ReduceFromTwice(Yr, modulus, vl);
+		}
+		rvv::Store(result + j, Xr, vl);
+		rvv::Store(result + j + t, Yr, vl);
+	}
 }
 
 // Every lane type, so tests and benchmarks can compare LMULs; the public

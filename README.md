@@ -8,16 +8,18 @@ IPCEI A14 plan (SENTHIPoli D01, *Direcția de accelerare*): an RVV-aware HEXL ba
 measured on the SpaceMiT K3 (X100 and A100 clusters) against stock OpenFHE and the no-RVV
 baseline.
 
-**Status: skeleton.** The public API, dispatch, build system, tests and benchmarks are in place.
-Every kernel body is a stub that throws `[rvv-hexl TODO] <function>`. `make todo` lists
-them. Read [docs/PORTING_GUIDE.md](docs/PORTING_GUIDE.md) before you start.
+**Status: complete.** Every function of the Intel HEXL 1.2.6 API is implemented: scalar number
+theory, the native kernels and the RVV kernels for all seven eltwise operations and the NTT
+(forward and inverse, 64- and 32-bit lanes). The RVV NTT kernels are a first version whose
+small-span stages (span below the vector length) still run underfilled; see
+[docs/PORTING_GUIDE.md](docs/PORTING_GUIDE.md).
 
 ```
 OpenFHE (NATIVE_SIZE 64|32) ── openfhe-hexl HAL ──┐
                                                   ├─ intel::hexl API ── rvv-hexl
 Microsoft SEAL 4.1 ── SEAL_USE_INTEL_HEXL ────────┘  (this repo)       ├─ dispatch (done)
-                                                                       ├─ native C++ kernels (TODO)
-                                                                       └─ RVV kernels (TODO)
+                                                                       ├─ native C++ kernels (done)
+                                                                       └─ RVV kernels (done)
 ```
 
 ## Quick start (K3 / RISC-V Ubuntu)
@@ -29,10 +31,9 @@ sudo apt install build-essential g++-14 cmake git python3 libssl-dev libgmp-dev 
 ```bash
 make info                 # toolchain, -march, paths, selected OpenFHE configuration
 make rvv-hexl-test        # correctness tests: RVV dispatch, then HEXL_DISABLE_RVV=1 (native)
-make todo                 # remaining stubs
 ```
 
-Then, once kernels are implemented:
+Then:
 
 ```bash
 make openfhe                          # stock OpenFHE, NATIVE_SIZE = CPU word size (64)
@@ -51,11 +52,11 @@ bench/run.sh                          # full matrix, both K3 clusters -> results
 
 ```
 include/hexl/        PUBLIC API, source-identical to Intel HEXL 1.2.6 (+ RVV tables, port-info)
-src/number-theory/   scalar modular arithmetic (primes, roots, inverses)       TODO
-src/eltwise/         7 elementwise ops: <op>.cpp = entry + dispatch + native,  TODO
+src/number-theory/   scalar modular arithmetic (primes, roots, inverses)
+src/eltwise/         7 elementwise ops: <op>.cpp = entry + dispatch + native,
                      <op>-rvv.cpp = RVV kernels
-src/ntt/             NTT class (ntt.cpp), native radix-2, RVV kernels          TODO
-src/util/            CPU detection, RVV helpers (rvv-util.hpp, TODO), stub marker
+src/ntt/             NTT class (ntt.cpp), native radix-2, RVV kernels
+src/util/            CPU detection, RVV helpers (rvv-util.hpp), lane types (rvv-config.hpp)
 test/                self-contained tests with independent __int128 oracles
 test/seal/           seal-smoke.cpp: end-to-end SEAL check (make seal-check)
 bench/hexl/          HEXL-standard microbenchmarks (Google Benchmark)
@@ -106,7 +107,7 @@ selected by `NATIVE_SIZE` / `WITH_RVV_HEXL` (and `ISA`); every SEAL target on `W
 | `make run-bench` | `bench/run.sh` |
 | `make rvv-intrinsics-doc` | all RVA23 RVV intrinsics + `INDEX.md` + grep-able `rva23-intrinsics.tsv` in `docs/rvv_intrinsics/` (git-ignored) |
 | `make reconfigure` | forget the cached board/toolchain checks (after a compiler upgrade, or on another board) |
-| `make todo` / `info` / `clean` / `distclean` | |
+| `make info` / `clean` / `distclean` | |
 
 | Variable | Values (default first) | Meaning |
 |---|---|---|

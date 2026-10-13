@@ -14,7 +14,6 @@
 #include "hexl/number-theory/number-theory.hpp"
 #include "hexl/util/check.hpp"
 #include "ntt/ntt-internal.hpp"
-#include "util/not-implemented.hpp"
 
 namespace intel {
 namespace hexl {
@@ -59,22 +58,48 @@ void InverseTransformFromBitReverseRadix2(
 		const uint64_t* inv_root_of_unity_powers,
 		const uint64_t* precon_inv_root_of_unity_powers, uint64_t input_mod_factor,
 		uint64_t output_mod_factor) {
-	// TODO(port): Gentleman-Sande, decimation in frequency, bit-reversed ->
-	// natural, then multiply every element by N^{-1} mod q.
-	//
-	//   for (m = n/2, t = 1; m >= 1; m >>= 1, t <<= 1)
-	//     for (i = 0; i < m; i++)
-	//       W = next inverse twiddle (table order is whatever
-	//           NTT::ComputeRootOfUnityPowers stored; upstream: sequential)
-	//       for (j over the t butterflies of block i)
-	//         X, Y in [0, 2q):
-	//           result[j]     = X + Y reduced to [0, 2q)
-	//           result[j + t] = MultiplyModLazy<64>(X - Y + 2q, W, Wp, q)
-	//   Fold the N^{-1} scaling into the last stage (saves one full pass):
-	//   the last stage multiplies by N^{-1} and by W * N^{-1} (precompute both
-	//   and their Shoup factors), then reduce to output_mod_factor.
-	//   Word = uint32_t: same remark as the forward kernel (64-bit temporaries).
-	HEXL_NOT_IMPLEMENTED();
+	// Gentleman-Sande, decimation in frequency, bit-reversed -> natural.
+	// inv_root_of_unity_powers is in stage order (NTT::ComputeRootOfUnityPowers):
+	// entry k is the inverse twiddle of the k-th block this loop visits, so a
+	// single counter walks the table. Harvey lazy butterflies keep every value
+	// in [0, 2q); the N^{-1} scaling is folded into the last stage.
+	if (result != operand) //copy operand into result, then work in place.
+		for (uint64_t i=0; i<n; ++i)
+			result[i] = operand[i];
+
+	const uint64_t twice_mod = 2*modulus;
+	uint64_t k = 1;                                                    // next inverse twiddle
+	for (uint64_t t = 1, m = n/2; m > 1; m >>= 1, t <<= 1){            // all stages but the last
+		for (uint64_t i = 0; i < m; i++, k++){                          // m blocks
+			uint64_t W = inv_root_of_unity_powers[k];
+			uint64_t Wp = precon_inv_root_of_unity_powers[k];
+			for (uint64_t j = 2*i*t; j < 2*i*t + t; j++){                  // t butterflies
+				uint64_t X = static_cast<uint64_t>(result[j]);              // [0, 2q)
+				uint64_t Y = static_cast<uint64_t>(result[j + t]);          // [0, 2q)
+				uint64_t S = X + Y;                                          // [0, 4q)
+				result[j] = static_cast<Word>(std::min(S, S - twice_mod));  // [0, 2q)
+				result[j + t] = static_cast<Word>(MultiplyModLazy<64>(X - Y + twice_mod, W, Wp, modulus)); // [0, 2q)
+			}
+		}
+	}
+
+	// Last stage (one block, t = n/2) with the N^{-1} scaling folded in:
+	//   X' = (X + Y) * N^{-1},   Y' = (X - Y) * (W * N^{-1})
+	const uint64_t t = n/2;
+	const uint64_t n_inv = InverseMod(n, modulus);
+	const uint64_t n_inv_p = MultiplyFactor(n_inv, 64, modulus).BarrettFactor();
+	const uint64_t W = inv_root_of_unity_powers[k];                    // k == n - 1 here
+	const uint64_t Wn = MultiplyMod(W, n_inv, n_inv_p, modulus);       // W * N^{-1} mod q
+	const uint64_t Wn_p = MultiplyFactor(Wn, 64, modulus).BarrettFactor();
+	const uint64_t final_red = (output_mod_factor == 1) ? modulus : 0; // min(v, v - 0) = v leaves [0, 2q)
+	for (uint64_t j = 0; j < t; j++){
+		uint64_t X = static_cast<uint64_t>(result[j]);
+		uint64_t Y = static_cast<uint64_t>(result[j + t]);
+		uint64_t Xr = MultiplyModLazy<64>(X + Y, n_inv, n_inv_p, modulus);          // [0, 2q)
+		uint64_t Yr = MultiplyModLazy<64>(X - Y + twice_mod, Wn, Wn_p, modulus);    // [0, 2q)
+		result[j] = static_cast<Word>(std::min(Xr, Xr - final_red));               // [0, q) if output_mod_factor == 1
+		result[j + t] = static_cast<Word>(std::min(Yr, Yr - final_red));
+	}
 }
 
 void ReferenceForwardTransformToBitReverse(
@@ -100,8 +125,27 @@ void ReferenceForwardTransformToBitReverse(
 void ReferenceInverseTransformFromBitReverse(
 		uint64_t* operand, uint64_t n, uint64_t modulus,
 		const uint64_t* inv_root_of_unity_powers) {
-	// TODO(port): textbook Gentleman-Sande + N^{-1} scaling, fully reduced.
-	HEXL_NOT_IMPLEMENTED();
+	// textbook Gentleman-Sande, fully reduced (AddUIntMod / SubUIntMod / Shoup
+	// MultiplyMod), stages in reverse order of the forward, then a separate
+	// N^{-1} scaling pass. Same table order as the fast kernel.
+	uint64_t k = 1;                                                    // next inverse twiddle
+	for (uint64_t t = 1, m = n/2; m >= 1; m >>= 1, t <<= 1){           // log2(n) stages
+		for (uint64_t i = 0; i < m; i++, k++){                          // m blocks
+			uint64_t W = inv_root_of_unity_powers[k];
+			uint64_t Wp = MultiplyFactor(W, 64, modulus).BarrettFactor();
+			for (uint64_t j = 2*i*t; j < 2*i*t + t; j++){                  // t butterflies
+				uint64_t X = operand[j];
+				uint64_t Y = operand[j + t];
+				operand[j] = AddUIntMod(X, Y, modulus);
+				operand[j + t] = MultiplyMod(SubUIntMod(X, Y, modulus), W, Wp, modulus);
+			}
+		}
+	}
+
+	const uint64_t n_inv = InverseMod(n, modulus);
+	const uint64_t n_inv_p = MultiplyFactor(n_inv, 64, modulus).BarrettFactor();
+	for (uint64_t i = 0; i < n; i++)
+		operand[i] = MultiplyMod(operand[i], n_inv, n_inv_p, modulus);
 }
 
 // Both storage types are dispatched from ntt.cpp.

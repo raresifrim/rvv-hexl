@@ -32,7 +32,7 @@
 # ---- everything ---------------------------------------------------------------
 #   make bench                rvv-hexl-bench + uarch-bench + IPCEI benches for every OpenFHE and SEAL build + tools
 #   make run-bench            bench/run.sh (see bench/run.sh --help)
-#   make todo | info | reconfigure | clean | distclean
+#   make info | reconfigure | clean | distclean
 #   make rvv-intrinsics-doc   RVA23 RVV intrinsics reference + index into docs/rvv_intrinsics
 #
 #   make ISA=scalar ...       any of the above, RISC-V without V (the no-RVV baseline)
@@ -47,7 +47,7 @@ include mk/config.mk
         test install gbench uarch-bench \
         openfhe openfhe-check openfhe-bench openfhe-all openfhe-list \
         seal seal-check seal-bench seal-all seal-list \
-        bench bench-openfhe-all bench-seal-all tools run-bench todo info reconfigure format clean distclean \
+        bench bench-openfhe-all bench-seal-all tools run-bench info reconfigure format clean distclean \
         rvv-intrinsics-doc
 
 # ===========================================================================
@@ -64,8 +64,7 @@ TEST_SRCS := $(sort $(wildcard test/*.cpp))
 TEST_CPPFLAGS := -Isrc
 TEST_OBJS := $(patsubst test/%.cpp,$(OBJDIR)/test/%.o,$(TEST_SRCS))
 TEST_BIN  := $(BINDIR)/hexl-tests
-STRICT    ?=
-TEST_ARGS ?= $(if $(STRICT),--strict,)
+TEST_ARGS ?=
 
 BENCH_HEXL_SRCS := $(sort $(wildcard bench/hexl/*.cpp))
 BENCH_HEXL_OBJS := $(patsubst bench/hexl/%.cpp,$(OBJDIR)/bench/hexl/%.o,$(BENCH_HEXL_SRCS))
@@ -246,7 +245,7 @@ openfhe-list:
 SEAL_ENV = CXX="$(CXX)" CC="$(CC)" JOBS=$(JOBS) ISA_FLAGS="$(ISA_FLAGS)" \
            SEAL_TAG=$(SEAL_TAG) SEAL_DIR="$(SEAL_DIR)" SEAL_PREFIX="$(SEAL_PREFIX)" \
            WITH_RVV_HEXL=$(WITH_RVV_HEXL) HEXL_PREFIX="$(RVV_HEXL_PREFIX)" \
-           SEAL_TESTS=$(call onoff,$(SEAL_TESTS)) STRICT="$(STRICT)"
+           SEAL_TESTS=$(call onoff,$(SEAL_TESTS))
 
 # With WITH_RVV_HEXL=ON, (re)install rvv-hexl first: same ISA and BUILD.
 seal: $(if $(filter ON,$(WITH_RVV_HEXL)),rvv-hexl-install)
@@ -309,16 +308,6 @@ run-bench:
 # ===========================================================================
 # Housekeeping
 # ===========================================================================
-todo:
-	@grep -rn --include='*.cpp' --include='*.hpp' 'HEXL_NOT_IMPLEMENTED();' src \
-	  | sort -t: -k1,1 -k2,2n \
-	  | sed -e 's/:[[:space:]]*HEXL_NOT_IMPLEMENTED();//' \
-	  | awk -F: '{print $$1":"$$2}' \
-	  | while IFS=: read f l; do \
-	      fn=$$(awk -v L=$$l 'NR<=L && /^[a-zA-Z].*\(/ {s=$$0} NR==L {print s}' $$f | sed 's/(.*//; s/.* //'); \
-	      printf '  %-40s %s:%s\n' "$$fn" "$$f" "$$l"; \
-	    done
-	@printf '%s stubs left\n' "$$(grep -rn --include='*.cpp' --include='*.hpp' 'HEXL_NOT_IMPLEMENTED();' src | wc -l | tr -d ' ')"
 
 info:
 	@echo "host            : $(HOST_OS)/$(HOST_ARCH)"

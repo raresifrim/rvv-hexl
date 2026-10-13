@@ -24,7 +24,7 @@ headers, same namespace, same signatures and same semantics** is a drop-in repla
    src/*/<op>.cpp  argument checks + dispatch ─ HEXL_HAS_RVV && has_rvv ?          [DONE]
                    │                                    │
                    ▼                                    ▼
-          <Op>Native (portable C++)          <Op>RVV / RVV32 / RVV64 (intrinsics)  [eltwise done, NTT TODO]
+          <Op>Native (portable C++)          <Op>RVV / RVV32 / RVV64 (intrinsics)  [DONE]
           = "no RVV" path, = reference       = the port proper
 ```
 
@@ -73,20 +73,17 @@ HEXL 1.2.6.
 |---|---|---|
 | Public API declarations | `include/hexl/**` | **done**: exact upstream signatures, checked at compile time by `test/test-api-compat.cpp` |
 | Header-inline helpers | `number-theory.hpp` (MultiplyFactor, ReduceMod, BarrettReduce64, MultiplyModLazy, MultiplyAddMod, …), `util/*.hpp` | **done**: part of the upstream header API |
-| Entry points + dispatch | `src/eltwise/<op>.cpp` (top half), `src/ntt/ntt.cpp` (except one method) | **done** |
+| Entry points + dispatch | `src/eltwise/<op>.cpp` (top half), `src/ntt/ntt.cpp` | **done** |
 | CPU detection, port info, allocator | `src/util/cpu-features.*`, `aligned-allocator.cpp` | **done** |
 | Scalar number theory | `src/number-theory/number-theory.cpp` | **done**: `PowMod` and `IsPrime` work in Montgomery form (odd moduli; `IsPrime` exact for every 64-bit input), `InverseMod` is extended Euclid, `MultiplyMod` is inline in the header |
-| Native kernels | `src/eltwise/<op>.cpp` (bottom half), `src/ntt/ntt-radix-2.cpp` | **done** for all 7 eltwise ops; **TODO**: `ntt-radix-2.cpp` |
-| Twiddle precomputation | `NTT::ComputeRootOfUnityPowers` in `src/ntt/ntt.cpp` | **TODO** |
-| RVV kernels | `src/eltwise/<op>-rvv.cpp`, `src/ntt/ntt-rvv.cpp` | **done** for all 7 eltwise ops (e64 and e32, every lane m1-m8); **TODO**: `ntt-rvv.cpp` |
+| Native kernels | `src/eltwise/<op>.cpp` (bottom half), `src/ntt/ntt-radix-2.cpp` | **done**: all 7 eltwise ops; NTT forward and inverse (Harvey lazy butterflies, N^-1 folded into the inverse's last stage) and the reference transforms |
+| Twiddle precomputation | `NTT::ComputeRootOfUnityPowers` in `src/ntt/ntt.cpp` | **done**: forward table at bit-reversed indices, inverse table in stage order (powers of w^-1), Shoup factors, RVV32 copies |
+| RVV kernels | `src/eltwise/<op>-rvv.cpp`, `src/ntt/ntt-rvv.cpp` | **done**: all 7 eltwise ops (e64 and e32, every lane m1-m8); NTT forward and inverse, RVV64 and RVV32, every lane (first version: small-span stages still underfilled) |
 | RVV helpers | `src/util/rvv-util.hpp` | **done**, each with a test (`hexl-tests RvvUtil`) |
 
-Every TODO body is `HEXL_NOT_IMPLEMENTED();`. It throws `std::logic_error("[rvv-hexl TODO] <fn>
-(<file>:<line>)")`, so:
-* `make test` reports each test as PASS / FAIL / **TODO ← name of the stub it hit**,
-* benchmarks skip that entry and print the stub name,
-* OpenFHE's unit tests print the stub name instead of crashing or silently computing garbage,
-* `make todo` lists every remaining stub.
+Every layer is implemented; `make rvv-hexl-test` reports each test as PASS or FAIL. (While the
+port was in progress, unimplemented functions threw a `[rvv-hexl TODO]` marker that the test
+runner, `make todo` and `seal-check` reported; that machinery was removed once nothing was left.)
 
 ---
 
@@ -228,7 +225,7 @@ transforms that read them.
 | getters (`GetRootOfUnityPowers`, `GetPrecon64…`, …) | done | read-only access to the tables |
 | `GetAVX512…`, `…Precon52…` | kept, **empty** | source compatibility with upstream code only |
 | `GetRVV32RootOfUnityPowers` + 3 more | done (getters) | rvv-hexl addition: `uint32_t` twiddle tables for the e32 kernels |
-| **`ComputeRootOfUnityPowers()`** | **TODO** | fill every table (below) |
+| **`ComputeRootOfUnityPowers()`** | done | fills every table (below) |
 
 **`ComputeRootOfUnityPowers()`: what to fill:**
 
@@ -267,7 +264,6 @@ pattern, and 8 threads sharing one object.
 | `cpu-features.hpp/.cpp` | `HEXL_HAS_RVV` (compile time: TU built with V), `has_rvv` (runtime: `AT_HWCAP` has V and `HEXL_DISABLE_RVV` unset), `CurrentVLenBits()`, `kMaxModulusRVV32` | done |
 | `rvv-util.hpp` | the RVV vocabulary: `AddMod`, `SubMod`, `ReduceFromTwice`, `BarrettReduce` (any 64-bit x mod q, factor `MultiplyFactor(1, 64, q)`), `MulModShoupLazy`, `MulAddModShoup<InputModFactor>` (fused (x·w + y) mod q, the FMA element), `MulModBarrett` (e64) and `Load32`, `Store32` (overloaded on `uint64_t*` = narrow/widen and `uint32_t*` = plain vle32/vse32, which is what lets one e32 kernel serve both storage widths), `AddMod32`, `SubMod32`, `ReduceFromTwice32`, `BarrettReduce32` (factor `MultiplyFactor(1, 32, q)`), `MulModShoupLazy32`, `MulAddModShoup32<InputModFactor>`, `MulModBarrett32` (e32). All helpers are LMUL-generic templates: the arithmetic ones deduce the LMUL from their arguments; `Load32<V32>(p, vl)` takes the lane type as a template argument (default `vuint32m1_t`) and `Store32` deduces it | **done**: compose kernels from them. Each helper has its own test (`hexl-tests RvvUtil`, `test/test-rvv-util.cpp`), so it can be checked before any kernel uses it. The two Barrett helpers' factor convention is defined at the top of that file (`Barrett64Factors`, `Barrett32Factor`): edit it if you choose another. Change the signatures if a better decomposition emerges (and the matching test) |
 | `rvv-config.hpp` | the lane type (SEW + LMUL) of every RVV kernel (`rvv::cfg::AddMod64`, `…32`, `MultMod64`, `Ntt64`, …), m4 by default (MultMod m8); each kernel takes it as its `V` template parameter | done: one line moves a kernel to another LMUL; `RvvLanes` tests and `BM_Lanes` benchmarks cover m1-m8 |
-| `not-implemented.hpp/.cpp` | `HEXL_NOT_IMPLEMENTED()` | done |
 | `util-internal.hpp` | scalar `Compare(CMPINT, a, b)` for the native Cmp kernels | done |
 | `aligned-allocator.cpp` | the global `mallocStrategy` | done |
 
@@ -294,11 +290,11 @@ Each milestone ends with a command that must pass.
 |---|---|---|
 | M0 | `number-theory.cpp` (11 functions) (**done**) | `make test` → all `NumberTheory_*` PASS |
 | M1 | the 7 native eltwise kernels (**done**) | `HEXL_DISABLE_RVV=1 build/rvv-release/bin/hexl-tests Eltwise` all PASS |
-| M2 | `ComputeRootOfUnityPowers` (64-bit tables) + native radix-2 forward/inverse | `make ISA=scalar test` fully green, **0 TODO** |
+| M2 | `ComputeRootOfUnityPowers` (64-bit tables) + native radix-2 forward/inverse (**done**) | `make ISA=scalar test` fully green |
 | M3 | integration with the native path only | `make ISA=scalar openfhe openfhe-check WITH_RVV_HEXL=ON`: OpenFHE's own tests pass on the port. Same for SEAL: `make ISA=scalar seal seal-check WITH_RVV_HEXL=ON` (section 7) |
 | M4 | `rvv-util.hpp` + RVV eltwise (e64 first, then e32 for Mult/FMA) (**done**) | `hexl-tests RvvUtil` green for each helper as you write it, then `make test` green (both passes) |
-| M5 | RVV32 NTT (+ `m_rvv32_*` tables): the binfhe path | `Ntt_*` green; `bench-hexl --benchmark_filter=NTT.*qbits:27` vs `HEXL_DISABLE_RVV=1` |
-| M6 | RVV64 NTT | green; honest comparison against native for 60-bit q |
+| M5 | RVV32 NTT (+ `m_rvv32_*` tables): the binfhe path (**first version done**; next: vectorized small spans, 32-bit scratch for uint64_t storage) | `Ntt_*` green; `bench-hexl --benchmark_filter=NTT.*qbits:27` vs `HEXL_DISABLE_RVV=1` |
+| M6 | RVV64 NTT (**first version done**) | green; honest comparison against native for 60-bit q |
 | M7 | full matrix on both K3 clusters | `bench/run.sh` |
 
 Stop after M2/M3 and run the benchmarks once: `ISA=scalar` + native kernels is the fair "base
@@ -413,7 +409,7 @@ Microsoft SEAL has its own Intel HEXL backend, and rvv-hexl is a drop-in for it 
 changes to SEAL** and none to rvv-hexl. Verified on the K3 (2026-09-28, SEAL 4.1.2, GCC 16.2,
 `-march=rva23u64`): SEAL configures against rvv-hexl, compiles and links cleanly (all 11
 `intel::hexl` symbols it references resolve to this library), and at runtime its calls reach
-rvv-hexl (the first one hits a stub until M0/M2 are done).
+rvv-hexl.
 
 ```
                   Microsoft SEAL v4.1.2   (make seal WITH_RVV_HEXL=ON)
@@ -494,14 +490,13 @@ Compared with OpenFHE (section 1), what this adds to your work:
 ```sh
 make seal-all                          # stock + rvvhexl (installs rvv-hexl first)
 make seal-check                        # stock: must pass (sanity of the build itself)
-make seal-check WITH_RVV_HEXL=ON       # BFV + CKKS through every call above; TODO until M0/M2
+make seal-check WITH_RVV_HEXL=ON       # BFV + CKKS through every call above
 make seal-check WITH_RVV_HEXL=ON SEAL_TESTS=ON   # + SEAL's sealtest (apt install libgtest-dev)
 make ISA=scalar seal seal-check WITH_RVV_HEXL=ON # the M3 integration check on the native path
 make bench && bench/run.sh --suite ipcei         # SEAL benches for every SEAL build
 ```
 
-`seal-check` exits 0 when all checks pass, 1 on a wrong result, 2 when it reaches a stub (it
-names it, like `make test`). The smoke test prints which backend it ran on (stock, or rvv-hexl
+`seal-check` exits 0 when all checks pass and 1 on a wrong result. The smoke test prints which backend it ran on (stock, or rvv-hexl
 with RVV compiled/enabled and the VLEN), so a silent fallback shows up in the output.
 
 After changing a kernel, `make rvv-hexl-install` is enough for SEAL: `libhexl` is linked into

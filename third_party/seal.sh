@@ -10,7 +10,6 @@
 #   SEAL_PREFIX      <dir>/install install prefix
 #   SEAL_TAG         v4.1.2        the SEAL release the IPCEI suite uses
 #   SEAL_TESTS       ON | OFF      also build SEAL's own sealtest (needs libgtest-dev)
-#   STRICT           1             check: treat a reached rvv-hexl stub as a failure
 #   ISA_FLAGS CXX CC JOBS
 #
 # How this maps onto upstream: SEAL's HEXL switch is a plain CMake option,
@@ -130,11 +129,6 @@ case "${1:-}" in
     step "$(basename "$SEAL_DIR"): seal-smoke"
     rc=0
     "$smoke" || rc=$?
-    # same rule as `make rvv-hexl-test`: reaching a stub is TODO, not a failure (STRICT=1 fails)
-    if [ "$rc" = 2 ] && [ -z "${STRICT:-}" ]; then
-      echo "(an rvv-hexl stub was reached: TODO, not a failure; STRICT=1 makes it fail)"
-      rc=0
-    fi
     if [ -x "$SEAL_DIR/build/bin/sealtest" ]; then
       step "$(basename "$SEAL_DIR"): sealtest"
       "$SEAL_DIR/build/bin/sealtest" --gtest_brief=1 || rc=1

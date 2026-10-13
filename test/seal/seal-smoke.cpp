@@ -12,8 +12,7 @@
 // The same program runs against the stock SEAL build, so a result that differs between
 // the two builds is the backend's fault. BFV is checked exactly, CKKS within 1e-3.
 //
-// Exit status: 0 all PASS, 1 a FAIL, 2 an rvv-hexl stub was reached (TODO; `make seal-check`
-// reports it as not a failure unless STRICT=1, like `make rvv-hexl-test`).
+// Exit status: 0 all PASS, 1 a FAIL.
 
 #include <cmath>
 #include <cstdint>
@@ -192,10 +191,6 @@ int main() {
 		BfvRoundTrip();
 		CkksRoundTrip();
 	} catch (const std::exception& e) {
-		if (std::strstr(e.what(), "[rvv-hexl TODO]")) {
-			std::cout << "  TODO  " << e.what() << "\n";
-			return 2;
-		}
 		std::cout << "  FAIL  exception: " << e.what() << "\n";
 		return 1;
 	}
