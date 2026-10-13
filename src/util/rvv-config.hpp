@@ -55,7 +55,11 @@ using MultMod32U64 = vuint32m4_t;  // RVV32 on uint64_t storage, q < 2^30 (<= m4
 using FMAMod64 = vuint64m4_t;
 using FMAMod32 = vuint32m4_t;   // <= m4
 using Ntt64 = vuint64m4_t;
-using Ntt32 = vuint32m4_t;      // <= m4
+using Ntt32 = vuint32m4_t;     // RVV32 NTT on uint32_t storage
+using Ntt32U64 = vuint32m4_t;  // RVV32 NTT on uint64_t storage (<= m4: narrowing load)
+			       // If the RVV32 twiddle layout depends on VL (e.g. twiddles replicated per lane),
+			       // NTT::ComputeRootOfUnityPowers must build it for these lane types: keep
+			       // Ntt32 and Ntt32U64 equal then, or make the layout VL-independent.
 
 }  // namespace cfg
 

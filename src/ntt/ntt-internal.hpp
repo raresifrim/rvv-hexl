@@ -24,12 +24,13 @@
 #include <stdint.h>
 #include <algorithm>
 #include "util/cpu-features.hpp"
+#include "util/rvv-config.hpp"  // lane types (empty without RVV)
 
 namespace intel {
 namespace hexl {
 
 // ---------------------------------------------------------------------------
-// Native (portable scalar) path: src/ntt/ntt-radix-2.cpp        TODO(port)
+// Native (portable scalar) path: src/ntt/ntt-radix-2.cpp
 // ---------------------------------------------------------------------------
 
 /// @brief Radix-2 Cooley-Tukey forward NTT (Harvey butterflies).
@@ -66,7 +67,7 @@ void ReferenceInverseTransformFromBitReverse(
 		const uint64_t* inv_root_of_unity_powers);
 
 // ---------------------------------------------------------------------------
-// RVV path: src/ntt/ntt-rvv.cpp                               TODO(port-rvv)
+// RVV path: src/ntt/ntt-rvv.cpp
 // ---------------------------------------------------------------------------
 #ifdef HEXL_HAS_RVV
 
@@ -76,7 +77,9 @@ void ReferenceInverseTransformFromBitReverse(
 /// @param w, w_precon NTT::GetRVV32RootOfUnityPowers() /
 /// GetRVV32PreconRootOfUnityPowers(); layout decided by YOU in
 /// NTT::ComputeRootOfUnityPowers.
-template <typename Word>
+/// Lane type V: rvv::cfg::Ntt32 (uint32_t storage) or Ntt32U64 (uint64_t
+/// storage, at most u32m4 because of the narrowing load).
+template <typename Word, class V = rvv::LaneFor<Word, rvv::cfg::Ntt32U64, rvv::cfg::Ntt32>>
 void ForwardTransformToBitReverseRVV32(Word* result,
 		const Word* operand, uint64_t n,
 		uint64_t modulus, const uint32_t* w,
@@ -85,7 +88,7 @@ void ForwardTransformToBitReverseRVV32(Word* result,
 		uint64_t output_mod_factor);
 
 /// @brief RVV inverse NTT, 32-bit lanes (incl. N^{-1} scaling).
-template <typename Word>
+template <typename Word, class V = rvv::LaneFor<Word, rvv::cfg::Ntt32U64, rvv::cfg::Ntt32>>
 void InverseTransformFromBitReverseRVV32(Word* result,
 		const Word* operand, uint64_t n,
 		uint64_t modulus, const uint32_t* w_inv,
@@ -96,6 +99,8 @@ void InverseTransformFromBitReverseRVV32(Word* result,
 /// @brief RVV forward NTT, 64-bit lanes. Every modulus >= 2^30 (the 49/60-bit
 /// BFV/CKKS primes). Uses the same tables as the native path. 64-bit storage
 /// only (32-bit storage with q >= 2^30 goes to the native path).
+/// Lane type V: rvv::cfg::Ntt64.
+template <class V = rvv::cfg::Ntt64>
 void ForwardTransformToBitReverseRVV64(
 		uint64_t* result, const uint64_t* operand, uint64_t n, uint64_t modulus,
 		const uint64_t* root_of_unity_powers,
@@ -103,6 +108,7 @@ void ForwardTransformToBitReverseRVV64(
 		uint64_t output_mod_factor);
 
 /// @brief RVV inverse NTT, 64-bit lanes (incl. N^{-1} scaling).
+template <class V = rvv::cfg::Ntt64>
 void InverseTransformFromBitReverseRVV64(
 		uint64_t* result, const uint64_t* operand, uint64_t n, uint64_t modulus,
 		const uint64_t* inv_root_of_unity_powers,

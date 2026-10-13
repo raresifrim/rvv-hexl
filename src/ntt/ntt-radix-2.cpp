@@ -26,7 +26,7 @@ void ForwardTransformToBitReverseRadix2(
 		const uint64_t* precon_root_of_unity_powers, uint64_t input_mod_factor,
 		uint64_t output_mod_factor) {
 	// Cooley-Tukey, decimation in time, natural -> bit-reversed.
-	//
+
 	if (result != operand) //copy operand into result, then work in place.
 		for (uint64_t i=0; i<n; ++i)
 			result[i] = operand[i];
@@ -48,8 +48,8 @@ void ForwardTransformToBitReverseRadix2(
 
 	if (output_mod_factor == 1) 
 		for (uint64_t i=0; i<n; ++i){
-			result[i] = static_cast<Word>(std::min(static_cast<uint64_t>(result[i]), static_cast<uint64_t>(result[i]) - 2*modulus));
-			result[i] = static_cast<Word>(std::min(static_cast<uint64_t>(result[i]), static_cast<uint64_t>(result[i]) - modulus));
+			result[i] = static_cast<Word>(std::min(static_cast<uint64_t>(result[i]), static_cast<uint64_t>(result[i]) - 2*modulus)); //reduce from 4q to 2q
+			result[i] = static_cast<Word>(std::min(static_cast<uint64_t>(result[i]), static_cast<uint64_t>(result[i]) - modulus)); //reduce from 2q to q
 		}	
 }
 
