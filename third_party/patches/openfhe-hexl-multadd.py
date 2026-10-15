@@ -12,14 +12,15 @@ this = (this + a * b) mod q, element-wise, all operands reduced mod q. It is wha
 patches/openfhe-binfhe-multadd.py makes binfhe's external product call instead of
 "acc += (x * y)" (a multiplication into a temporary polynomial, then an addition).
 
-Switch HEXL_MULADD_ENABLE in math/math-hal.h, from OPENFHE_HEXL_MULADD (default 0):
+Switch HEXL_MULADD_ENABLE in math/math-hal.h, from OPENFHE_HEXL_MULADD (default 1):
   1  one intel::hexl::EltwiseMultAddMod call (rvv-hexl extension,
      HEXL_RVV_HAS_MULT_ADD_MOD): one pass, no temporary;
   0  EltwiseMultMod into a temporary, then EltwiseAddMod: the same two calls as
-     the code it replaces, so binfhe performs as before.
-Default 0 until the end-to-end binfhe benches confirm it; per call the fused
-kernels are 1.05-1.33x faster (bench-hexl BM_EltwiseMultAddMod vs
-BM_EltwiseMultModThenAddMod, 2026-10-14).
+     the code it replaces (the comparison baseline).
+Per call the fused kernels are 1.05-1.33x faster (bench-hexl BM_EltwiseMultAddMod
+vs BM_EltwiseMultModThenAddMod, 2026-10-14); end to end, IPCEI TFHE benches against
+0 (2026-10-15): X100 RVV 1.03-1.06x, X100 scalar 1.06-1.17x, A100 RVV 1.01-1.04x,
+A100 scalar 0.98-1.01x.
 """
 import os
 import pathlib
@@ -28,7 +29,7 @@ import sys
 
 ROOT = pathlib.Path(sys.argv[1])
 MARK = "rvv-hexl: patches/openfhe-hexl-multadd.py"
-VALUE = os.environ.get("OPENFHE_HEXL_MULADD", "0")
+VALUE = os.environ.get("OPENFHE_HEXL_MULADD", "1")
 if VALUE not in ("0", "1"):
     sys.exit(f"[openfhe-hexl] ERROR: OPENFHE_HEXL_MULADD must be 0 or 1, got {VALUE!r}")
 

@@ -38,8 +38,8 @@
 #     one NativeVector::ModSubEq per key row, so it reaches EltwiseSubMod as well.
 #   * patches/openfhe-hexl-multadd.py adds NativeVector/NativePoly ModMulAddEq (acc += a * b),
 #     and patches/openfhe-binfhe-multadd.py makes binfhe's external products accumulate with it.
-#     OPENFHE_HEXL_MULADD=1 runs it as one rvv-hexl EltwiseMultAddMod call; the default 0 keeps
-#     the two calls it replaces (EltwiseMultMod + EltwiseAddMod) until the fused kernels win.
+#     By default it runs as one rvv-hexl EltwiseMultAddMod call; OPENFHE_HEXL_MULADD=0 keeps
+#     the two calls it replaces (EltwiseMultMod + EltwiseAddMod), as a comparison baseline.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

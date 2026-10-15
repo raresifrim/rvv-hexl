@@ -8,8 +8,9 @@
 // small-span strategy (how the stages with span t < VLMAX are vectorized),
 // both with defaults in src/util/rvv-config.hpp. Structure:
 //   forward: copy, large stages t = n/2 .. VL per block (ntt-rvv-stages.hpp),
-//            small stages by the strategy (ntt-rvv-fused-slides.hpp,
-//            ntt-rvv-transposed.hpp), which also produces the output range;
+//            small stages by the strategy (Forward{FusedSlides,Transposed}RVV*
+//            in ntt-rvv-fused-slides.hpp / ntt-rvv-transposed.hpp, picked by
+//            the dispatch below), which also produces the output range;
 //   inverse: small stages by the strategy (operand -> result), large stages
 //            per block, last stage with N^{-1} folded in.
 // Without tables for this n and VL (and always for rvv::ntt::PerBlock) every
@@ -34,6 +35,66 @@
 namespace intel {
 namespace hexl {
 
+// Small-span stages of strategy SmallSpan: one function per strategy and
+// direction (ntt-rvv-fused-slides.hpp, ntt-rvv-transposed.hpp), chosen at
+// compile time. PerBlock has none; the kernels below never call these for it.
+template <class SmallSpan>
+inline constexpr bool kHasSmallSpanStages = std::is_same_v<SmallSpan, rvv::ntt::FusedSlides> || rvv::ntt::kIsTransposed<SmallSpan>;
+
+template <typename Word, class V, class SmallSpan>
+inline void ForwardSmallSpanRVV32(Word* result, uint64_t n, uint64_t modulus,
+		const uint32_t* w, const uint32_t* w_precon,
+		const NttSmallSpanTables<SmallSpan, uint32_t>& tables,
+		uint64_t output_mod_factor) {
+	static_assert(kHasSmallSpanStages<SmallSpan>, "no small-span stages for this strategy");
+	if constexpr (std::is_same_v<SmallSpan, rvv::ntt::FusedSlides>) {
+		ForwardFusedSlidesRVV32<Word, V>(result, n, modulus, w, w_precon, tables, output_mod_factor);
+	} else {
+		ForwardTransposedRVV32<Word, V, SmallSpan>(result, n, modulus, w, w_precon, tables, output_mod_factor);
+	}
+}
+
+template <typename Word, class V, class SmallSpan>
+inline void InverseSmallSpanRVV32(Word* result, const Word* operand, uint64_t n,
+		uint64_t modulus, const uint32_t* w_inv,
+		const uint32_t* w_inv_precon,
+		const NttSmallSpanTables<SmallSpan, uint32_t>& tables) {
+	static_assert(kHasSmallSpanStages<SmallSpan>, "no small-span stages for this strategy");
+	if constexpr (std::is_same_v<SmallSpan, rvv::ntt::FusedSlides>) {
+		InverseFusedSlidesRVV32<Word, V>(result, operand, n, modulus, w_inv, w_inv_precon, tables);
+	} else {
+		InverseTransposedRVV32<Word, V, SmallSpan>(result, operand, n, modulus, w_inv, w_inv_precon, tables);
+	}
+}
+
+template <class V, class SmallSpan>
+inline void ForwardSmallSpanRVV64(uint64_t* result, uint64_t n, uint64_t modulus,
+		const uint64_t* root_of_unity_powers,
+		const uint64_t* precon_root_of_unity_powers,
+		const NttSmallSpanTables<SmallSpan, uint64_t>& tables,
+		uint64_t output_mod_factor) {
+	static_assert(kHasSmallSpanStages<SmallSpan>, "no small-span stages for this strategy");
+	if constexpr (std::is_same_v<SmallSpan, rvv::ntt::FusedSlides>) {
+		ForwardFusedSlidesRVV64<V>(result, n, modulus, root_of_unity_powers, precon_root_of_unity_powers, tables, output_mod_factor);
+	} else {
+		ForwardTransposedRVV64<V, SmallSpan>(result, n, modulus, root_of_unity_powers, precon_root_of_unity_powers, tables, output_mod_factor);
+	}
+}
+
+template <class V, class SmallSpan>
+inline void InverseSmallSpanRVV64(uint64_t* result, const uint64_t* operand,
+		uint64_t n, uint64_t modulus,
+		const uint64_t* inv_root_of_unity_powers,
+		const uint64_t* precon_inv_root_of_unity_powers,
+		const NttSmallSpanTables<SmallSpan, uint64_t>& tables) {
+	static_assert(kHasSmallSpanStages<SmallSpan>, "no small-span stages for this strategy");
+	if constexpr (std::is_same_v<SmallSpan, rvv::ntt::FusedSlides>) {
+		InverseFusedSlidesRVV64<V>(result, operand, n, modulus, inv_root_of_unity_powers, precon_inv_root_of_unity_powers, tables);
+	} else {
+		InverseTransposedRVV64<V, SmallSpan>(result, operand, n, modulus, inv_root_of_unity_powers, precon_inv_root_of_unity_powers, tables);
+	}
+}
+
 template <typename Word, class V, class SmallSpan>
 void ForwardTransformToBitReverseRVV32(Word* result,
 		const Word* operand, uint64_t n,
@@ -45,10 +106,9 @@ void ForwardTransformToBitReverseRVV32(Word* result,
 	const uint32_t modulus32 = static_cast<uint32_t>(modulus);
 	CopyRVV32<Word, V>(result, operand, n);   // then in place
 	if constexpr (!std::is_same_v<SmallSpan, rvv::ntt::PerBlock>) {
-		const uint64_t vl = rvv::VlMax<V>();
-		if (UseSmallSpan(small_span, n, vl)) {
-			ForwardStagesRVV32<Word, V>(result, n, modulus32, w, w_precon, n/2, vl);   // large spans
-			ForwardSmallSpanRVV32<Word, V>(SmallSpan{}, result, n, modulus, w, w_precon, *small_span, output_mod_factor);
+		if (UseSmallSpan(small_span, n, SmallSpanLanes<SmallSpan, V>())) {
+			ForwardStagesRVV32<Word, V>(result, n, modulus32, w, w_precon, n/2, small_span->t_top);   // per block down to t_top
+			ForwardSmallSpanRVV32<Word, V, SmallSpan>(result, n, modulus, w, w_precon, *small_span, output_mod_factor);
 			return;
 		}
 	}
@@ -68,16 +128,17 @@ void InverseTransformFromBitReverseRVV32(Word* result,
 	// twiddle tables in stage order, Harvey lazy butterflies in [0, 2q), and
 	// the N^{-1} scaling folded into the last stage.
 	const uint32_t modulus32 = static_cast<uint32_t>(modulus);
-	uint64_t t = 1;                                                    // first stage left to run
 	if constexpr (!std::is_same_v<SmallSpan, rvv::ntt::PerBlock>) {
-		const uint64_t vl = rvv::VlMax<V>();
-		if (UseSmallSpan(small_span, n, vl)) {
-			InverseSmallSpanRVV32<Word, V>(SmallSpan{}, result, operand, n, modulus, w_inv, w_inv_precon, *small_span);
-			t = vl;
+		if (UseSmallSpan(small_span, n, SmallSpanLanes<SmallSpan, V>())) {
+			// small spans first, operand -> result (no copy pass)
+			InverseSmallSpanRVV32<Word, V, SmallSpan>(result, operand, n, modulus, w_inv, w_inv_precon, *small_span);
+			InverseStagesRVV32<Word, V>(result, n, modulus32, w_inv, w_inv_precon, small_span->t_top, n/4);   // per block from t_top
+			InverseLastStageRVV32<Word, V>(result, n, modulus, w_inv, output_mod_factor);
+			return;
 		}
 	}
-	if (t == 1) CopyRVV32<Word, V>(result, operand, n);
-	InverseStagesRVV32<Word, V>(result, n, modulus32, w_inv, w_inv_precon, t, n/4);
+	CopyRVV32<Word, V>(result, operand, n);                                           // then in place
+	InverseStagesRVV32<Word, V>(result, n, modulus32, w_inv, w_inv_precon, 1, n/4);   // every stage but the last
 	InverseLastStageRVV32<Word, V>(result, n, modulus, w_inv, output_mod_factor);
 }
 
@@ -90,10 +151,9 @@ void ForwardTransformToBitReverseRVV64(
 		const NttSmallSpanTables<SmallSpan, uint64_t>* small_span) {
 	CopyRVV64<V>(result, operand, n);
 	if constexpr (!std::is_same_v<SmallSpan, rvv::ntt::PerBlock>) {
-		const uint64_t vl = rvv::VlMax<V>();
-		if (UseSmallSpan(small_span, n, vl)) {
-			ForwardStagesRVV64<V>(result, n, modulus, root_of_unity_powers, precon_root_of_unity_powers, n/2, vl);
-			ForwardSmallSpanRVV64<V>(SmallSpan{}, result, n, modulus, root_of_unity_powers, precon_root_of_unity_powers, *small_span, output_mod_factor);
+		if (UseSmallSpan(small_span, n, SmallSpanLanes<SmallSpan, V>())) {
+			ForwardStagesRVV64<V>(result, n, modulus, root_of_unity_powers, precon_root_of_unity_powers, n/2, small_span->t_top);
+			ForwardSmallSpanRVV64<V, SmallSpan>(result, n, modulus, root_of_unity_powers, precon_root_of_unity_powers, *small_span, output_mod_factor);
 			return;
 		}
 	}
@@ -108,16 +168,17 @@ void InverseTransformFromBitReverseRVV64(
 		const uint64_t* precon_inv_root_of_unity_powers, uint64_t input_mod_factor,
 		uint64_t output_mod_factor,
 		const NttSmallSpanTables<SmallSpan, uint64_t>* small_span) {
-	uint64_t t = 1;                                                    // first stage left to run
 	if constexpr (!std::is_same_v<SmallSpan, rvv::ntt::PerBlock>) {
-		const uint64_t vl = rvv::VlMax<V>();
-		if (UseSmallSpan(small_span, n, vl)) {
-			InverseSmallSpanRVV64<V>(SmallSpan{}, result, operand, n, modulus, inv_root_of_unity_powers, precon_inv_root_of_unity_powers, *small_span);
-			t = vl;
+		if (UseSmallSpan(small_span, n, SmallSpanLanes<SmallSpan, V>())) {
+			// small spans first, operand -> result (no copy pass)
+			InverseSmallSpanRVV64<V, SmallSpan>(result, operand, n, modulus, inv_root_of_unity_powers, precon_inv_root_of_unity_powers, *small_span);
+			InverseStagesRVV64<V>(result, n, modulus, inv_root_of_unity_powers, precon_inv_root_of_unity_powers, small_span->t_top, n/4);   // per block from t_top
+			InverseLastStageRVV64<V>(result, n, modulus, inv_root_of_unity_powers, output_mod_factor);
+			return;
 		}
 	}
-	if (t == 1) CopyRVV64<V>(result, operand, n);
-	InverseStagesRVV64<V>(result, n, modulus, inv_root_of_unity_powers, precon_inv_root_of_unity_powers, t, n/4);
+	CopyRVV64<V>(result, operand, n);                                                                           // then in place
+	InverseStagesRVV64<V>(result, n, modulus, inv_root_of_unity_powers, precon_inv_root_of_unity_powers, 1, n/4);   // every stage but the last
 	InverseLastStageRVV64<V>(result, n, modulus, inv_root_of_unity_powers, output_mod_factor);
 }
 
@@ -154,10 +215,14 @@ void InverseTransformFromBitReverseRVV64(
 
 HEXL_NTT_RVV32_LANES(rvv::ntt::PerBlock);
 HEXL_NTT_RVV32_LANES(rvv::ntt::FusedSlides);
-HEXL_NTT_RVV32_LANES(rvv::ntt::Transposed);
+
 HEXL_NTT_RVV64_LANES(rvv::ntt::PerBlock);
 HEXL_NTT_RVV64_LANES(rvv::ntt::FusedSlides);
-HEXL_NTT_RVV64_LANES(rvv::ntt::Transposed);
+#define HEXL_NTT_TRANSPOSED(S)              \
+	HEXL_NTT_RVV32_LANES(rvv::ntt::S); \
+HEXL_NTT_RVV64_LANES(rvv::ntt::S);
+HEXL_RVV_NTT_TRANSPOSED_SHAPES(HEXL_NTT_TRANSPOSED);
+#undef HEXL_NTT_TRANSPOSED
 
 #undef HEXL_NTT_RVV64_LANES
 #undef HEXL_NTT_RVV32_LANES

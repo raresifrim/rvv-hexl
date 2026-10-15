@@ -8,6 +8,8 @@
 /docs/rvv_intrinsics/
 # benchmark results: machine-specific, collect and archive them separately
 /results/
+# Python bytecode (the third_party/patches/*.py scripts)
+__pycache__/
 # editor / OS
 .DS_Store
 *.swp

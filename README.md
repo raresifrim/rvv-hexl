@@ -263,6 +263,6 @@ prebuilt route, with `INTEL_HEXL_HINT_DIR` pointing at the rvv-hexl install.
   `(a * b + c) mod q` on three vectors in one pass, for binfhe's accumulation
   (`acc += digit * key`): 1.05-1.33x faster than `EltwiseMultMod` + `EltwiseAddMod` (RVV),
   1.09-1.22x scalar. `openfhe-hexl-multadd.py` and `openfhe-binfhe-multadd.py` make binfhe's
-  external products call it when OpenFHE is staged with `OPENFHE_HEXL_MULADD=1` (default 0:
-  the two calls, as before).
+  external products call it (binfhe 1.03-1.17x on the X100); staging OpenFHE with
+  `OPENFHE_HEXL_MULADD=0` keeps the two calls, as a baseline.
 * License: Apache-2.0, as upstream Intel HEXL (the public headers derive from it).

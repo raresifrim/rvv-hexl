@@ -33,7 +33,7 @@ namespace hexl {
 /// Forward small-span stages t = VL/2 .. 1 on result (in place), then the
 /// output range of output_mod_factor.
 template <typename Word, class V>
-void ForwardSmallSpanRVV32(rvv::ntt::FusedSlides, Word* result, uint64_t n,
+void ForwardFusedSlidesRVV32(Word* result, uint64_t n,
 		uint64_t modulus, const uint32_t* w,
 		const uint32_t* w_precon,
 		const NttSmallSpanTables<rvv::ntt::FusedSlides, uint32_t>& tables,
@@ -47,7 +47,7 @@ void ForwardSmallSpanRVV32(rvv::ntt::FusedSlides, Word* result, uint64_t n,
 /// Inverse small-span stages t = 1 .. VL/2, from operand into result (they
 /// may alias).
 template <typename Word, class V>
-void InverseSmallSpanRVV32(rvv::ntt::FusedSlides, Word* result,
+void InverseFusedSlidesRVV32(Word* result,
 		const Word* operand, uint64_t n, uint64_t modulus,
 		const uint32_t* w_inv, const uint32_t* w_inv_precon,
 		const NttSmallSpanTables<rvv::ntt::FusedSlides, uint32_t>& tables) {
@@ -58,7 +58,7 @@ void InverseSmallSpanRVV32(rvv::ntt::FusedSlides, Word* result,
 
 /// Forward small-span stages, 64-bit lanes.
 template <class V>
-void ForwardSmallSpanRVV64(rvv::ntt::FusedSlides, uint64_t* result, uint64_t n,
+void ForwardFusedSlidesRVV64(uint64_t* result, uint64_t n,
 		uint64_t modulus, const uint64_t* root_of_unity_powers,
 		const uint64_t* precon_root_of_unity_powers,
 		const NttSmallSpanTables<rvv::ntt::FusedSlides, uint64_t>& tables,
@@ -70,7 +70,7 @@ void ForwardSmallSpanRVV64(rvv::ntt::FusedSlides, uint64_t* result, uint64_t n,
 
 /// Inverse small-span stages, 64-bit lanes.
 template <class V>
-void InverseSmallSpanRVV64(rvv::ntt::FusedSlides, uint64_t* result,
+void InverseFusedSlidesRVV64(uint64_t* result,
 		const uint64_t* operand, uint64_t n, uint64_t modulus,
 		const uint64_t* inv_root_of_unity_powers,
 		const uint64_t* precon_inv_root_of_unity_powers,

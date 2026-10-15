@@ -49,10 +49,36 @@ struct PerBlock {};
 /// with vslidedown / vslideup / vmerge and per-lane twiddles, store once.
 /// Contiguous access only; needs N >= 2 VL. Measured best on the A100.
 struct FusedSlides {};
-/// Strided transpose into N words of scratch so that butterfly partners
-/// share a lane across rows, plain row butterflies with per-lane twiddles,
-/// transpose back. Needs N >= VL^2. Measured best on the X100.
-struct Transposed {};
+/// Tiles of Rows rows, each row one register group of LMUL Lmul (L = VLMAX
+/// lanes of V's element width at that LMUL), loaded with strided loads
+/// straight into registers, in which butterfly partners share a lane across
+/// rows: the stages t < Rows as plain row butterflies with per-lane twiddles,
+/// stored back with strided stores. Rows * Lmul <= 16 registers (the
+/// twiddles and the temporaries take the rest of the 32). More rows merge
+/// more stages per pass over memory, more lanes run them in fewer, longer
+/// instructions. Needs N >= Rows * L. Runs on any VLEN; fast where strided
+/// access is cheap (X100), correct but slow on the A100.
+template <unsigned Rows, unsigned Lmul = 1>
+struct Transposed {
+	static_assert(Rows == 4 || Rows == 8 || Rows == 16, "Transposed tiles have 4, 8 or 16 rows");
+	static_assert(Lmul == 1 || Lmul == 2 || Lmul == 4, "Transposed rows are m1, m2 or m4");
+	static_assert(Rows * Lmul <= 16, "Transposed tile rows must fit in 16 registers");
+	static constexpr unsigned kRows = Rows;
+	static constexpr unsigned kLmul = Lmul;
+};
+template <class S>
+inline constexpr bool kIsTransposed = false;
+template <unsigned Rows, unsigned Lmul>
+inline constexpr bool kIsTransposed<Transposed<Rows, Lmul>> = true;
+
+// The Transposed shapes the library instantiates (kernels, twiddle tables,
+// tests, benchmarks), rows x LMUL. To add one: an alias here and an entry in
+// the list. cfg::NttSmallSpan64/32 must name one of them.
+using Transposed16 = Transposed<16, 1>;
+using Transposed8 = Transposed<8, 1>;
+using Transposed8x2 = Transposed<8, 2>;
+using Transposed4x4 = Transposed<4, 4>;
+#define HEXL_RVV_NTT_TRANSPOSED_SHAPES(X) X(Transposed16) X(Transposed8) X(Transposed8x2) X(Transposed4x4)
 }  // namespace ntt
 
 namespace cfg {

@@ -181,7 +181,7 @@ void BM_Lanes_MultMod32FromU64(benchmark::State& state) {
 
 /// An NTT of size state.range(0) with the modulus its kernel serves (27-bit
 /// for e32 lanes: RVV32 on either storage word; 60-bit for e64: RVV64), and
-/// strategy S's small-span tables built for VLMAX of V.
+/// strategy S's small-span tables built for the lanes S runs at under V.
 template <typename Word, class V, class S>
 struct NttLane {
 	static constexpr bool kE32 = intel::hexl::rvv::IsE32<V>;
@@ -193,7 +193,7 @@ struct NttLane {
 
 	explicit NttLane(benchmark::State& state)
 		: n(state.range(0)), q(hexlbench::Prime(kE32 ? 27 : 60, n)), ntt(n, q),
-		tables(intel::hexl::BuildNttSmallSpanTables<S, E>(ntt, intel::hexl::rvv::VlMax<V>())),
+		tables(intel::hexl::BuildNttSmallSpanTables<S, E>(ntt, intel::hexl::SmallSpanLanes<S, V>())),
 		x(hexlbench::RandomW<Word>(n, q)) {
 			if (!std::is_same_v<S, intel::hexl::rvv::ntt::PerBlock> && tables.vl == 0)
 				state.SetLabel("N too small for the strategy: per block");
@@ -247,7 +247,9 @@ void BM_Lanes_NttInverse(benchmark::State& state) {
 // short names for the benchmark labels
 using PerBlock = intel::hexl::rvv::ntt::PerBlock;
 using FusedSlides = intel::hexl::rvv::ntt::FusedSlides;
-using Transposed = intel::hexl::rvv::ntt::Transposed;
+#define HEXL_TRANSPOSED_NAME(S) using intel::hexl::rvv::ntt::S;
+HEXL_RVV_NTT_TRANSPOSED_SHAPES(HEXL_TRANSPOSED_NAME);
+#undef HEXL_TRANSPOSED_NAME
 
 }  // namespace
 
@@ -276,8 +278,9 @@ BENCHMARK_TEMPLATE(BM_Lanes_MultAddMod32FromU64, vuint32m1_t);
 BENCHMARK_TEMPLATE(BM_Lanes_MultAddMod32FromU64, vuint32m2_t);
 BENCHMARK_TEMPLATE(BM_Lanes_MultAddMod32FromU64, vuint32m4_t);
 
-// NTT: N = 1024 (binfhe) and 4096; Transposed needs N >= VL^2 (A100 e32 m4:
-// VL 128, so it falls back to per block there, as the label says).
+// NTT: N = 1024 (binfhe) and 4096, every Transposed shape (its tile rows have
+// their own LMUL, whatever V); N too small for a strategy falls back to per
+// block, as the label says.
 #define HEXL_NTT_LANES(BM, S)                                                   \
 	BENCHMARK_TEMPLATE(BM, uint64_t, vuint64m1_t, S)->Arg(1024)->Arg(4096); \
 BENCHMARK_TEMPLATE(BM, uint64_t, vuint64m2_t, S)->Arg(1024)->Arg(4096); \
@@ -293,9 +296,13 @@ BENCHMARK_TEMPLATE(BM, uint64_t, vuint32m4_t, S)->Arg(1024)->Arg(4096)
 
 HEXL_NTT_LANES(BM_Lanes_NttForward, PerBlock);
 HEXL_NTT_LANES(BM_Lanes_NttForward, FusedSlides);
-HEXL_NTT_LANES(BM_Lanes_NttForward, Transposed);
+#define HEXL_TRANSPOSED_FWD(S) HEXL_NTT_LANES(BM_Lanes_NttForward, S);
+HEXL_RVV_NTT_TRANSPOSED_SHAPES(HEXL_TRANSPOSED_FWD);
+#undef HEXL_TRANSPOSED_FWD
 HEXL_NTT_LANES(BM_Lanes_NttInverse, PerBlock);
 HEXL_NTT_LANES(BM_Lanes_NttInverse, FusedSlides);
-HEXL_NTT_LANES(BM_Lanes_NttInverse, Transposed);
+#define HEXL_TRANSPOSED_INV(S) HEXL_NTT_LANES(BM_Lanes_NttInverse, S);
+HEXL_RVV_NTT_TRANSPOSED_SHAPES(HEXL_TRANSPOSED_INV);
+#undef HEXL_TRANSPOSED_INV
 
 #endif  // HEXL_HAS_RVV

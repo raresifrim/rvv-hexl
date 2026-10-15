@@ -6,7 +6,7 @@
 // default lanes of src/util/rvv-config.hpp; these tests make sure every other
 // instantiation (the ones bench-hexl BM_Lanes_* times) is correct too.
 // The NTT kernels additionally at every small-span strategy (PerBlock,
-// FusedSlides, Transposed), against the reference transforms.
+// FusedSlides, every Transposed shape), against the reference transforms.
 // Also rvv::SetVl / Load / Store at every LMUL.
 //
 //   hexl-tests RvvLanes
@@ -244,9 +244,8 @@ struct NttCase {
 	std::vector<uint64_t> in, want;
 };
 
-/// N = 2 .. 4096 at three moduli and all mod factors; N = 16384 and 65536
-/// (N >= VL^2, so Transposed runs, up to VL 256: u32m8 on the A100) at the
-/// largest modulus, (1, 1) and lazy. e32 lanes: q < 2^30; e64: q up to 2^62.
+/// N = 2 .. 4096 at three moduli and all mod factors; N = 16384 and 65536 at
+/// the largest modulus, (1, 1) and lazy (every strategy at large N). e32 lanes: q < 2^30; e64: q up to 2^62.
 const std::vector<NttCase>& NttCases(bool e32) {
 	static std::vector<NttCase> cases[2];
 	std::vector<NttCase>& cs = cases[e32];
@@ -298,7 +297,7 @@ void CheckNtt(const char* lane, const char* strategy) {
 	constexpr bool kE32 = rvv::IsE32<V>;
 	static_assert(kE32 || std::is_same_v<Word, uint64_t>, "e64 lanes need uint64_t storage");
 	using E = std::conditional_t<kE32, uint32_t, uint64_t>;
-	const uint64_t vl = rvv::VlMax<V>();
+	const uint64_t vl = intel::hexl::SmallSpanLanes<S, V>();  // the lanes S runs at
 	const intel::hexl::NTT* built = nullptr;
 	intel::hexl::NttSmallSpanTables<S, E> tables;
 	for (const NttCase& c : NttCases(kE32)) {
@@ -354,10 +353,15 @@ void CheckNtt(const char* lane, const char* strategy) {
 template <class S, typename E>
 void CheckSmallSpanLayout(uint64_t n, uint64_t vl, uint64_t q, const char* name) {
 	constexpr bool kFused = std::is_same_v<S, intel::hexl::rvv::ntt::FusedSlides>;
+	constexpr uint64_t kT = [] {  // Transposed tile rows
+		if constexpr (intel::hexl::rvv::ntt::kIsTransposed<S>) return uint64_t{S::kRows};
+		else return uint64_t{0};
+	}();
 	constexpr unsigned kBits = sizeof(E) * 8;
 	const intel::hexl::NTT ntt(n, q);
 	const auto tw = intel::hexl::BuildNttSmallSpanTables<S, E>(ntt, vl);
 	CHECK_EQ(tw.vl, vl, << name << " n=" << n);
+	CHECK_EQ(tw.t_top, kFused ? vl : kT, << name << " t_top n=" << n << " vl=" << vl);
 	auto check_precon = [&](const std::vector<E>& t, const std::vector<E>& p) {
 		CHECK_EQ(t.size(), p.size(), << name << " n=" << n << " vl=" << vl);
 		for (size_t k = 0; k < t.size(); ++k) {
@@ -383,7 +387,7 @@ void CheckSmallSpanLayout(uint64_t n, uint64_t vl, uint64_t q, const char* name)
 	std::vector<uint64_t> x = O::Random(n, q), want = x;
 	intel::hexl::ReferenceForwardTransformToBitReverse(want.data(), n, q, ntt.GetRootOfUnityPowers().data());
 	const auto& W = ntt.GetRootOfUnityPowers();
-	for (uint64_t t = n / 2; t >= vl; t >>= 1)
+	for (uint64_t t = n / 2; t >= tw.t_top; t >>= 1)
 		for (uint64_t i = 0, m = n / (2 * t); i < m; ++i)
 			for (uint64_t j = 2 * i * t; j < 2 * i * t + t; ++j) ct(x[j], x[j + t], W[m + i]);
 	if constexpr (kFused) {
@@ -396,12 +400,15 @@ void CheckSmallSpanLayout(uint64_t n, uint64_t vl, uint64_t q, const char* name)
 					ct(x[c * vl + l], x[c * vl + l + t], tw.fwd[k]);
 				}
 	} else {
-		uint64_t off = 0;
-		for (uint64_t t = vl / 2; t >= 1; off += rows / (2 * t) * vl, t >>= 1)
-			for (uint64_t g = 0; g < rows / (2 * t); ++g)
-				for (uint64_t r = 2 * g * t; r < 2 * g * t + t; ++r)
-					for (uint64_t k = 0; k < vl; ++k) ct(x[r + k * rows], x[r + t + k * rows], tw.fwd[off + g * vl + k]);
-		CHECK_EQ(off, tw.fwd.size(), << name << " n=" << n << " vl=" << vl);
+		for (uint64_t c = 0; c < rows / kT; ++c)  // tile by tile, the stages t < kT
+			for (uint64_t t = kT / 2; t >= 1; t >>= 1)
+				for (uint64_t g = 0; g < kT / (2 * t); ++g)
+					for (uint64_t r = 2 * g * t; r < 2 * g * t + t; ++r)
+						for (uint64_t k = 0; k < vl; ++k) {
+							const uint64_t e = c * kT + r + k * rows;
+							ct(x[e], x[e + t], tw.fwd[(c * (kT - 1) + kT / (2 * t) - 1 + g) * vl + k]);
+						}
+		CHECK_EQ(n / kT * (kT - 1), tw.fwd.size(), << name << " n=" << n << " vl=" << vl);
 	}
 	CHECK_VEC_EQ(want, x, << "forward " << name << " n=" << n << " vl=" << vl);
 
@@ -419,15 +426,18 @@ void CheckSmallSpanLayout(uint64_t n, uint64_t vl, uint64_t q, const char* name)
 					gs(x[c * vl + l], x[c * vl + l + t], tw.inv[k]);
 				}
 	} else {
-		uint64_t off = 0;
-		for (uint64_t t = 1; t < vl; off += rows / (2 * t) * vl, t <<= 1)
-			for (uint64_t g = 0; g < rows / (2 * t); ++g)
-				for (uint64_t r = 2 * g * t; r < 2 * g * t + t; ++r)
-					for (uint64_t k = 0; k < vl; ++k) gs(x[r + k * rows], x[r + t + k * rows], tw.inv[off + g * vl + k]);
-		CHECK_EQ(off, tw.inv.size(), << name << " n=" << n << " vl=" << vl);
+		for (uint64_t c = 0; c < rows / kT; ++c)
+			for (uint64_t t = 1; t < kT; t <<= 1)
+				for (uint64_t g = 0; g < kT / (2 * t); ++g)
+					for (uint64_t r = 2 * g * t; r < 2 * g * t + t; ++r)
+						for (uint64_t k = 0; k < vl; ++k) {
+							const uint64_t e = c * kT + r + k * rows;
+							gs(x[e], x[e + t], tw.inv[(c * (kT - 1) + kT - kT / t + g) * vl + k]);
+						}
+		CHECK_EQ(n / kT * (kT - 1), tw.inv.size(), << name << " n=" << n << " vl=" << vl);
 	}
 	const auto& Wi = ntt.GetInvRootOfUnityPowers();
-	for (uint64_t t = vl; t <= n / 2; t <<= 1)
+	for (uint64_t t = tw.t_top; t <= n / 2; t <<= 1)
 		for (uint64_t i = 0, m = n / (2 * t); i < m; ++i)
 			for (uint64_t j = 2 * i * t; j < 2 * i * t + t; ++j) gs(x[j], x[j + t], Wi[n - 2 * m + 1 + i]);
 	const uint64_t n_inv = O::InvModPrime(n, q);
@@ -507,11 +517,16 @@ TEST(RvvLanes_MultAddMod) {
 
 TEST(RvvLanes_NttSmallSpanLayouts) {
 	CheckSmallSpanLayouts<intel::hexl::rvv::ntt::FusedSlides>("FusedSlides");
-	CheckSmallSpanLayouts<intel::hexl::rvv::ntt::Transposed>("Transposed");
+#define HEXL_TRANSPOSED_LAYOUT(S) CheckSmallSpanLayouts<intel::hexl::rvv::ntt::S>(#S);
+	HEXL_RVV_NTT_TRANSPOSED_SHAPES(HEXL_TRANSPOSED_LAYOUT);
+#undef HEXL_TRANSPOSED_LAYOUT
 }
 
 TEST(RvvLanes_NttPerBlock) { HEXL_FOR_EACH_NTT_LANE(intel::hexl::rvv::ntt::PerBlock, "PerBlock"); }
 TEST(RvvLanes_NttFusedSlides) { HEXL_FOR_EACH_NTT_LANE(intel::hexl::rvv::ntt::FusedSlides, "FusedSlides"); }
-TEST(RvvLanes_NttTransposed) { HEXL_FOR_EACH_NTT_LANE(intel::hexl::rvv::ntt::Transposed, "Transposed"); }
+#define HEXL_TRANSPOSED_TEST(S) \
+	TEST(RvvLanes_Ntt##S) { HEXL_FOR_EACH_NTT_LANE(intel::hexl::rvv::ntt::S, #S); }
+HEXL_RVV_NTT_TRANSPOSED_SHAPES(HEXL_TRANSPOSED_TEST);
+#undef HEXL_TRANSPOSED_TEST
 
 #endif  // HEXL_HAS_RVV
