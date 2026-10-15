@@ -323,7 +323,6 @@ public:
 
 private:
 	/// @brief Fills every twiddle table below from m_w / m_q / m_degree.
-	/// TODO(port): implement in src/ntt/ntt.cpp.
 	void ComputeRootOfUnityPowers();
 
 	uint64_t m_degree;  // N: size of NTT transform, should be power of 2
@@ -365,6 +364,13 @@ private:
 	AlignedVector64<uint32_t> m_rvv32_precon_root_of_unity_powers;
 	AlignedVector64<uint32_t> m_rvv32_inv_root_of_unity_powers;
 	AlignedVector64<uint32_t> m_rvv32_precon_inv_root_of_unity_powers;
+
+	// rvv-hexl: twiddle layouts of the small-span NTT strategies configured in
+	// src/util/rvv-config.hpp (an NttSmallSpanSet, src/ntt/ntt-rvv-small-span.hpp;
+	// type-erased to keep RVV types out of this header). Null without RVV, for
+	// the PerBlock strategy, or when N is too small for the strategy. Immutable
+	// once built, so copies of the NTT object share it.
+	std::shared_ptr<const void> m_rvv_small_span;
 };
 
 }  // namespace hexl

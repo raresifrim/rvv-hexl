@@ -102,6 +102,12 @@ inline size_t SetVl(size_t n) {
 	}
 }
 
+/// @brief VLMAX of lane type V (vsetvl with the largest AVL).
+template <class V>
+inline size_t VlMax() {
+	return SetVl<V>(~size_t{0});
+}
+
 /// @brief Unit-stride load of vl elements as lane type V (e64 from uint64_t).
 template <class V>
 inline V Load(const uint64_t* p, size_t vl) {
@@ -222,7 +228,7 @@ inline V BarrettReduce(V x, uint64_t q, uint64_t q_barr, size_t vl) {
 	//now we can compute Q*q using the standar vmul as we know this will never overflow the data type
 	//Q = __riscv_vmul(Q, q, vl);
 	//Q = __riscv_vsub(x, Q, vl);
-	Q = __riscv_vnmsac(x, q, Q, vl); //= x - q*Q in one instruction with better measured performance 
+	Q = __riscv_vnmsac(x, q, Q, vl); //= x - q*Q in one instruction with better measured performance
 	if constexpr (OutputModFactor == 1){
 		return ReduceFromTwice(Q, q, vl);
 	}
@@ -237,7 +243,7 @@ inline V MulModShoupLazy(V x, V y, V y_precon, uint64_t q, size_t vl) {
 	static_assert(IsE64<V>, "rvv::MulModShoupLazy takes e64 vectors; use MulModShoupLazy32 for e32");
 	V Q = __riscv_vmulhu(x, y_precon, vl);
 	V r = __riscv_vnmsac(__riscv_vmul(x, y, vl), q, Q, vl);  // x*y - q*Q: the multiply-subtract in one instruction
-	return r; 
+	return r;
 }
 
 
@@ -247,7 +253,7 @@ inline V MulModShoupLazy(V x, uint64_t y, uint64_t y_precon, uint64_t q, size_t 
 	static_assert(IsE64<V>, "rvv::MulModShoupLazy takes e64 vectors; use MulModShoupLazy32 for e32");
 	V Q = __riscv_vmulhu(x, y_precon, vl);
 	V r = __riscv_vnmsac(__riscv_vmul(x, y, vl), q, Q, vl);  // x*y - q*Q: the multiply-subtract in one instruction
-	return r; 
+	return r;
 }
 
 
@@ -299,14 +305,14 @@ inline V MulModBarrett(V a, V b, uint64_t q, uint64_t mu, uint64_t shift, size_t
 			__riscv_vsrl(lo, shift, vl),
 			__riscv_vsll(hi, 64-shift, vl),
 			vl
-			); 
+			);
 
 	V Q = __riscv_vmulhu(c, mu, vl);
 
 	V r = __riscv_vnmsac(lo, q, Q, vl);  // lo - q*Q in one instruction (8-33% faster than vmul + vsub, measured)
 
 	return __riscv_vminu(
-			r, 
+			r,
 			__riscv_vsub(r, q, vl),
 			vl);
 }
@@ -447,9 +453,9 @@ inline V BarrettReduce32(V x, uint32_t q, uint32_t q_barr, size_t vl) {
 	//now we can compute Q*q using the standar vmul as we know this will never overflow the data type
 	//Q = __riscv_vmul(Q, q, vl);
 	//Q = __riscv_vsub(x, Q, vl);
-	Q = __riscv_vnmsac(x, q, Q, vl); 
+	Q = __riscv_vnmsac(x, q, Q, vl);
 	if constexpr (OutputModFactor == 1){
-		return __riscv_vminu(Q, __riscv_vsub(Q, q, vl), vl);	
+		return __riscv_vminu(Q, __riscv_vsub(Q, q, vl), vl);
 	}
 	return Q;
 }
@@ -461,7 +467,7 @@ inline V MulModShoupLazy32(V x, V y, V y_precon, uint32_t q, size_t vl) {
 	static_assert(IsE32<V>, "rvv::MulModShoupLazy32 takes e32 vectors; use MulModShoupLazy for e64");
 	V Q = __riscv_vmulhu(x, y_precon, vl);
 	V r = __riscv_vnmsac(__riscv_vmul(x, y, vl), q, Q, vl);  // x*y - q*Q: the multiply-subtract in one instruction
-	return r; 
+	return r;
 }
 
 /// @brief Same, with a scalar multiplier broadcast to every lane (y < q,
@@ -515,14 +521,14 @@ inline V MulModBarrett32(V a, V b, uint32_t q, uint32_t mu, uint32_t shift, size
 			__riscv_vsrl(lo, shift, vl),
 			__riscv_vsll(hi, 32-shift, vl),
 			vl
-			); 
+			);
 
 	V Q = __riscv_vmulhu(c, mu, vl);
 
 	V r = __riscv_vnmsac(lo, q, Q, vl);  // lo - q*Q in one instruction (8-33% faster than vmul + vsub, measured)
 
 	r = __riscv_vminu(
-			r, 
+			r,
 			__riscv_vsub(r, q, vl),
 			vl);
 
@@ -530,9 +536,45 @@ inline V MulModBarrett32(V a, V b, uint32_t q, uint32_t mu, uint32_t shift, size
 		return r;
 	else
 		return __riscv_vminu(
-				r, 
+				r,
 				__riscv_vsub(r, q, vl),
 				vl);
+}
+
+
+/// @brief Full modular multiply and add of three 32-bit vectors, a, b, c < q < 2^30. Returns [0, q).
+/// Same pre-shift Barrett as the e64 MulModBarrett, at 32-bit words, with
+/// n = bit length of q (n <= 30):
+///   shift = n - 2,   mu = floor(2^(n+30) / q)
+///                       = MultiplyFactor(1 << shift, 32, q).BarrettFactor()
+/// The kernel computes both ONCE per call (a single 64-bit divu here).
+template <class V>
+inline V MulAddModBarrett32(V a, V b, V c, uint32_t q, uint32_t mu, uint32_t shift, size_t vl) {
+	static_assert(IsE32<V>, "rvv::MulAddModBarrett32 takes e32 vectors");
+	V hi, lo;
+	hi = __riscv_vmulhu(a, b, vl);
+	lo = __riscv_vmul(a, b, vl);
+
+	V d = __riscv_vor(
+			__riscv_vsrl(lo, shift, vl),
+			__riscv_vsll(hi, 32-shift, vl),
+			vl
+			);
+
+	V Q = __riscv_vmulhu(d, mu, vl);
+
+	V r = __riscv_vnmsac(__riscv_vadd(lo, c, vl), q, Q, vl);
+
+	r = __riscv_vminu(
+			r,
+			__riscv_vsub(r, 2*q, vl),
+			vl);
+
+	return __riscv_vminu(
+			r,
+			__riscv_vsub(r, q, vl),
+			vl);
+
 }
 
 

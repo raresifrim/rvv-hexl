@@ -37,6 +37,24 @@
 namespace intel {
 namespace hexl {
 namespace rvv {
+
+// Small-span NTT strategies: how the stages with span t < VLMAX (butterfly
+// partners closer than one register) are vectorized. Large-span stages are
+// the same for all three. Layouts and contracts: src/ntt/ntt-rvv-small-span.hpp.
+namespace ntt {
+/// Each block's t butterflies as one strip with vl = t (the first-version
+/// kernels): no extra tables, but the register is underfilled.
+struct PerBlock {};
+/// Load VL contiguous elements once, run every small stage in the register
+/// with vslidedown / vslideup / vmerge and per-lane twiddles, store once.
+/// Contiguous access only; needs N >= 2 VL. Measured best on the A100.
+struct FusedSlides {};
+/// Strided transpose into N words of scratch so that butterfly partners
+/// share a lane across rows, plain row butterflies with per-lane twiddles,
+/// transpose back. Needs N >= VL^2. Measured best on the X100.
+struct Transposed {};
+}  // namespace ntt
+
 namespace cfg {
 
 using AddMod64 = vuint64m4_t;
@@ -54,12 +72,31 @@ using MultMod32 = vuint32m8_t;     // RVV32 on uint32_t storage, q < 2^30
 using MultMod32U64 = vuint32m4_t;  // RVV32 on uint64_t storage, q < 2^30 (<= m4)
 using FMAMod64 = vuint64m4_t;
 using FMAMod32 = vuint32m4_t;   // <= m4
-using Ntt64 = vuint64m4_t;
-using Ntt32 = vuint32m4_t;     // RVV32 NTT on uint32_t storage
-using Ntt32U64 = vuint32m4_t;  // RVV32 NTT on uint64_t storage (<= m4: narrowing load)
-			       // If the RVV32 twiddle layout depends on VL (e.g. twiddles replicated per lane),
-			       // NTT::ComputeRootOfUnityPowers must build it for these lane types: keep
-			       // Ntt32 and Ntt32U64 equal then, or make the layout VL-independent.
+				// EltwiseMultAddMod (rvv-hexl extension): m4. Three input streams plus the
+				// Barrett temporaries keep more groups live than MultMod; BM_Lanes_MultAddMod
+				// (2026-10-14): m4 best or within 2% on both clusters, m8 6-14% slower on the X100.
+using MultAddMod64 = vuint64m4_t;
+using MultAddMod32 = vuint32m4_t;     // RVV32 on uint32_t storage
+using MultAddMod32U64 = vuint32m4_t;  // RVV32 on uint64_t storage (<= m4)
+				      // NTT at m1 for now: with the per-block small-span strategy (below), stages
+				      // with span t < VLMAX run with vl = t, and a vector instruction costs about
+				      // the same however small vl is (more at higher LMUL). Measured (forward,
+				      // N=4096 e64 / N=1024 e32, X100): RVV64 m1 125 us vs m4 210 us; RVV32 m1
+				      // 16.5 us vs m4 26.4 us. Revisit with the fused-slides / transposed
+				      // strategies: the layout study measured both best at m4.
+using Ntt64 = vuint64m1_t;
+using Ntt32 = vuint32m1_t;     // RVV32 NTT on uint32_t storage
+using Ntt32U64 = vuint32m1_t;  // RVV32 NTT on uint64_t storage (<= m4: narrowing load)
+
+// How the small-span NTT stages (span t < VLMAX of the lane type) run; see
+// rvv::ntt above and src/ntt/ntt-rvv-small-span.hpp. One for the RVV64
+// kernels, one for both RVV32 kernels (both storage words).
+// NTT::ComputeRootOfUnityPowers builds the twiddle layout of the strategy
+// chosen here, for the lane types above (Ntt32 and Ntt32U64 get one layout
+// each when their VLMAX differs). Tests and BM_Lanes_Ntt* run all three.
+// PerBlock until the other two have bodies (their stubs run PerBlock).
+using NttSmallSpan64 = ntt::PerBlock;
+using NttSmallSpan32 = ntt::PerBlock;
 
 }  // namespace cfg
 

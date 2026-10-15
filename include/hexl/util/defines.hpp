@@ -32,3 +32,6 @@
 // uint32_t overloads of the NTT and eltwise functions, for OpenFHE built with
 // NATIVE_SIZE=32 (see third_party/patches/openfhe-hexl-wordsize.py).
 #define HEXL_RVV_HAS_32BIT_API 1
+// EltwiseMultAddMod: (a * b + c) mod q on three vectors, both storage words
+// (include/hexl/eltwise/eltwise-mult-add-mod.hpp).
+#define HEXL_RVV_HAS_MULT_ADD_MOD 1

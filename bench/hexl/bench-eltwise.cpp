@@ -129,6 +129,39 @@ static void BM_EltwiseMultMod(benchmark::State& state) {
 ->ArgsProduct({{1024, 4096, 16384}, {27, 60}, {0, 1}})
 	->ArgNames({"n", "qbits", "add"});
 
+#ifdef HEXL_RVV_HAS_MULT_ADD_MOD
+	// ---- vector multiply-add (rvv-hexl extension; binfhe's accumulation) --------
+	// acc = (a * b + acc) mod q in one call, against the two calls OpenFHE makes
+	// without it (EltwiseMultMod into a temporary, then EltwiseAddMod).
+	static void BM_EltwiseMultAddMod(benchmark::State& state) {
+		const uint64_t n = state.range(0), q = Prime(state.range(1), 1);
+		Vec a = Random(n, q), b = Random(n, q), acc = Random(n, q);
+		HEXL_BENCH_PROBE(state, EltwiseMultAddMod(acc.data(), a.data(), b.data(), acc.data(), n, q, 1));
+		for (auto _ : state) {
+			EltwiseMultAddMod(acc.data(), a.data(), b.data(), acc.data(), n, q, 1);
+			benchmark::ClobberMemory();
+		}
+		SetBytes(state, n, 4);
+	}
+	BENCHMARK(BM_EltwiseMultAddMod)
+->ArgsProduct({{1024, 4096, 16384}, {27, 50, 60}})
+	->ArgNames({"n", "qbits"});
+
+	static void BM_EltwiseMultModThenAddMod(benchmark::State& state) {
+		const uint64_t n = state.range(0), q = Prime(state.range(1), 1);
+		Vec a = Random(n, q), b = Random(n, q), acc = Random(n, q), tmp(n);
+		for (auto _ : state) {
+			EltwiseMultMod(tmp.data(), a.data(), b.data(), n, q, 1);
+			EltwiseAddMod(acc.data(), acc.data(), tmp.data(), n, q);
+			benchmark::ClobberMemory();
+		}
+		SetBytes(state, n, 6);
+	}
+	BENCHMARK(BM_EltwiseMultModThenAddMod)
+->ArgsProduct({{1024, 4096, 16384}, {27, 50, 60}})
+	->ArgNames({"n", "qbits"});
+#endif
+
 	// ---- reductions -------------------------------------------------------------
 	static void BM_EltwiseReduceMod(benchmark::State& state) {
 		const uint64_t n = state.range(0), q = Prime(state.range(1), 1);
@@ -205,4 +238,34 @@ BENCHMARK(BM_EltwiseMultMod32)
 	}
 BENCHMARK(BM_EltwiseFMAMod32)
 	->ArgsProduct({{1024, 4096, 16384}, {27}, {0, 1}})->ArgNames({"n", "qbits", "add"});
+
+#ifdef HEXL_RVV_HAS_MULT_ADD_MOD
+	static void BM_EltwiseMultAddMod32(benchmark::State& state) {
+		const uint64_t n = state.range(0), q = Prime(state.range(1), 1);
+		auto a = RandomW<uint32_t>(n, q), b = RandomW<uint32_t>(n, q), acc = RandomW<uint32_t>(n, q);
+		HEXL_BENCH_PROBE(state, EltwiseMultAddMod(acc.data(), a.data(), b.data(), acc.data(), n, q, 1));
+		for (auto _ : state) {
+			EltwiseMultAddMod(acc.data(), a.data(), b.data(), acc.data(), n, q, 1);
+			benchmark::ClobberMemory();
+		}
+		state.SetBytesProcessed(static_cast<int64_t>(state.iterations() * n * 4 * 4));
+		state.SetItemsProcessed(static_cast<int64_t>(state.iterations() * n));
+	}
+BENCHMARK(BM_EltwiseMultAddMod32)
+	->ArgsProduct({{1024, 4096, 16384}, {27}})->ArgNames({"n", "qbits"});
+
+	static void BM_EltwiseMultModThenAddMod32(benchmark::State& state) {
+		const uint64_t n = state.range(0), q = Prime(state.range(1), 1);
+		auto a = RandomW<uint32_t>(n, q), b = RandomW<uint32_t>(n, q), acc = RandomW<uint32_t>(n, q), tmp = acc;
+		for (auto _ : state) {
+			EltwiseMultMod(tmp.data(), a.data(), b.data(), n, q, 1);
+			EltwiseAddMod(acc.data(), acc.data(), tmp.data(), n, q);
+			benchmark::ClobberMemory();
+		}
+		state.SetBytesProcessed(static_cast<int64_t>(state.iterations() * n * 4 * 6));
+		state.SetItemsProcessed(static_cast<int64_t>(state.iterations() * n));
+	}
+BENCHMARK(BM_EltwiseMultModThenAddMod32)
+	->ArgsProduct({{1024, 4096, 16384}, {27}})->ArgNames({"n", "qbits"});
+#endif
 #endif

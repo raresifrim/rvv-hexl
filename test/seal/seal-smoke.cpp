@@ -4,7 +4,7 @@
 // seal-smoke: end-to-end correctness check for one SEAL build (`make seal-check`).
 //
 // With SEAL_USE_INTEL_HEXL, SEAL sends every call below to HEXL (i.e. to rvv-hexl),
-// with no per-call fallback (see docs/PORTING_GUIDE.md, "SEAL"):
+// with no per-call fallback:
 //   NTT forward (lazy 4->4, 4->1) and inverse (2->2, 2->1)   seal/util/ntt.cpp
 //   EltwiseAddMod / EltwiseSubMod (vector and scalar)         seal/util/polyarithsmallmod.cpp
 //   EltwiseMultMod (input factor 4), EltwiseFMAMod (nullptr addend, input factor 8),

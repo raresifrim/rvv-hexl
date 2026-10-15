@@ -1,9 +1,10 @@
 // Copyright (C) 2026 IPCEI-NXP A14 team (RISC-V port)
 // SPDX-License-Identifier: Apache-2.0
 //
-// hexl/eltwise: all seven public functions, every size tail, every modulus
-// class, every input/output mod factor, out-of-place AND in-place (OpenFHE
-// calls almost everything with result == operand1).
+// hexl/eltwise: all seven public functions, plus the rvv-hexl extension
+// EltwiseMultAddMod, every size tail, every modulus class, every input/output
+// mod factor, out-of-place AND in-place (OpenFHE calls almost everything with
+// result == operand1).
 //
 // Every test is a template on the storage word. Eltwise_<Op> runs it with
 // uint64_t (the upstream API; validated against Intel HEXL); Eltwise_<Op>_32
@@ -296,6 +297,43 @@ void RunSwitchModulusPattern() {
 	}
 }
 
+#ifdef HEXL_RVV_HAS_MULT_ADD_MOD
+/// EltwiseMultAddMod (rvv-hexl extension): (a * b + c) mod q, every input in
+/// [0, imf * q), every aliasing pattern OpenFHE can produce (result == a,
+/// result == b, accumulation result == c).
+template <typename Word>
+void RunMultAddMod() {
+	for (uint64_t imf : {1ULL, 2ULL, 4ULL}) {
+		// same bounds as EltwiseMultMod
+		auto ok = [imf](uint64_t q) {
+			return Is32<Word>() ? q <= (1ULL << 32) / imf
+				: q < (1ULL << 61) && imf * q < (1ULL << 63);
+		};
+		for (uint64_t q : Moduli(ok)) {
+			for (size_t n : O::EltwiseSizes()) {
+				auto a64 = O::Random(n, imf * q), b64 = O::Random(n, imf * q), c64 = O::Random(n, imf * q);
+				a64[0] = imf * q - 1; b64[0] = imf * q - 1; c64[0] = imf * q - 1;  // largest a * b + c
+				std::vector<Word> want(n);
+				for (size_t i = 0; i < n; ++i)
+					want[i] = static_cast<Word>(O::AddMod(O::MulMod(a64[i], b64[i], q), c64[i] % q, q));
+				const auto a = O::As<Word>(a64), b = O::As<Word>(b64), c = O::As<Word>(c64);
+				// out of place, and result == arg1
+				CheckBothWays(want, a, [&](Word* r, const Word* x) {
+						EltwiseMultAddMod(r, x, b.data(), c.data(), n, q, imf); }, "MultAddMod", q);
+				// result == arg2
+				auto b2 = b;
+				EltwiseMultAddMod(b2.data(), a.data(), b2.data(), c.data(), n, q, imf);
+				CHECK_VEC_EQ(want, b2, << "MultAddMod result==arg2 n=" << n << " q=" << q << " imf=" << imf);
+				// result == arg3: the accumulation acc += a * b
+				auto c2 = c;
+				EltwiseMultAddMod(c2.data(), a.data(), b.data(), c2.data(), n, q, imf);
+				CHECK_VEC_EQ(want, c2, << "MultAddMod result==arg3 n=" << n << " q=" << q << " imf=" << imf);
+			}
+		}
+	}
+}
+#endif
+
 }  // namespace
 
 TEST(Eltwise_AddMod) { RunAddSub<uint64_t>(true); }
@@ -306,6 +344,9 @@ TEST(Eltwise_ReduceMod) { RunReduceMod<uint64_t>(); }
 TEST(Eltwise_CmpAdd) { RunCmpAdd<uint64_t>(); }
 TEST(Eltwise_CmpSubMod) { RunCmpSubMod<uint64_t>(); }
 TEST(Eltwise_OpenFHESwitchModulusPattern) { RunSwitchModulusPattern<uint64_t>(); }
+#ifdef HEXL_RVV_HAS_MULT_ADD_MOD
+TEST(Eltwise_MultAddMod) { RunMultAddMod<uint64_t>(); }
+#endif
 
 #ifdef HEXL_RVV_HAS_32BIT_API
 TEST(Eltwise_AddMod_32) { RunAddSub<uint32_t>(true); }
@@ -316,4 +357,7 @@ TEST(Eltwise_ReduceMod_32) { RunReduceMod<uint32_t>(); }
 TEST(Eltwise_CmpAdd_32) { RunCmpAdd<uint32_t>(); }
 TEST(Eltwise_CmpSubMod_32) { RunCmpSubMod<uint32_t>(); }
 TEST(Eltwise_OpenFHESwitchModulusPattern_32) { RunSwitchModulusPattern<uint32_t>(); }
+#ifdef HEXL_RVV_HAS_MULT_ADD_MOD
+TEST(Eltwise_MultAddMod_32) { RunMultAddMod<uint32_t>(); }
+#endif
 #endif
