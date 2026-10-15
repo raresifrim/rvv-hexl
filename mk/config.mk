@@ -130,8 +130,17 @@ PREFIX   ?= $(BUILDDIR)/install
 CXXSTD   := -std=c++17
 WARN     := -Wall -Wextra -Wno-unused-parameter
 PIC      := $(if $(BAREMETAL),,-fPIC)
+# Code alignment, off by default. On the X100 the same scalar loop measured ~20%
+# slower or faster depending only on where it landed (EltwiseMultAddModNative 5.2 vs
+# 4.24 ns/element, 2026-10-14), so a tight loop's timing can move when unrelated code
+# changes. Aligning everything does not fix that, it reshuffles it (bench-hexl, 183
+# eltwise/NTT benchmarks, 2026-10-14, -falign-functions=64 -falign-loops=64 vs none):
+# X100 RVV 1.00x, X100 scalar 1.02x (37 faster, 65 slower), A100 RVV 0.97x (72 slower,
+# RVV32 NTT 0.89x), A100 scalar 1.00x; .text +41%. To try it:
+#   make ALIGN_FLAGS="-falign-functions=64 -falign-loops=64"
+ALIGN_FLAGS ?=
 CXXFLAGS ?=
-CXXFLAGS += $(CXXSTD) $(OPT_FLAGS) $(ISA_FLAGS) $(WARN) $(PIC) -MMD -MP
+CXXFLAGS += $(CXXSTD) $(OPT_FLAGS) $(ISA_FLAGS) $(ALIGN_FLAGS) $(WARN) $(PIC) -MMD -MP
 LDFLAGS  ?=
 LDLIBS   ?=
 ifeq ($(BAREMETAL),)

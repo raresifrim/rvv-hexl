@@ -121,6 +121,7 @@ void EltwiseSubMod(uint32_t* result, const uint32_t* operand1,
 template <typename Word>
 void EltwiseSubModNative(Word* result, const Word* operand1, const Word* operand2,
 		uint64_t n, uint64_t modulus) {
+#pragma GCC novector
 	for(uint64_t i=0; i<n; ++i){
 		uint64_t diff = (uint64_t)operand1[i] - operand2[i];
 		result[i] = (Word)std::min(diff, diff + modulus);
@@ -130,7 +131,7 @@ void EltwiseSubModNative(Word* result, const Word* operand1, const Word* operand
 template <typename Word>
 void EltwiseSubModNative(Word* result, const Word* operand1, uint64_t operand2,
 		uint64_t n, uint64_t modulus) {
-
+#pragma GCC novector
 	for(uint64_t i=0; i<n; ++i){
 		uint64_t diff = (uint64_t)operand1[i] - operand2;
 		result[i] = (Word)std::min(diff, diff + modulus);

@@ -73,36 +73,43 @@ void EltwiseCmpAddNative(Word* result, const Word* operand1, uint64_t n, CMPINT 
 		uint64_t bound, uint64_t diff) {
 	switch (cmp) {
 		case CMPINT::EQ:
+#pragma GCC novector
 			for (uint64_t i = 0; i < n; ++i) {
 				result[i] = CmpAddOne<Word>(operand1[i], operand1[i] == bound, diff);
 			}
 			break;
 		case CMPINT::LT:
+#pragma GCC novector
 			for (uint64_t i = 0; i < n; ++i) {
 				result[i] = CmpAddOne<Word>(operand1[i], operand1[i] < bound, diff);
 			}
 			break;
 		case CMPINT::LE:
+#pragma GCC novector
 			for (uint64_t i = 0; i < n; ++i) {
 				result[i] = CmpAddOne<Word>(operand1[i], operand1[i] <= bound, diff);
 			}
 			break;
 		case CMPINT::NE:
+#pragma GCC novector
 			for (uint64_t i = 0; i < n; ++i) {
 				result[i] = CmpAddOne<Word>(operand1[i], operand1[i] != bound, diff);
 			}
 			break;
 		case CMPINT::NLT:
+#pragma GCC novector
 			for (uint64_t i = 0; i < n; ++i) {
 				result[i] = CmpAddOne<Word>(operand1[i], operand1[i] >= bound, diff);
 			}
 			break;
 		case CMPINT::NLE:
+#pragma GCC novector
 			for (uint64_t i = 0; i < n; ++i) {
 				result[i] = CmpAddOne<Word>(operand1[i], operand1[i] > bound, diff);
 			}
 			break;
 		case CMPINT::TRUE:
+#pragma GCC novector
 			for (uint64_t i = 0; i < n; ++i) {
 				result[i] = CmpAddOne<Word>(operand1[i], true, diff);
 			}
@@ -111,6 +118,7 @@ void EltwiseCmpAddNative(Word* result, const Word* operand1, uint64_t n, CMPINT 
 			// no element changes: copy only when not in place (a pointer compare,
 			// one instruction; in place the call does no memory traffic at all)
 			if (result != operand1) {
+#pragma GCC novector
 				for (uint64_t i = 0; i < n; ++i) {
 					result[i] = operand1[i];
 				}
@@ -118,6 +126,7 @@ void EltwiseCmpAddNative(Word* result, const Word* operand1, uint64_t n, CMPINT 
 			break;
 		default:
 			// not a valid CMPINT; the scalar Compare() treats unknown values as TRUE
+#pragma GCC novector
 			for (uint64_t i = 0; i < n; ++i) {
 				result[i] = CmpAddOne<Word>(operand1[i], true, diff);
 			}

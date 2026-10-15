@@ -121,6 +121,7 @@ void EltwiseAddMod(uint32_t* result, const uint32_t* operand1,
 template <typename Word>
 void EltwiseAddModNative(Word* result, const Word* operand1, const Word* operand2,
 		uint64_t n, uint64_t modulus) {
+#pragma GCC novector
 	for(uint64_t i=0; i<n; ++i){
 		//for 64-bit operands the modulus is actually 63-bits or less, so adding the operands will not overflow over 64-bits
 		//for 32-bits we need a bigger data type, so we can use the same uint64_t data type 
@@ -135,6 +136,7 @@ template <typename Word>
 void EltwiseAddModNative(Word* result, const Word* operand1, uint64_t operand2,
 		uint64_t n, uint64_t modulus) {
 	//same as above
+#pragma GCC novector
 	for(uint64_t i=0; i<n; ++i){
 		uint64_t sum = (uint64_t)operand1[i] + operand2;
 		result[i] = (Word)std::min(sum, sum - modulus);

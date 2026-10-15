@@ -8,6 +8,7 @@
 #   make rvv-hexl-install     headers, libs, CMake + pkg-config files -> PREFIX     alias: install
 #       ISA=rvv|scalar (auto-detected on RISC-V, see mk/detect-riscv.sh)  BUILD=release|debug  PREFIX=...
 #       HEXL_SHARED_LIB / HEXL_TESTING / HEXL_BENCHMARK=ON|OFF   (upstream option names)
+#       ALIGN_FLAGS=...   extra code-alignment flags (default none, see mk/config.mk)
 #
 # ---- OpenFHE ------------------------------------------------------------------
 #   make openfhe              build OpenFHE v1.5.1
@@ -38,7 +39,7 @@
 #   make ISA=scalar ...       any of the above, RISC-V without V (the no-RVV baseline)
 #   make CROSS=riscv64-unknown-elf- RISCV_MARCH=rv64gcv RUN="spike --isa=rv64gcv pk" test
 #
-# See README.md and docs/PORTING_GUIDE.md.
+# See README.md.
 
 include mk/config.mk
 
@@ -57,7 +58,7 @@ LIB_SRCS := $(sort $(wildcard src/*/*.cpp))
 LIB_OBJS := $(patsubst src/%.cpp,$(OBJDIR)/lib/%.o,$(LIB_SRCS))
 LIB_A    := $(LIBDIR)/libhexl.a
 LIB_SO   := $(LIBDIR)/libhexl.$(SHLIB_EXT)
-LIB_CPPFLAGS := -Iinclude -Isrc -DHEXL_BUILD_FLAGS='"$(strip $(OPT_FLAGS) $(ISA_FLAGS))"'
+LIB_CPPFLAGS := -Iinclude -Isrc -DHEXL_BUILD_FLAGS='"$(strip $(OPT_FLAGS) $(ISA_FLAGS) $(ALIGN_FLAGS))"'
 
 TEST_SRCS := $(sort $(wildcard test/*.cpp))
 # tests and bench-lanes.cpp use internal headers (src/util/rvv-util.hpp, the eltwise kernels)
