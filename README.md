@@ -11,8 +11,10 @@ baseline.
 **Status: complete.** Every function of the Intel HEXL 1.2.6 API is implemented: scalar number
 theory, the native kernels and the RVV kernels for all seven eltwise operations and the NTT
 (forward and inverse, 64- and 32-bit lanes). The RVV NTT kernels are a first version whose
-small-span stages (span below the vector length) still run underfilled; see
-[docs/PORTING_GUIDE.md](docs/PORTING_GUIDE.md).
+small-span stages (span below the vector length) still run underfilled; two strategies for them,
+fused slides and a transposed layout, are selectable in `src/util/rvv-config.hpp` (layouts and
+contract in `src/ntt/ntt-rvv-small-span.hpp`), with stub bodies for now.
+Ideas beyond the drop-in API are collected in [docs/FUTURE_WORK.md](docs/FUTURE_WORK.md).
 
 ```
 OpenFHE (NATIVE_SIZE 64|32) ── openfhe-hexl HAL ──┐
@@ -55,7 +57,7 @@ include/hexl/        PUBLIC API, source-identical to Intel HEXL 1.2.6 (+ RVV tab
 src/number-theory/   scalar modular arithmetic (primes, roots, inverses)
 src/eltwise/         7 elementwise ops: <op>.cpp = entry + dispatch + native,
                      <op>-rvv.cpp = RVV kernels
-src/ntt/             NTT class (ntt.cpp), native radix-2, RVV kernels
+src/ntt/             NTT class (ntt.cpp), native radix-2, RVV kernels (ntt-rvv*: stages, small-span strategies)
 src/util/            CPU detection, RVV helpers (rvv-util.hpp), lane types (rvv-config.hpp)
 test/                self-contained tests with independent __int128 oracles
 test/seal/           seal-smoke.cpp: end-to-end SEAL check (make seal-check)
@@ -66,7 +68,7 @@ bench/seal/          IPCEI SEAL benches (verbatim from ZKP+FHE Research @9d51ffd
 bench/run.sh         benchmark matrix runner (ISA x OpenFHE/SEAL variant x RVV on/off x cluster)
 third_party/         OpenFHE / openfhe-hexl / SEAL / Google Benchmark build scripts
 cmake/               HEXLConfig.cmake: lets OpenFHE and SEAL find this library as "HEXL 1.2.6"
-docs/                PORTING_GUIDE.md: every class and interface, what to implement
+docs/                FUTURE_WORK.md: ideas beyond the drop-in API
 docs/rvv_intrinsics/ all RVA23 RVV intrinsics + searchable index, local only (make rvv-intrinsics-doc)
 docs/tools/          scripts that fetch and index docs/rvv_intrinsics
 ```
@@ -134,7 +136,7 @@ code, and its incremental rebuild picks up the change.
 Developing against SEAL: `libseal` is static and does not embed HEXL, so the smoke test and the
 SEAL benches link `libhexl` themselves. After changing a kernel, `make rvv-hexl-install &&
 make seal-check WITH_RVV_HEXL=ON` is enough; after a public-header change, rerun `make seal
-WITH_RVV_HEXL=ON`. What SEAL calls, and with which arguments, is in the porting guide, section 7.
+WITH_RVV_HEXL=ON`. What SEAL calls, and with which arguments, is listed at the top of `test/seal/seal-smoke.cpp`.
 
 Runtime switch: `HEXL_DISABLE_RVV=1` forces the native kernels in an RVV build (the counterpart
 of upstream's `HEXL_DISABLE_AVX512DQ`).
@@ -252,5 +254,15 @@ prebuilt route, with `INTEL_HEXL_HINT_DIR` pointing at the rvv-hexl install.
 * Upstream's HEXL backend only works at `NATIVE_SIZE=64`: it casts coefficient vectors to
   `uint64_t*`. rvv-hexl adds a `uint32_t` API (`HEXL_RVV_HAS_32BIT_API`), and
   `third_party/patches/openfhe-hexl-wordsize.py` makes the overlay use OpenFHE's own word type,
-  so `WITH_RVV_HEXL=ON` also works at `NATIVE_SIZE=32`. See the porting guide, section 1.
+  so `WITH_RVV_HEXL=ON` also works at `NATIVE_SIZE=32`.
+* The overlay routes only OpenFHE's NTTs, multiplications and modulus switches to HEXL.
+  `third_party/patches/openfhe-hexl-add.py` and `openfhe-hexl-sub.py` also route its additions
+  and subtractions, and `openfhe-binfhe-keyswitch.py` turns binfhe's LWE key switching into
+  vector subtractions (results: `results/hexl-sub-2026-10-14/REPORT.md`, local).
+* `EltwiseMultAddMod` (`HEXL_RVV_HAS_MULT_ADD_MOD`, both storage words) is an rvv-hexl extension:
+  `(a * b + c) mod q` on three vectors in one pass, for binfhe's accumulation
+  (`acc += digit * key`): 1.05-1.33x faster than `EltwiseMultMod` + `EltwiseAddMod` (RVV),
+  1.09-1.22x scalar. `openfhe-hexl-multadd.py` and `openfhe-binfhe-multadd.py` make binfhe's
+  external products call it when OpenFHE is staged with `OPENFHE_HEXL_MULADD=1` (default 0:
+  the two calls, as before).
 * License: Apache-2.0, as upstream Intel HEXL (the public headers derive from it).

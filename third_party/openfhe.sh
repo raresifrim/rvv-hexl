@@ -30,6 +30,16 @@
 #     after staging, patches/openfhe-hexl-wordsize.py rewrites those casts to OpenFHE's
 #     BasicInteger (identical code at 64; rvv-hexl's uint32_t API at 32) and fixes the
 #     overlay's riscv64 MultD branch, which does not compile at NATIVE_SIZE=32.
+#   * patches/openfhe-hexl-add.py sets the overlay's HEXL_ADD_ENABLE to 1, so OpenFHE's
+#     modular additions go to rvv-hexl too (upstream routes only the multiplications).
+#   * patches/openfhe-hexl-sub.py routes the subtractions (NativeVector ModSub/ModSubEq, which
+#     every polynomial subtraction ends in) to EltwiseSubMod, behind a new HEXL_SUB_ENABLE;
+#     patches/openfhe-binfhe-keyswitch.py turns binfhe's LWE key-switching inner loop into
+#     one NativeVector::ModSubEq per key row, so it reaches EltwiseSubMod as well.
+#   * patches/openfhe-hexl-multadd.py adds NativeVector/NativePoly ModMulAddEq (acc += a * b),
+#     and patches/openfhe-binfhe-multadd.py makes binfhe's external products accumulate with it.
+#     OPENFHE_HEXL_MULADD=1 runs it as one rvv-hexl EltwiseMultAddMod call; the default 0 keeps
+#     the two calls it replaces (EltwiseMultMod + EltwiseAddMod) until the fused kernels win.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -128,6 +138,11 @@ stage_rvvhexl() {
   fi
   # idempotent: safe on an already staged (and patched) tree
   python3 "$HERE/patches/openfhe-hexl-wordsize.py" "$RVVHEXL_SRC"
+  python3 "$HERE/patches/openfhe-hexl-add.py" "$RVVHEXL_SRC"
+  python3 "$HERE/patches/openfhe-hexl-sub.py" "$RVVHEXL_SRC"
+  python3 "$HERE/patches/openfhe-binfhe-keyswitch.py" "$RVVHEXL_SRC"
+  python3 "$HERE/patches/openfhe-hexl-multadd.py" "$RVVHEXL_SRC"   # switch: OPENFHE_HEXL_MULADD=0|1
+  python3 "$HERE/patches/openfhe-binfhe-multadd.py" "$RVVHEXL_SRC"
 }
 
 # build_openfhe <src> <label> [extra cmake args...]
