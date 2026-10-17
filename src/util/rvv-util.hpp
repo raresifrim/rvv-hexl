@@ -382,6 +382,89 @@ inline void Store32(uint32_t* p, V32 v, size_t vl) {
 	__riscv_vse32(p, v, vl);
 }
 
+// ---------------------------------------------------------------------------
+// Strided load / store: lane k is p[k * stride], stride in elements (Words,
+// not bytes; negative and, for loads, zero allowed). The lane type V is a
+// template argument of the load and deduced for the store; the storage word
+// follows the pointer, as for Load / Load32:
+//   e64 lanes, uint64_t storage:  vlse64 / vsse64            V = u64m1..m8
+//   e32 lanes, uint32_t storage:  vlse32 / vsse32            V = u32mf2..m8
+//   e32 lanes, uint64_t storage:  vlse64 at twice V's LMUL + vncvt (load),
+//                                 vzext.vf2 + vsse64 (store) V = u32mf2..m4
+// Used by the Transposed small-span NTT (src/ntt/ntt-rvv-transposed.hpp).
+// Measured on the K3 (2026-10-15): X100 ~1 cycle per element, pipelined, at
+// any stride and LMUL; A100 17 cycles per element, serialized.
+// ---------------------------------------------------------------------------
+
+/// @brief Strided load of vl elements as lane type V from uint64_t storage
+/// (e64 lanes, or e32 lanes narrowed: see above).
+template <class V>
+inline V LoadStrided(const uint64_t* p, ptrdiff_t stride, size_t vl) {
+	const ptrdiff_t bs = stride * static_cast<ptrdiff_t>(sizeof(uint64_t));
+	if constexpr (IsE64<V>) {
+		if constexpr (std::is_same_v<V, vuint64m1_t>) {
+			return __riscv_vlse64_v_u64m1(p, bs, vl);
+		} else if constexpr (std::is_same_v<V, vuint64m2_t>) {
+			return __riscv_vlse64_v_u64m2(p, bs, vl);
+		} else if constexpr (std::is_same_v<V, vuint64m4_t>) {
+			return __riscv_vlse64_v_u64m4(p, bs, vl);
+		} else {
+			return __riscv_vlse64_v_u64m8(p, bs, vl);
+		}
+	} else {
+		static_assert(IsE32<V>, "rvv::LoadStrided<V>(const uint64_t*): V must be an e64 or e32 vector type");
+		if constexpr (std::is_same_v<V, vuint32mf2_t>) {
+			return __riscv_vncvt_x(__riscv_vlse64_v_u64m1(p, bs, vl), vl);
+		} else if constexpr (std::is_same_v<V, vuint32m1_t>) {
+			return __riscv_vncvt_x(__riscv_vlse64_v_u64m2(p, bs, vl), vl);
+		} else if constexpr (std::is_same_v<V, vuint32m2_t>) {
+			return __riscv_vncvt_x(__riscv_vlse64_v_u64m4(p, bs, vl), vl);
+		} else {
+			static_assert(std::is_same_v<V, vuint32m4_t>,
+					"rvv::LoadStrided from uint64_t storage: e32 V must be u32mf2..u32m4 (the e64 load needs twice the LMUL)");
+			return __riscv_vncvt_x(__riscv_vlse64_v_u64m8(p, bs, vl), vl);
+		}
+	}
+}
+/// @brief Strided load of vl elements as lane type V (e32) from uint32_t storage.
+template <class V>
+inline V LoadStrided(const uint32_t* p, ptrdiff_t stride, size_t vl) {
+	static_assert(IsE32<V>, "rvv::LoadStrided<V>(const uint32_t*): V must be vuint32mf2_t..m8_t");
+	const ptrdiff_t bs = stride * static_cast<ptrdiff_t>(sizeof(uint32_t));
+	if constexpr (std::is_same_v<V, vuint32mf2_t>) {
+		return __riscv_vlse32_v_u32mf2(p, bs, vl);
+	} else if constexpr (std::is_same_v<V, vuint32m1_t>) {
+		return __riscv_vlse32_v_u32m1(p, bs, vl);
+	} else if constexpr (std::is_same_v<V, vuint32m2_t>) {
+		return __riscv_vlse32_v_u32m2(p, bs, vl);
+	} else if constexpr (std::is_same_v<V, vuint32m4_t>) {
+		return __riscv_vlse32_v_u32m4(p, bs, vl);
+	} else {
+		return __riscv_vlse32_v_u32m8(p, bs, vl);
+	}
+}
+
+/// @brief Strided store of vl elements into uint64_t storage (e64 lanes, or
+/// e32 lanes zero-extended: see above).
+template <class V>
+inline void StoreStrided(uint64_t* p, ptrdiff_t stride, V v, size_t vl) {
+	const ptrdiff_t bs = stride * static_cast<ptrdiff_t>(sizeof(uint64_t));
+	if constexpr (IsE64<V>) {
+		__riscv_vsse64(p, bs, v, vl);
+	} else {
+		static_assert(IsE32<V>, "rvv::StoreStrided(uint64_t*, v): v must be an e64 or e32 vector");
+		static_assert(!std::is_same_v<V, vuint32m8_t>,
+				"rvv::StoreStrided to uint64_t storage: e32 v at most u32m4 (the e64 store needs twice the LMUL)");
+		__riscv_vsse64(p, bs, __riscv_vzext_vf2(v, vl), vl);
+	}
+}
+/// @brief Strided store of vl e32 elements into uint32_t storage.
+template <class V>
+inline void StoreStrided(uint32_t* p, ptrdiff_t stride, V v, size_t vl) {
+	static_assert(IsE32<V>, "rvv::StoreStrided(uint32_t*, v): v must be an e32 vector");
+	__riscv_vsse32(p, stride * static_cast<ptrdiff_t>(sizeof(uint32_t)), v, vl);
+}
+
 // The Add/Sub helpers below are LMUL-generic: V = vuint32mf2_t ... vuint32m8_t.
 
 /// @brief (a + b) mod q, 32-bit lanes.
@@ -577,6 +660,66 @@ inline V MulAddModBarrett32(V a, V b, V c, uint32_t q, uint32_t mu, uint32_t shi
 
 }
 
+
+// ---------------------------------------------------------------------------
+// NTT butterflies (Harvey, lazy), in place on two vectors x, y, for the
+// small-span tiles (src/ntt/ntt-rvv-transposed.hpp) and any other strip.
+// The twiddle is either a vector (per-lane twiddles, w and w_precon of type V)
+// or a scalar broadcast to every lane (uint64_t for e64, uint32_t for e32);
+// w < q, w_precon its Shoup factor floor(w * 2^SEW / q).
+// x and y are taken by reference and the helpers are always_inline: after
+// inlining they are plain SSA values, so the rows stay in vector registers. A
+// real call cannot pass an RVV value by reference except through memory, so
+// never drop the attribute.
+// ---------------------------------------------------------------------------
+
+/// @brief Forward (Cooley-Tukey) butterfly, e64 lanes:
+///   x' = x + w*y,  y' = x - w*y  (mod q), x, y in [0, 4q) in and out, q < 2^62.
+template <class V, class Tw>
+__attribute__((always_inline)) inline void FwdButterfly(V& x, V& y, Tw w, Tw w_precon, uint64_t q, size_t vl) {
+	static_assert(IsE64<V>, "rvv::FwdButterfly takes e64 vectors; use FwdButterfly32 for e32");
+	static_assert(std::is_same_v<Tw, V> || std::is_same_v<Tw, uint64_t>, "twiddle: a V vector or a uint64_t scalar");
+	const uint64_t q2 = 2 * q;
+	x = ReduceFromTwice(x, q2, vl);                       // [0, 2q)
+	const V t = MulModShoupLazy(y, w, w_precon, q, vl);   // w*y in [0, 2q)
+	y = __riscv_vadd(__riscv_vsub(x, t, vl), q2, vl);     // [0, 4q)
+	x = __riscv_vadd(x, t, vl);                           // [0, 4q)
+}
+
+/// @brief Inverse (Gentleman-Sande) butterfly, e64 lanes:
+///   x' = x + y,  y' = (x - y)*w  (mod q), x, y in [0, 2q) in and out, q < 2^62.
+template <class V, class Tw>
+__attribute__((always_inline)) inline void InvButterfly(V& x, V& y, Tw w, Tw w_precon, uint64_t q, size_t vl) {
+	static_assert(IsE64<V>, "rvv::InvButterfly takes e64 vectors; use InvButterfly32 for e32");
+	static_assert(std::is_same_v<Tw, V> || std::is_same_v<Tw, uint64_t>, "twiddle: a V vector or a uint64_t scalar");
+	const uint64_t q2 = 2 * q;
+	const V d = __riscv_vadd(__riscv_vsub(x, y, vl), q2, vl);   // [0, 4q)
+	x = ReduceFromTwice(__riscv_vadd(x, y, vl), q2, vl);        // [0, 2q)
+	y = MulModShoupLazy(d, w, w_precon, q, vl);                 // [0, 2q)
+}
+
+/// @brief Forward butterfly, e32 lanes, q < 2^30 (see FwdButterfly).
+template <class V, class Tw>
+__attribute__((always_inline)) inline void FwdButterfly32(V& x, V& y, Tw w, Tw w_precon, uint32_t q, size_t vl) {
+	static_assert(IsE32<V>, "rvv::FwdButterfly32 takes e32 vectors; use FwdButterfly for e64");
+	static_assert(std::is_same_v<Tw, V> || std::is_same_v<Tw, uint32_t>, "twiddle: a V vector or a uint32_t scalar");
+	const uint32_t q2 = 2 * q;
+	x = ReduceFromTwice32(x, q2, vl);
+	const V t = MulModShoupLazy32(y, w, w_precon, q, vl);
+	y = __riscv_vadd(__riscv_vsub(x, t, vl), q2, vl);
+	x = __riscv_vadd(x, t, vl);
+}
+
+/// @brief Inverse butterfly, e32 lanes, q < 2^30 (see InvButterfly).
+template <class V, class Tw>
+__attribute__((always_inline)) inline void InvButterfly32(V& x, V& y, Tw w, Tw w_precon, uint32_t q, size_t vl) {
+	static_assert(IsE32<V>, "rvv::InvButterfly32 takes e32 vectors; use InvButterfly for e64");
+	static_assert(std::is_same_v<Tw, V> || std::is_same_v<Tw, uint32_t>, "twiddle: a V vector or a uint32_t scalar");
+	const uint32_t q2 = 2 * q;
+	const V d = __riscv_vadd(__riscv_vsub(x, y, vl), q2, vl);
+	x = ReduceFromTwice32(__riscv_vadd(x, y, vl), q2, vl);
+	y = MulModShoupLazy32(d, w, w_precon, q, vl);
+}
 
 }  // namespace rvv
 }  // namespace hexl

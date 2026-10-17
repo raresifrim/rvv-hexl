@@ -234,6 +234,105 @@ void CheckSetVlLoadStore(const char* lane, size_t vlmax) {
 	}
 }
 
+/// rvv::LoadStrided / StoreStrided at lane type V on storage Word: lane k is
+/// p[k * stride] (elements; positive, negative, and zero for loads), at vl 1,
+/// about half of VLMAX and VLMAX; a store writes exactly those words. e32
+/// lanes on uint64_t storage carry values below 2^32 (as the NTT does).
+template <class V, typename Word>
+void CheckLoadStoreStrided(const char* lane) {
+	using E = rvv::ElemT<V>;
+	const size_t vlmax = rvv::VlMax<V>();
+	const uint64_t bound = rvv::IsE32<V> ? (uint64_t{1} << 32) : O::AnyWord<Word>();
+	const Word guard = static_cast<Word>(0xA5A5A5A5A5A5A5A5ULL);
+	for (ptrdiff_t stride : {1, 2, 3, 7, 512, -1, -3, 0}) {
+		for (size_t vl : {size_t{1}, vlmax / 2 + 1, vlmax}) {
+			const size_t mag = static_cast<size_t>(stride < 0 ? -stride : stride);
+			const size_t span = (vl - 1) * mag + 1;
+			const size_t base = stride < 0 ? span - 1 : 0;  // lane 0's word
+			const auto src = AsWord<Word>(O::Random(span, bound));
+			const V v = rvv::LoadStrided<V>(src.data() + base, stride, vl);
+			std::vector<E> got(vl);
+			rvv::Store(got.data(), v, vl);
+			std::vector<E> want(vl);
+			for (size_t k = 0; k < vl; ++k) want[k] = static_cast<E>(src[base + k * stride]);
+			CHECK_VEC_EQ(want, got, << "LoadStrided " << lane << " stride=" << stride << " vl=" << vl);
+			if (stride == 0) continue;  // a zero-stride store writes one word vl times
+			std::vector<Word> dst(span, guard), dwant(span, guard);
+			rvv::StoreStrided(dst.data() + base, stride, v, vl);
+			for (size_t k = 0; k < vl; ++k) dwant[base + k * stride] = static_cast<Word>(got[k]);
+			CHECK_VEC_EQ(dwant, dst, << "StoreStrided " << lane << " stride=" << stride << " vl=" << vl);
+		}
+	}
+}
+
+/// rvv::FwdButterfly / InvButterfly (and the 32 variants) at lane type V, with
+/// per-lane and broadcast twiddles, against the exact butterflies: outputs
+/// congruent and inside Harvey's lazy ranges (forward [0, 4q) in and out,
+/// inputs up to 4q - 1; inverse [0, 2q)).
+template <typename Word, class V>
+void CheckButterflies(const char* lane) {
+	using E = rvv::ElemT<V>;
+	constexpr bool k32 = rvv::IsE32<V>;
+	constexpr unsigned kBits = sizeof(E) * 8;
+	const size_t vl = rvv::VlMax<V>();
+	const std::vector<uint64_t> moduli = k32 ? std::vector<uint64_t>{O::NttPrime(19, 1024), O::Primes(1, 29, false, 1024)[0]}
+	: std::vector<uint64_t>{O::NttPrime(30, 1024), O::Primes(1, 61, false, 1024)[0]};
+	auto vec = [&](const std::vector<uint64_t>& a) { return rvv::Load<V>(AsWord<E>(a).data(), vl); };
+	auto out = [&](V v) { std::vector<E> r(vl); rvv::Store(r.data(), v, vl); return r; };
+	for (uint64_t q : moduli) {
+		for (int round = 0; round < 20; ++round) {
+			for (bool lanes : {true, false}) {  // per-lane twiddles, or one broadcast
+				const auto w = O::Random(vl, q);
+				std::vector<uint64_t> wp(vl);
+				for (size_t k = 0; k < vl; ++k) wp[k] = static_cast<uint64_t>((static_cast<unsigned __int128>(w[k]) << kBits) / q);
+				auto tw = [&](size_t k) { return lanes ? w[k] : w[0]; };
+				// forward
+				std::vector<uint64_t> x = O::Random(vl, 4 * q), y = O::Random(vl, 4 * q);
+				x[0] = 4 * q - 1;
+				y[0] = 4 * q - 1;
+				V X = vec(x), Y = vec(y);
+				if constexpr (k32) {
+					if (lanes) rvv::FwdButterfly32(X, Y, vec(w), vec(wp), static_cast<uint32_t>(q), vl);
+					else rvv::FwdButterfly32(X, Y, static_cast<uint32_t>(w[0]), static_cast<uint32_t>(wp[0]), static_cast<uint32_t>(q), vl);
+				} else {
+					if (lanes) rvv::FwdButterfly(X, Y, vec(w), vec(wp), q, vl);
+					else rvv::FwdButterfly(X, Y, w[0], wp[0], q, vl);
+				}
+				auto gx = out(X), gy = out(Y);
+				for (size_t k = 0; k < vl; ++k) {
+					const uint64_t t = O::MulMod(y[k] % q, tw(k), q);
+					CHECK_EQ(gx[k] < 4 * q && gx[k] % q == O::AddMod(x[k] % q, t, q), true,
+							<< "FwdButterfly x " << lane << " q=" << q << " k=" << k << " got " << uint64_t{gx[k]});
+					CHECK_EQ(gy[k] < 4 * q && gy[k] % q == O::SubMod(x[k] % q, t, q), true,
+							<< "FwdButterfly y " << lane << " q=" << q << " k=" << k << " got " << uint64_t{gy[k]});
+				}
+				// inverse
+				x = O::Random(vl, 2 * q);
+				y = O::Random(vl, 2 * q);
+				x[0] = 2 * q - 1;
+				y[0] = 0;
+				X = vec(x);
+				Y = vec(y);
+				if constexpr (k32) {
+					if (lanes) rvv::InvButterfly32(X, Y, vec(w), vec(wp), static_cast<uint32_t>(q), vl);
+					else rvv::InvButterfly32(X, Y, static_cast<uint32_t>(w[0]), static_cast<uint32_t>(wp[0]), static_cast<uint32_t>(q), vl);
+				} else {
+					if (lanes) rvv::InvButterfly(X, Y, vec(w), vec(wp), q, vl);
+					else rvv::InvButterfly(X, Y, w[0], wp[0], q, vl);
+				}
+				gx = out(X);
+				gy = out(Y);
+				for (size_t k = 0; k < vl; ++k) {
+					CHECK_EQ(gx[k] < 2 * q && gx[k] % q == O::AddMod(x[k] % q, y[k] % q, q), true,
+							<< "InvButterfly x " << lane << " q=" << q << " k=" << k << " got " << uint64_t{gx[k]});
+					CHECK_EQ(gy[k] < 2 * q && gy[k] % q == O::MulMod(O::SubMod(x[k] % q, y[k] % q, q), tw(k), q), true,
+							<< "InvButterfly y " << lane << " q=" << q << " k=" << k << " got " << uint64_t{gy[k]});
+				}
+			}
+		}
+	}
+}
+
 /// One NTT check, shared by every lane and strategy: the inputs and the
 /// fully reduced reference output (ReferenceForward/InverseTransform*, the
 /// textbook transforms that test-ntt.cpp checks against the definition).
@@ -480,6 +579,24 @@ TEST(RvvLanes_SetVlLoadStore) {
 	CheckSetVlLoadStore<vuint32m4_t, uint32_t>("u32m4", __riscv_vsetvlmax_e32m4());
 	CheckSetVlLoadStore<vuint32m8_t, uint32_t>("u32m8", __riscv_vsetvlmax_e32m8());
 }
+
+TEST(RvvLanes_LoadStoreStrided) {
+	CheckLoadStoreStrided<vuint64m1_t, uint64_t>("u64m1");
+	CheckLoadStoreStrided<vuint64m2_t, uint64_t>("u64m2");
+	CheckLoadStoreStrided<vuint64m4_t, uint64_t>("u64m4");
+	CheckLoadStoreStrided<vuint64m8_t, uint64_t>("u64m8");
+	CheckLoadStoreStrided<vuint32mf2_t, uint32_t>("u32mf2");
+	CheckLoadStoreStrided<vuint32m1_t, uint32_t>("u32m1");
+	CheckLoadStoreStrided<vuint32m2_t, uint32_t>("u32m2");
+	CheckLoadStoreStrided<vuint32m4_t, uint32_t>("u32m4");
+	CheckLoadStoreStrided<vuint32m8_t, uint32_t>("u32m8");
+	CheckLoadStoreStrided<vuint32mf2_t, uint64_t>("u64->u32mf2");
+	CheckLoadStoreStrided<vuint32m1_t, uint64_t>("u64->u32m1");
+	CheckLoadStoreStrided<vuint32m2_t, uint64_t>("u64->u32m2");
+	CheckLoadStoreStrided<vuint32m4_t, uint64_t>("u64->u32m4");
+}
+
+TEST(RvvLanes_Butterflies) { HEXL_FOR_EACH_LANE(CheckButterflies); }
 
 TEST(RvvLanes_AddSubMod) { HEXL_FOR_EACH_LANE(CheckAddSub); }
 TEST(RvvLanes_CmpAdd) { HEXL_FOR_EACH_LANE(CheckCmpAdd); }
