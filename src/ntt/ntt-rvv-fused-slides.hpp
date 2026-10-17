@@ -27,6 +27,9 @@
 
 #ifdef HEXL_HAS_RVV
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wregister"
+
 namespace intel {
 namespace hexl {
 
@@ -38,10 +41,53 @@ void ForwardFusedSlidesRVV32(Word* result, uint64_t n,
 		const uint32_t* w_precon,
 		const NttSmallSpanTables<rvv::ntt::FusedSlides, uint32_t>& tables,
 		uint64_t output_mod_factor) {
-	// Stub: the per-block loops until the fused body is written.
-	const uint32_t modulus32 = static_cast<uint32_t>(modulus);
-	ForwardStagesRVV32<Word, V>(result, n, modulus32, w, w_precon, tables.vl/2, 1);
-	if (output_mod_factor == 1) ReduceFromFourRVV32<Word, V>(result, n, modulus32);
+
+	const register uint32_t modulus32 = static_cast<uint32_t>(modulus);
+	const register uint64_t vl = tables.vl;
+	const register uint32_t* tw  = tables.fwd.data();
+	const register uint32_t* twp = tables.fwd_precon.data();
+
+	V lane; //get id of each lane
+	if constexpr (std::is_same_v<V, vuint32m1_t>) {
+		lane = __riscv_vid_v_u32m1(vl);
+	} else if constexpr (std::is_same_v<V, vuint32m2_t>) {
+		lane = __riscv_vid_v_u32m2(vl);
+	} else if constexpr (std::is_same_v<V, vuint32m4_t>) {
+		lane = __riscv_vid_v_u32m4(vl);
+	} else if constexpr (std::is_same_v<V, vuint32m8_t>) {
+		lane = __riscv_vid_v_u32m8(vl);
+	}
+
+	for (uint64_t c = 0; c < n/vl; ++c){
+		V r = rvv::Load32<V>(result + c * vl, vl);
+
+		//perform first stage outside inner loop as its doesn't require merging
+		V W = rvv::Load32<V>(tw, vl); tw += vl;
+		V Wp = rvv::Load32<V>(twp, vl); twp += vl;
+		V x = r;
+		V y = __riscv_vslidedown(r, vl/2, vl);
+		rvv::FwdButterfly32(x, y, W, Wp, modulus32, vl);
+		r = __riscv_vslideup(x, y, vl/2, vl);
+		//rest of the stages will always require a merge
+		for (uint64_t t = vl/4; t >= 1; t >>= 1, tw += vl, twp += vl){
+			V W = rvv::Load32<V>(tw, vl);
+			V Wp = rvv::Load32<V>(twp, vl);
+			auto mask = __riscv_vmseq(__riscv_vand(lane, t, vl), 0, vl); //mask based on lane id and current stage
+
+			V x = r;
+			V y = __riscv_vslidedown(r, t, vl);
+			rvv::FwdButterfly32(x, y, W, Wp, modulus32, vl);
+			r = __riscv_vslideup(x, y, t, vl);
+			r = __riscv_vmerge(r, x, mask, vl);
+		}
+
+		if (output_mod_factor == 1) {
+			r = rvv::ReduceFromTwice32(r, 2 * modulus32, vl);
+			r = rvv::ReduceFromTwice32(r, modulus32, vl);
+		}
+
+		rvv::Store32<V>(result + c * vl, r, vl);
+	}
 }
 
 /// Inverse small-span stages t = 1 .. VL/2, from operand into result (they
@@ -51,9 +97,47 @@ void InverseFusedSlidesRVV32(Word* result,
 		const Word* operand, uint64_t n, uint64_t modulus,
 		const uint32_t* w_inv, const uint32_t* w_inv_precon,
 		const NttSmallSpanTables<rvv::ntt::FusedSlides, uint32_t>& tables) {
-	// Stub: copy, then the per-block loops until the fused body is written.
-	CopyRVV32<Word, V>(result, operand, n);
-	InverseStagesRVV32<Word, V>(result, n, static_cast<uint32_t>(modulus), w_inv, w_inv_precon, 1, tables.vl/2);
+	const register uint32_t modulus32 = static_cast<uint32_t>(modulus);
+	const register uint64_t vl = tables.vl;
+	const register uint32_t* tw  = tables.inv.data();
+	const register uint32_t* twp = tables.inv_precon.data();
+
+	V lane; //get id of each lane
+	if constexpr (std::is_same_v<V, vuint32m1_t>) {
+		lane = __riscv_vid_v_u32m1(vl);
+	} else if constexpr (std::is_same_v<V, vuint32m2_t>) {
+		lane = __riscv_vid_v_u32m2(vl);
+	} else if constexpr (std::is_same_v<V, vuint32m4_t>) {
+		lane = __riscv_vid_v_u32m4(vl);
+	} else if constexpr (std::is_same_v<V, vuint32m8_t>) {
+		lane = __riscv_vid_v_u32m8(vl);
+	}
+
+	for (uint64_t c = 0; c < n/vl; ++c){
+		V r = rvv::Load32<V>(operand + c * vl, vl);
+
+		//stages t = 1 .. vl/4 (inverse order) always require a merge
+		for (uint64_t t = 1; t <= vl/4; t <<= 1, tw += vl, twp += vl){
+			V W = rvv::Load32<V>(tw, vl);
+			V Wp = rvv::Load32<V>(twp, vl);
+			auto mask = __riscv_vmseq(__riscv_vand(lane, t, vl), 0, vl); //mask based on lane id and current stage
+
+			V x = r;
+			V y = __riscv_vslidedown(r, t, vl);
+			rvv::InvButterfly32(x, y, W, Wp, modulus32, vl);
+			r = __riscv_vslideup(x, y, t, vl);
+			r = __riscv_vmerge(r, x, mask, vl);
+		}
+		//perform last stage t = vl/2 outside the loop as it doesn't require merging
+		V W = rvv::Load32<V>(tw, vl); tw += vl;
+		V Wp = rvv::Load32<V>(twp, vl); twp += vl;
+		V x = r;
+		V y = __riscv_vslidedown(r, vl/2, vl);
+		rvv::InvButterfly32(x, y, W, Wp, modulus32, vl);
+		r = __riscv_vslideup(x, y, vl/2, vl);
+
+		rvv::Store32<V>(result + c * vl, r, vl);
+	}
 }
 
 /// Forward small-span stages, 64-bit lanes.
@@ -63,9 +147,51 @@ void ForwardFusedSlidesRVV64(uint64_t* result, uint64_t n,
 		const uint64_t* precon_root_of_unity_powers,
 		const NttSmallSpanTables<rvv::ntt::FusedSlides, uint64_t>& tables,
 		uint64_t output_mod_factor) {
-	// Stub: the per-block loops until the fused body is written.
-	ForwardStagesRVV64<V>(result, n, modulus, root_of_unity_powers, precon_root_of_unity_powers, tables.vl/2, 1);
-	if (output_mod_factor == 1) ReduceFromFourRVV64<V>(result, n, modulus);
+	const register uint64_t vl = tables.vl;
+	const register uint64_t* tw  = tables.fwd.data();
+	const register uint64_t* twp = tables.fwd_precon.data();
+
+	V lane; //get id of each lane
+	if constexpr (std::is_same_v<V, vuint64m1_t>) {
+		lane = __riscv_vid_v_u64m1(vl);
+	} else if constexpr (std::is_same_v<V, vuint64m2_t>) {
+		lane = __riscv_vid_v_u64m2(vl);
+	} else if constexpr (std::is_same_v<V, vuint64m4_t>) {
+		lane = __riscv_vid_v_u64m4(vl);
+	} else if constexpr (std::is_same_v<V, vuint64m8_t>) {
+		lane = __riscv_vid_v_u64m8(vl);
+	}
+
+	for (uint64_t c = 0; c < n/vl; ++c){
+		V r = rvv::Load<V>(result + c * vl, vl);
+
+		//perform first stage outside inner loop as its doesn't require merging
+		V W = rvv::Load<V>(tw, vl); tw += vl;
+		V Wp = rvv::Load<V>(twp, vl); twp += vl;
+		V x = r;
+		V y = __riscv_vslidedown(r, vl/2, vl);
+		rvv::FwdButterfly(x, y, W, Wp, modulus, vl);
+		r = __riscv_vslideup(x, y, vl/2, vl);
+		//rest of the stages will always require a merge
+		for (uint64_t t = vl/4; t >= 1; t >>= 1, tw += vl, twp += vl){
+			V W = rvv::Load<V>(tw, vl);
+			V Wp = rvv::Load<V>(twp, vl);
+			auto mask = __riscv_vmseq(__riscv_vand(lane, t, vl), 0, vl); //mask based on lane id and current stage
+
+			V x = r;
+			V y = __riscv_vslidedown(r, t, vl);
+			rvv::FwdButterfly(x, y, W, Wp, modulus, vl);
+			r = __riscv_vslideup(x, y, t, vl);
+			r = __riscv_vmerge(r, x, mask, vl);
+		}
+
+		if (output_mod_factor == 1) {
+			r = rvv::ReduceFromTwice(r, 2 * modulus, vl);
+			r = rvv::ReduceFromTwice(r, modulus, vl);
+		}
+
+		rvv::Store(result + c * vl, r, vl);
+	}
 }
 
 /// Inverse small-span stages, 64-bit lanes.
@@ -75,12 +201,51 @@ void InverseFusedSlidesRVV64(uint64_t* result,
 		const uint64_t* inv_root_of_unity_powers,
 		const uint64_t* precon_inv_root_of_unity_powers,
 		const NttSmallSpanTables<rvv::ntt::FusedSlides, uint64_t>& tables) {
-	// Stub: copy, then the per-block loops until the fused body is written.
-	CopyRVV64<V>(result, operand, n);
-	InverseStagesRVV64<V>(result, n, modulus, inv_root_of_unity_powers, precon_inv_root_of_unity_powers, 1, tables.vl/2);
+	const register uint64_t vl = tables.vl;
+	const register uint64_t* tw  = tables.inv.data();
+	const register uint64_t* twp = tables.inv_precon.data();
+
+	V lane; //get id of each lane
+	if constexpr (std::is_same_v<V, vuint64m1_t>) {
+		lane = __riscv_vid_v_u64m1(vl);
+	} else if constexpr (std::is_same_v<V, vuint64m2_t>) {
+		lane = __riscv_vid_v_u64m2(vl);
+	} else if constexpr (std::is_same_v<V, vuint64m4_t>) {
+		lane = __riscv_vid_v_u64m4(vl);
+	} else if constexpr (std::is_same_v<V, vuint64m8_t>) {
+		lane = __riscv_vid_v_u64m8(vl);
+	}
+
+	for (uint64_t c = 0; c < n/vl; ++c){
+		V r = rvv::Load<V>(operand + c * vl, vl);
+
+		//stages t = 1 .. vl/4 (inverse order) always require a merge
+		for (uint64_t t = 1; t <= vl/4; t <<= 1, tw += vl, twp += vl){
+			V W = rvv::Load<V>(tw, vl);
+			V Wp = rvv::Load<V>(twp, vl);
+			auto mask = __riscv_vmseq(__riscv_vand(lane, t, vl), 0, vl); //mask based on lane id and current stage
+
+			V x = r;
+			V y = __riscv_vslidedown(r, t, vl);
+			rvv::InvButterfly(x, y, W, Wp, modulus, vl);
+			r = __riscv_vslideup(x, y, t, vl);
+			r = __riscv_vmerge(r, x, mask, vl);
+		}
+		//perform last stage t = vl/2 outside the loop as it doesn't require merging
+		V W = rvv::Load<V>(tw, vl); tw += vl;
+		V Wp = rvv::Load<V>(twp, vl); twp += vl;
+		V x = r;
+		V y = __riscv_vslidedown(r, vl/2, vl);
+		rvv::InvButterfly(x, y, W, Wp, modulus, vl);
+		r = __riscv_vslideup(x, y, vl/2, vl);
+
+		rvv::Store(result + c * vl, r, vl);
+	}
 }
 
 }  // namespace hexl
 }  // namespace intel
+
+#pragma GCC diagnostic pop
 
 #endif  // HEXL_HAS_RVV
