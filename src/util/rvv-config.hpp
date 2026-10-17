@@ -104,25 +104,74 @@ using FMAMod32 = vuint32m4_t;   // <= m4
 using MultAddMod64 = vuint64m4_t;
 using MultAddMod32 = vuint32m4_t;     // RVV32 on uint32_t storage
 using MultAddMod32U64 = vuint32m4_t;  // RVV32 on uint64_t storage (<= m4)
-				      // NTT at m1 for now: with the per-block small-span strategy (below), stages
-				      // with span t < VLMAX run with vl = t, and a vector instruction costs about
-				      // the same however small vl is (more at higher LMUL). Measured (forward,
-				      // N=4096 e64 / N=1024 e32, X100): RVV64 m1 125 us vs m4 210 us; RVV32 m1
-				      // 16.5 us vs m4 26.4 us. Revisit with the fused-slides / transposed
-				      // strategies: the layout study measured both best at m4.
-using Ntt64 = vuint64m1_t;
-using Ntt32 = vuint32m1_t;     // RVV32 NTT on uint32_t storage
-using Ntt32U64 = vuint32m1_t;  // RVV32 NTT on uint64_t storage (<= m4: narrowing load)
 
-// How the small-span NTT stages (span t < VLMAX of the lane type) run; see
-// rvv::ntt above and src/ntt/ntt-rvv-small-span.hpp. One for the RVV64
-// kernels, one for both RVV32 kernels (both storage words).
-// NTT::ComputeRootOfUnityPowers builds the twiddle layout of the strategy
-// chosen here, for the lane types above (Ntt32 and Ntt32U64 get one layout
-// each when their VLMAX differs). Tests and BM_Lanes_Ntt* run all three.
-// PerBlock until the other two have bodies (their stubs run PerBlock).
-using NttSmallSpan64 = ntt::PerBlock;
-using NttSmallSpan32 = ntt::PerBlock;
+// ---- NTT -------------------------------------------------------------------
+// How the small-span NTT stages (span t < VLMAX) run, one strategy for the RVV64
+// kernels and one for both RVV32 kernels (see rvv::ntt above and
+// src/ntt/ntt-rvv-small-span.hpp). Defaults: the best overall measured strategy,
+// i.e. the highest geomean over both K3 clusters (X100 VLEN 256, A100 VLEN 1024),
+// N = 1024 .. 32768, forward and inverse, against PerBlock at m1
+// (rvv-hexl results/ntt-fused-2026-10-17, 2026-10-17):
+//                     RVV64   RVV32/uint32_t   RVV32/uint64_t
+//   PerBlock           1.00x       1.00x            1.00x
+//   FusedSlides        1.97x       4.14x            3.98x
+//   Transposed16       2.05x       2.84x            2.51x
+//   Transposed8        1.95x       2.53x            2.19x
+//   Transposed8x2      1.94x       2.63x            2.20x
+//   Transposed4x4      1.60x       2.01x            1.84x
+// (each at its best lane type, below). Per cluster the order can differ: on the
+// X100 alone Transposed16 is best for RVV32 too (2.96x vs FusedSlides 2.49x), on
+// the A100 FusedSlides is best for both (RVV32 6.90x). The library stays
+// board-agnostic: change these two lines to pick another strategy.
+using NttSmallSpan64 = ntt::Transposed16;
+using NttSmallSpan32 = ntt::FusedSlides;
+
+// The NTT kernel lane types that measured best with each strategy (same sweep):
+// changing a strategy above picks its lanes here. Ntt32U64 is RVV32 on uint64_t
+// storage (at most u32m4, the narrowing load). To force a lane type, replace the
+// Ntt64 / Ntt32 / Ntt32U64 aliases below.
+template <class Strategy>
+struct NttBestLanes;
+template <>
+struct NttBestLanes<ntt::PerBlock> {  // per-block small spans run with vl = t: m1
+	using Ntt64 = vuint64m1_t;
+	using Ntt32 = vuint32m1_t;
+	using Ntt32U64 = vuint32m1_t;
+};
+template <>
+struct NttBestLanes<ntt::FusedSlides> {
+	using Ntt64 = vuint64m2_t;
+	using Ntt32 = vuint32m2_t;
+	using Ntt32U64 = vuint32m2_t;
+};
+template <>
+struct NttBestLanes<ntt::Transposed16> {
+	using Ntt64 = vuint64m2_t;
+	using Ntt32 = vuint32m2_t;
+	using Ntt32U64 = vuint32m2_t;
+};
+template <>
+struct NttBestLanes<ntt::Transposed8> {
+	using Ntt64 = vuint64m2_t;
+	using Ntt32 = vuint32m2_t;
+	using Ntt32U64 = vuint32m1_t;
+};
+template <>
+struct NttBestLanes<ntt::Transposed8x2> {
+	using Ntt64 = vuint64m2_t;
+	using Ntt32 = vuint32m2_t;
+	using Ntt32U64 = vuint32m1_t;
+};
+template <>
+struct NttBestLanes<ntt::Transposed4x4> {
+	using Ntt64 = vuint64m1_t;
+	using Ntt32 = vuint32m2_t;
+	using Ntt32U64 = vuint32m1_t;
+};
+
+using Ntt64 = NttBestLanes<NttSmallSpan64>::Ntt64;        // RVV64 NTT
+using Ntt32 = NttBestLanes<NttSmallSpan32>::Ntt32;        // RVV32 NTT on uint32_t storage
+using Ntt32U64 = NttBestLanes<NttSmallSpan32>::Ntt32U64;  // RVV32 NTT on uint64_t storage
 
 }  // namespace cfg
 
