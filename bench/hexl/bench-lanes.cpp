@@ -18,6 +18,7 @@
 #include <stdint.h>
 
 #include <type_traits>
+#include <vector>
 
 #include "bench-common.hpp"
 
@@ -28,6 +29,7 @@
 #include "eltwise/eltwise-cmp-sub-mod-internal.hpp"
 #include "eltwise/eltwise-mult-add-mod-internal.hpp"
 #include "eltwise/eltwise-mult-mod-internal.hpp"
+#include "eltwise/eltwise-signed-digit-decompose-internal.hpp"
 #include "eltwise/eltwise-sub-mod-internal.hpp"
 #include "hexl/ntt/ntt.hpp"
 #include "ntt/ntt-internal.hpp"
@@ -148,6 +150,43 @@ void BM_Lanes_MultAddMod(benchmark::State& state) {
 		} else {
 			intel::hexl::EltwiseMultAddModRVV32<Word, 1, V>(acc.data(), a.data(), b.data(), acc.data(), kN, q);
 		}
+		benchmark::ClobberMemory();
+	}
+	state.SetItemsProcessed(state.iterations() * kN);
+}
+
+/// SignedDigitDecompose (rvv-hexl extension), one polynomial: 32-bit lanes at
+/// the STD128 shape (27-bit q, g = 7, 3 digits kept), 64-bit lanes at a
+/// 60-bit q (g = 20, 2 digits).
+template <typename Word, class V>
+void BM_Lanes_SignedDigitDecompose(benchmark::State& state) {
+	constexpr bool kE64 = std::is_same_v<Word, uint64_t> && intel::hexl::rvv::IsE64<V>;
+	const uint64_t q = LaneModulus<Word>(), g = kE64 ? 20 : 7, digits = kE64 ? 2 : 3;
+	auto a = hexlbench::RandomW<Word>(kN, q);
+	std::vector<intel::hexl::AlignedVector64<Word>> out(digits, intel::hexl::AlignedVector64<Word>(kN));
+	std::vector<Word*> p(digits);
+	for (uint64_t d = 0; d < digits; ++d) p[d] = out[d].data();
+	for (auto _ : state) {
+		if constexpr (kE64) {
+			intel::hexl::SignedDigitDecomposeRVV64<V>(p.data(), a.data(), kN, q, g, digits);
+		} else {
+			intel::hexl::SignedDigitDecomposeRVV32<Word, V>(p.data(), a.data(), kN, q, g, digits);
+		}
+		benchmark::ClobberMemory();
+	}
+	state.SetItemsProcessed(state.iterations() * kN);
+}
+
+/// SignedDigitDecomposeRVV32 on uint64_t storage (27-bit q, narrowing load and
+/// widening stores): the lane type cfg::SignedDigitDecompose32U64 picks.
+template <class V>
+void BM_Lanes_SignedDigitDecompose32FromU64(benchmark::State& state) {
+	const uint64_t q = hexlbench::Prime(27, 1024);
+	auto a = hexlbench::RandomW<uint64_t>(kN, q);
+	std::vector<intel::hexl::AlignedVector64<uint64_t>> out(3, intel::hexl::AlignedVector64<uint64_t>(kN));
+	std::vector<uint64_t*> p = {out[0].data(), out[1].data(), out[2].data()};
+	for (auto _ : state) {
+		intel::hexl::SignedDigitDecomposeRVV32<uint64_t, V>(p.data(), a.data(), kN, q, 7, 3);
 		benchmark::ClobberMemory();
 	}
 	state.SetItemsProcessed(state.iterations() * kN);
@@ -277,6 +316,10 @@ BENCHMARK_TEMPLATE(BM_Lanes_MultMod32FromU64, vuint32m4_t);
 BENCHMARK_TEMPLATE(BM_Lanes_MultAddMod32FromU64, vuint32m1_t);
 BENCHMARK_TEMPLATE(BM_Lanes_MultAddMod32FromU64, vuint32m2_t);
 BENCHMARK_TEMPLATE(BM_Lanes_MultAddMod32FromU64, vuint32m4_t);
+HEXL_LANES(BM_Lanes_SignedDigitDecompose);
+BENCHMARK_TEMPLATE(BM_Lanes_SignedDigitDecompose32FromU64, vuint32m1_t);
+BENCHMARK_TEMPLATE(BM_Lanes_SignedDigitDecompose32FromU64, vuint32m2_t);
+BENCHMARK_TEMPLATE(BM_Lanes_SignedDigitDecompose32FromU64, vuint32m4_t);
 
 // NTT: N = 1024 (binfhe) and 4096, every Transposed shape (its tile rows have
 // their own LMUL, whatever V); N too small for a strategy falls back to per

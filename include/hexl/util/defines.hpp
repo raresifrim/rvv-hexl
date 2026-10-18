@@ -35,3 +35,6 @@
 // EltwiseMultAddMod: (a * b + c) mod q on three vectors, both storage words
 // (include/hexl/eltwise/eltwise-mult-add-mod.hpp).
 #define HEXL_RVV_HAS_MULT_ADD_MOD 1
+// SignedDigitDecompose: OpenFHE binfhe's signed gadget decomposition, both storage
+// words (include/hexl/eltwise/eltwise-signed-digit-decompose.hpp).
+#define HEXL_RVV_HAS_SIGNED_DIGIT_DECOMPOSE 1

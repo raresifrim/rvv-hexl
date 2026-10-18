@@ -8,7 +8,10 @@
 // bandwidth at the same size: an eltwise kernel near that line is memory
 // bound and no instruction selection will speed it up.
 
+#include <algorithm>
 #include <cstring>
+#include <type_traits>
+#include <vector>
 
 #include "bench-common.hpp"
 
@@ -267,5 +270,89 @@ BENCHMARK(BM_EltwiseMultAddMod32)
 	}
 BENCHMARK(BM_EltwiseMultModThenAddMod32)
 	->ArgsProduct({{1024, 4096, 16384}, {27}})->ArgNames({"n", "qbits"});
+#endif
+#endif
+
+#ifdef HEXL_RVV_HAS_SIGNED_DIGIT_DECOMPOSE
+	// ---- signed gadget decomposition (rvv-hexl extension; binfhe's blind rotation) ----
+	// One external product's worth at OpenFHE STD128 shapes: both accumulator
+	// polynomials (n coefficients, 27-bit q) into 2 x digits polynomials of base
+	// 2^g, interleaved as OpenFHE stores them; against the scalar loop OpenFHE
+	// runs today (rgsw-acc.cpp, v1.5.1: coefficient outer, digits inner, each
+	// digit added into its own zeroed polynomial), kept scalar with novector as
+	// it is in OpenFHE, where NativePoly indexing stops the vectoriser.
+	template <typename Word>
+	struct SddSetup {
+		uint64_t n, q, g, digits;
+		intel::hexl::AlignedVector64<Word> a0, a1;
+		std::vector<intel::hexl::AlignedVector64<Word>> out;
+		std::vector<Word*> p0, p1;
+		explicit SddSetup(benchmark::State& state)
+			: n(state.range(0)), q(Prime(27, state.range(0))), g(state.range(1)), digits(state.range(2)),
+			a0(RandomW<Word>(n, q)), a1(RandomW<Word>(n, q)),
+			out(2 * digits, intel::hexl::AlignedVector64<Word>(n)), p0(digits), p1(digits) {
+				for (uint64_t d = 0; d < digits; ++d) {
+					p0[d] = out[2 * d].data();
+					p1[d] = out[2 * d + 1].data();
+				}
+			}
+	};
+
+	template <typename Word>
+	static void BM_SignedDigitDecompose(benchmark::State& state) {
+		SddSetup<Word> s(state);
+		HEXL_BENCH_PROBE(state, SignedDigitDecompose(s.p0.data(), s.a0.data(), s.n, s.q, s.g, s.digits));
+		for (auto _ : state) {
+			SignedDigitDecompose(s.p0.data(), s.a0.data(), s.n, s.q, s.g, s.digits);
+			SignedDigitDecompose(s.p1.data(), s.a1.data(), s.n, s.q, s.g, s.digits);
+			benchmark::ClobberMemory();
+		}
+		state.SetItemsProcessed(static_cast<int64_t>(state.iterations() * 2 * s.n));
+	}
+
+	template <typename Word>
+	static void BM_SignedDigitDecomposeOpenFHELoop(benchmark::State& state) {
+		SddSetup<Word> s(state);
+		using S = std::conditional_t<std::is_same_v<Word, uint32_t>, int32_t, int64_t>;
+		using U = std::make_unsigned_t<S>;
+		const S q = static_cast<S>(s.q), gb = static_cast<S>(s.g);
+		const int up = static_cast<int>(sizeof(S) * 8 - s.g);
+		const uint64_t q_half = s.q >> 1;
+		for (auto _ : state) {
+			for (auto& o : s.out) std::fill(o.begin(), o.end(), Word{0});  // OpenFHE's zeroed dct
+#pragma GCC novector
+			for (uint64_t k = 0; k < s.n; ++k) {
+				S d0 = s.a0[k] < q_half ? static_cast<S>(s.a0[k]) : static_cast<S>(s.a0[k]) - q;
+				S d1 = s.a1[k] < q_half ? static_cast<S>(s.a1[k]) : static_cast<S>(s.a1[k]) - q;
+				S r0 = static_cast<S>(static_cast<U>(d0) << up) >> up;
+				d0 = (d0 - r0) >> gb;
+				S r1 = static_cast<S>(static_cast<U>(d1) << up) >> up;
+				d1 = (d1 - r1) >> gb;
+				for (uint64_t d = 0; d < 2 * s.digits; d += 2) {
+					r0 = static_cast<S>(static_cast<U>(d0) << up) >> up;
+					d0 = (d0 - r0) >> gb;
+					if (r0 < 0) r0 += q;
+					s.out[d][k] += static_cast<Word>(r0);
+					r1 = static_cast<S>(static_cast<U>(d1) << up) >> up;
+					d1 = (d1 - r1) >> gb;
+					if (r1 < 0) r1 += q;
+					s.out[d + 1][k] += static_cast<Word>(r1);
+				}
+			}
+			benchmark::ClobberMemory();
+		}
+		state.SetItemsProcessed(static_cast<int64_t>(state.iterations() * 2 * s.n));
+	}
+
+	// STD128 (N = 1024, g = 7, 3 digits kept), N = 2048, and a larger base
+BENCHMARK_TEMPLATE(BM_SignedDigitDecompose, uint64_t)
+	->Args({1024, 7, 3})->Args({2048, 7, 3})->Args({1024, 10, 2})->ArgNames({"n", "g", "digits"});
+BENCHMARK_TEMPLATE(BM_SignedDigitDecomposeOpenFHELoop, uint64_t)
+	->Args({1024, 7, 3})->Args({2048, 7, 3})->Args({1024, 10, 2})->ArgNames({"n", "g", "digits"});
+#ifdef HEXL_RVV_HAS_32BIT_API
+BENCHMARK_TEMPLATE(BM_SignedDigitDecompose, uint32_t)
+	->Args({1024, 7, 3})->Args({2048, 7, 3})->Args({1024, 10, 2})->ArgNames({"n", "g", "digits"});
+BENCHMARK_TEMPLATE(BM_SignedDigitDecomposeOpenFHELoop, uint32_t)
+	->Args({1024, 7, 3})->Args({2048, 7, 3})->Args({1024, 10, 2})->ArgNames({"n", "g", "digits"});
 #endif
 #endif

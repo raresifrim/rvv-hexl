@@ -264,6 +264,17 @@ prebuilt route, with `INTEL_HEXL_HINT_DIR` pointing at the rvv-hexl install.
   1.09-1.22x scalar. `openfhe-hexl-multadd.py` and `openfhe-binfhe-multadd.py` make binfhe's
   external products call it (binfhe 1.03-1.17x on the X100); staging OpenFHE with
   `OPENFHE_HEXL_MULADD=0` keeps the two calls, as a baseline.
+* BFV routing: `seal-hexl-keyswitch.py` and `seal-hexl-baseconv.py` move SEAL's key switching
+  (`EltwiseMultAddMod`) and RNS base conversion (`EltwiseReduceMod` / `EltwiseFMAMod`) onto
+  rvv-hexl, only in HEXL builds (`SEAL_RVV_HEXL_KEYSWITCH=0` / `SEAL_RVV_HEXL_BASECONV=0` keep
+  SEAL's code); `openfhe-pke-keyswitch-multadd.py` makes OpenFHE's hybrid key switching
+  accumulate with `ModMulAddEq`.
+* `SignedDigitDecompose` (`HEXL_RVV_HAS_SIGNED_DIGIT_DECOMPOSE`, both storage words) is an
+  rvv-hexl extension: binfhe's signed gadget decomposition on whole vectors, one output
+  polynomial per digit (the lowest digit dropped, as OpenFHE does). `openfhe-binfhe-decompose.py`
+  makes `RingGSWAccumulator::SignedDigitDecompose` call it; `OPENFHE_HEXL_DECOMPOSE=0` keeps
+  OpenFHE's loop. Kernel bodies: work in progress (the native and RVV kernels currently run a
+  scalar placeholder); `BM_SignedDigitDecompose` vs `BM_SignedDigitDecomposeOpenFHELoop`.
 * License: Apache-2.0, as upstream Intel HEXL (the public headers derive from it).
 
 ## Copyright and license

@@ -104,6 +104,11 @@ using FMAMod32 = vuint32m4_t;   // <= m4
 using MultAddMod64 = vuint64m4_t;
 using MultAddMod32 = vuint32m4_t;     // RVV32 on uint32_t storage
 using MultAddMod32U64 = vuint32m4_t;  // RVV32 on uint64_t storage (<= m4)
+				// SignedDigitDecompose (rvv-hexl extension, binfhe): m4 until BM_Lanes_SignedDigitDecompose
+				// has been measured on both clusters.
+using SignedDigitDecompose64 = vuint64m4_t;
+using SignedDigitDecompose32 = vuint32m4_t;     // RVV32 on uint32_t storage
+using SignedDigitDecompose32U64 = vuint32m4_t;  // RVV32 on uint64_t storage (<= m4)
 
 // ---- NTT -------------------------------------------------------------------
 // How the small-span NTT stages (span t < VLMAX) run, one strategy for the RVV64

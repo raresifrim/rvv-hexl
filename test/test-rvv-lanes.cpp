@@ -31,6 +31,7 @@
 #include "eltwise/eltwise-cmp-sub-mod-internal.hpp"
 #include "eltwise/eltwise-mult-add-mod-internal.hpp"
 #include "eltwise/eltwise-mult-mod-internal.hpp"
+#include "eltwise/eltwise-signed-digit-decompose-internal.hpp"
 #include "eltwise/eltwise-sub-mod-internal.hpp"
 #include "hexl/ntt/ntt.hpp"
 #include "ntt/ntt-internal.hpp"
@@ -213,6 +214,43 @@ void CheckMultAddMod(const char* lane) {
 		CheckMultAddModImf<Word, 1, V>(lane, q);
 		CheckMultAddModImf<Word, 2, V>(lane, q);
 		CheckMultAddModImf<Word, 4, V>(lane, q);
+	}
+}
+
+/// SignedDigitDecompose's RVV kernels against the scalar version
+/// (SignedDigitDecomposeStub, itself checked against an independent oracle in
+/// test-eltwise.cpp), at the STD128 shape (27-bit q, g = 7, 3 digits) and at
+/// the edges of each lane width. e64 lanes: RVV64; e32 lanes: RVV32 (q < 2^31).
+template <typename Word, class V>
+void CheckSignedDigitDecompose(const char* lane) {
+	constexpr bool kE64 = rvv::IsE64<V>;
+	struct Shape { uint64_t q, g, digits; };
+	const std::vector<Shape> shapes = kE64
+		? std::vector<Shape>{{O::NttPrime(27, 1), 7, 3}, {O::NttPrime(49, 1), 10, 5}, {O::PrimeBelow(1ULL << 62), 20, 3}, {17, 1, 6}}
+		: std::vector<Shape>{{O::NttPrime(27, 1), 7, 3}, {O::NttPrime(20, 1), 5, 4}, {O::PrimeBelow(1ULL << 31), 10, 3}, {17, 1, 6}};
+	for (const Shape& s : shapes) {
+		for (size_t n : kSizes) {
+			auto x64 = O::Random(n, s.q);
+			const uint64_t edge[] = {0, 1, s.q / 2 - 1, s.q / 2, s.q / 2 + 1, s.q - 1};
+			for (size_t i = 0; i < n && i < 6; ++i) x64[i] = edge[i];
+			const auto x = AsWord<Word>(x64);
+			std::vector<std::vector<Word>> got(s.digits, std::vector<Word>(n)), want = got;
+			std::vector<Word*> pg(s.digits), pw(s.digits);
+			for (uint64_t d = 0; d < s.digits; ++d) { pg[d] = got[d].data(); pw[d] = want[d].data(); }
+			intel::hexl::SignedDigitDecomposeStub<Word>(pw.data(), x.data(), n, s.q, s.g, s.digits);
+			if constexpr (kE64) {
+				intel::hexl::SignedDigitDecomposeRVV64<V>(pg.data(), x.data(), n, s.q, s.g, s.digits);
+			} else {
+				intel::hexl::SignedDigitDecomposeRVV32<Word, V>(pg.data(), x.data(), n, s.q, s.g, s.digits);
+			}
+			for (uint64_t d = 0; d < s.digits; ++d) {
+				for (size_t i = 0; i < n; ++i) {
+					CHECK_EQ(static_cast<uint64_t>(got[d][i]), static_cast<uint64_t>(want[d][i]),
+							<< "SignedDigitDecompose " << lane << " q=" << s.q << " g=" << s.g
+							<< " n=" << n << " d=" << d << " i=" << i);
+				}
+			}
+		}
 	}
 }
 
@@ -615,6 +653,14 @@ TEST(RvvLanes_MultAddMod) {
 	CheckMultAddMod<uint64_t, vuint32m1_t>("u64->u32m1");
 	CheckMultAddMod<uint64_t, vuint32m2_t>("u64->u32m2");
 	CheckMultAddMod<uint64_t, vuint32m4_t>("u64->u32m4");
+}
+
+TEST(RvvLanes_SignedDigitDecompose) {
+	HEXL_FOR_EACH_LANE(CheckSignedDigitDecompose);
+	// RVV32 on uint64_t storage (narrowing load): u32m1..m4
+	CheckSignedDigitDecompose<uint64_t, vuint32m1_t>("u64->u32m1");
+	CheckSignedDigitDecompose<uint64_t, vuint32m2_t>("u64->u32m2");
+	CheckSignedDigitDecompose<uint64_t, vuint32m4_t>("u64->u32m4");
 }
 
 // The NTT lanes: RVV64 at u64m1..m8, RVV32 on uint32_t storage at u32m1..m8

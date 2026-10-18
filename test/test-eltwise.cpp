@@ -1,8 +1,8 @@
 // Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
 // SPDX-License-Identifier: Apache-2.0
 //
-// hexl/eltwise: all seven public functions, plus the rvv-hexl extension
-// EltwiseMultAddMod, every size tail, every modulus class, every input/output
+// hexl/eltwise: all seven public functions, plus the rvv-hexl extensions
+// EltwiseMultAddMod and SignedDigitDecompose, every size tail, every modulus class, every input/output
 // mod factor, out-of-place AND in-place (OpenFHE calls almost everything with
 // result == operand1).
 //
@@ -334,6 +334,63 @@ void RunMultAddMod() {
 }
 #endif
 
+#ifdef HEXL_RVV_HAS_SIGNED_DIGIT_DECOMPOSE
+/// Oracle for SignedDigitDecompose, written independently of OpenFHE's shifts:
+/// floor division and remainder on the centred value.
+std::vector<std::vector<uint64_t>> SignedDigitsOracle(const std::vector<uint64_t>& x,
+		uint64_t q, uint64_t g, uint64_t digits) {
+	const __int128 base = static_cast<__int128>(1) << g;
+	std::vector<std::vector<uint64_t>> out(digits, std::vector<uint64_t>(x.size()));
+	for (size_t j = 0; j < x.size(); ++j) {
+		__int128 c = x[j] < q / 2 ? static_cast<__int128>(x[j]) : static_cast<__int128>(x[j]) - q;
+		for (uint64_t d = 0; d <= digits; ++d) {
+			__int128 low = c % base;
+			if (low < 0) low += base;                // low digit in [0, B)
+			const __int128 r = low >= base / 2 ? low - base : low;  // signed, in [-B/2, B/2)
+			c = (c - r) / base;                      // exact
+			if (d > 0) out[d - 1][j] = static_cast<uint64_t>(r < 0 ? r + q : r);  // digit 0 dropped
+		}
+	}
+	return out;
+}
+
+/// SignedDigitDecompose (rvv-hexl extension, OpenFHE binfhe): every modulus
+/// class of the word (e32 and e64 lanes), gadget bases from 2 to 2^20, more
+/// digits than the modulus needs (the extra ones are 0 or q - 1), the boundary
+/// values around q / 2 and 0, q - 1.
+template <typename Word>
+void RunSignedDigitDecompose() {
+	auto ok = [](uint64_t q) { return Is32<Word>() ? q < (1ULL << 31) : q < (1ULL << 62); };
+	for (uint64_t q : Moduli(ok)) {
+		const uint64_t bits = 64 - __builtin_clzll(q);
+		for (uint64_t g : {1ULL, 2ULL, 5ULL, 7ULL, 10ULL, 16ULL, 20ULL}) {
+			if (g >= bits && g > 1) continue;
+			const uint64_t full = (bits + g - 1) / g;  // digits of a full decomposition
+			for (uint64_t digits : {uint64_t{1}, full > 1 ? full - 1 : 1, full + 1}) {
+				for (size_t n : O::EltwiseSizes()) {
+					auto x64 = O::Random(n, q);
+					const uint64_t edge[] = {0, 1, q / 2 - 1, q / 2, q / 2 + 1, q - 1};
+					for (size_t i = 0; i < n && i < 6; ++i) x64[i] = edge[i] % q;
+					const auto want = SignedDigitsOracle(x64, q, g, digits);
+					const auto x = O::As<Word>(x64);
+					std::vector<std::vector<Word>> got(digits, std::vector<Word>(n, static_cast<Word>(0x5A5A5A5A)));
+					std::vector<Word*> ptr(digits);
+					for (uint64_t d = 0; d < digits; ++d) ptr[d] = got[d].data();
+					SignedDigitDecompose(ptr.data(), x.data(), n, q, g, digits);
+					for (uint64_t d = 0; d < digits; ++d) {
+						for (size_t i = 0; i < n; ++i) {
+							CHECK_EQ(static_cast<uint64_t>(got[d][i]), want[d][i],
+									<< "SignedDigitDecompose q=" << q << " g=" << g << " digits=" << digits
+									<< " n=" << n << " d=" << d << " i=" << i << " x=" << x64[i]);
+						}
+					}
+				}
+			}
+		}
+	}
+}
+#endif
+
 }  // namespace
 
 TEST(Eltwise_AddMod) { RunAddSub<uint64_t>(true); }
@@ -347,6 +404,9 @@ TEST(Eltwise_OpenFHESwitchModulusPattern) { RunSwitchModulusPattern<uint64_t>();
 #ifdef HEXL_RVV_HAS_MULT_ADD_MOD
 TEST(Eltwise_MultAddMod) { RunMultAddMod<uint64_t>(); }
 #endif
+#ifdef HEXL_RVV_HAS_SIGNED_DIGIT_DECOMPOSE
+TEST(Eltwise_SignedDigitDecompose) { RunSignedDigitDecompose<uint64_t>(); }
+#endif
 
 #ifdef HEXL_RVV_HAS_32BIT_API
 TEST(Eltwise_AddMod_32) { RunAddSub<uint32_t>(true); }
@@ -359,5 +419,8 @@ TEST(Eltwise_CmpSubMod_32) { RunCmpSubMod<uint32_t>(); }
 TEST(Eltwise_OpenFHESwitchModulusPattern_32) { RunSwitchModulusPattern<uint32_t>(); }
 #ifdef HEXL_RVV_HAS_MULT_ADD_MOD
 TEST(Eltwise_MultAddMod_32) { RunMultAddMod<uint32_t>(); }
+#endif
+#ifdef HEXL_RVV_HAS_SIGNED_DIGIT_DECOMPOSE
+TEST(Eltwise_SignedDigitDecompose_32) { RunSignedDigitDecompose<uint32_t>(); }
 #endif
 #endif
