@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
+# SPDX-License-Identifier: Apache-2.0
+#
 # rvv-hexl — RISC-V (RVV 1.0) port of Intel HEXL, drop-in for OpenFHE and Microsoft SEAL.
 #
 # ---- rvv-hexl (the library) ------------------------------------------------
@@ -16,7 +19,6 @@
 #       WITH_RVV_HEXL=OFF|ON  ON = openfhe-hexl backend linked against rvv-hexl
 #                             (builds + installs rvv-hexl first; NATIVE_SIZE 64 or 32)
 #   make openfhe-check        OpenFHE's own unit tests for the selected build
-#   make openfhe-bench        IPCEI benches against the selected build
 #   make openfhe-all          the comparison set: n64, n32, n64 + rvv-hexl, n32 + rvv-hexl
 #   make openfhe-list         what is built for this ISA
 #
@@ -26,12 +28,11 @@
 #                             (builds + installs rvv-hexl first)
 #       SEAL_TESTS=ON         also build SEAL's sealtest (needs libgtest-dev)
 #   make seal-check           test/seal/seal-smoke.cpp (BFV + CKKS round trips) [+ sealtest]
-#   make seal-bench           IPCEI SEAL benches against the selected build
 #   make seal-all             the comparison pair: stock, rvvhexl
 #   make seal-list            what is built for this ISA
 #
 # ---- everything ---------------------------------------------------------------
-#   make bench                rvv-hexl-bench + uarch-bench + IPCEI benches for every OpenFHE and SEAL build + tools
+#   make bench                rvv-hexl-bench + uarch-bench + tools
 #   make run-bench            bench/run.sh (see bench/run.sh --help)
 #   make info | reconfigure | clean | distclean
 #   make rvv-intrinsics-doc   RVA23 RVV intrinsics reference + index into docs/rvv_intrinsics
@@ -46,9 +47,9 @@ include mk/config.mk
 .DEFAULT_GOAL := rvv-hexl
 .PHONY: rvv-hexl rvv-hexl-test rvv-hexl-bench rvv-hexl-install rvv-hexl-uninstall \
         test install gbench uarch-bench \
-        openfhe openfhe-check openfhe-bench openfhe-all openfhe-list \
-        seal seal-check seal-bench seal-all seal-list \
-        bench bench-openfhe-all bench-seal-all tools run-bench info reconfigure format clean distclean \
+        openfhe openfhe-check openfhe-all openfhe-list \
+        seal seal-check seal-all seal-list \
+        bench tools run-bench info reconfigure format clean distclean \
         rvv-intrinsics-doc
 
 # ===========================================================================
@@ -220,11 +221,6 @@ openfhe: $(if $(filter ON,$(WITH_RVV_HEXL)),rvv-hexl-install)
 openfhe-check:
 	$(OFHE_ENV) third_party/openfhe.sh check
 
-openfhe-bench:
-	$(MAKE) --no-print-directory -f mk/openfhe-bench.mk \
-	  OFHE_PREFIX="$(OPENFHE_PREFIX)" HEXL_PREFIX="$(RVV_HEXL_PREFIX)" \
-	  OUTDIR="$(ROOT)/build/bench-openfhe/$(ISA)/$(OPENFHE_NAME)"
-
 openfhe-all:
 	$(MAKE) --no-print-directory openfhe NATIVE_SIZE=64 WITH_RVV_HEXL=OFF
 	$(MAKE) --no-print-directory openfhe NATIVE_SIZE=32 WITH_RVV_HEXL=OFF
@@ -255,11 +251,6 @@ seal: $(if $(filter ON,$(WITH_RVV_HEXL)),rvv-hexl-install)
 seal-check:
 	$(SEAL_ENV) third_party/seal.sh check
 
-seal-bench:
-	$(MAKE) --no-print-directory -f mk/seal-bench.mk \
-	  SEAL_INSTALL="$(SEAL_PREFIX)" HEXL_PREFIX="$(RVV_HEXL_PREFIX)" \
-	  OUTDIR="$(ROOT)/build/bench-seal/$(ISA)/$(SEAL_NAME)"
-
 seal-all:
 	$(MAKE) --no-print-directory seal WITH_RVV_HEXL=OFF
 	$(MAKE) --no-print-directory seal WITH_RVV_HEXL=ON
@@ -274,33 +265,13 @@ seal-list:
 # ===========================================================================
 # Benchmarks
 # ===========================================================================
-# IPCEI benches for EVERY OpenFHE build of this ISA (what bench/run.sh expects)
-bench-openfhe-all:
-	@for d in $(OPENFHE_ROOT)/*/install; do \
-	  [ -d "$$d" ] || { echo "no OpenFHE build under $(OPENFHE_ROOT) (make openfhe)"; break; }; \
-	  name=$$(basename $$(dirname $$d)); \
-	  $(MAKE) --no-print-directory -f mk/openfhe-bench.mk OFHE_PREFIX="$$d" \
-	    HEXL_PREFIX="$(ROOT)/build/$(ISA)-$$(case $$name in *-debug) echo debug;; *) echo release;; esac)/install" \
-	    OUTDIR="$(ROOT)/build/bench-openfhe/$(ISA)/$$name" || exit 1; \
-	done
-
-# IPCEI SEAL benches for EVERY SEAL build of this ISA (skipped if none is built)
-bench-seal-all:
-	@for d in $(SEAL_ROOT)/*/install; do \
-	  [ -d "$$d" ] || { echo "no SEAL build under $(SEAL_ROOT) (make seal): SEAL benches skipped"; break; }; \
-	  name=$$(basename $$(dirname $$d)); \
-	  $(MAKE) --no-print-directory -f mk/seal-bench.mk SEAL_INSTALL="$$d" \
-	    HEXL_PREFIX="$(ROOT)/build/$(ISA)-$$(case $$name in *-debug) echo debug;; *) echo release;; esac)/install" \
-	    OUTDIR="$(ROOT)/build/bench-seal/$(ISA)/$$name" || exit 1; \
-	done
-
 tools: $(ROOT)/build/tools/ailaunch
 
 $(ROOT)/build/tools/ailaunch: bench/tools/ailaunch.c
 	@mkdir -p $(dir $@)
 	$(CC) -O2 -o $@ $<
 
-bench: rvv-hexl-bench $(if $(filter rvv,$(ISA)),uarch-bench) bench-openfhe-all bench-seal-all \
+bench: rvv-hexl-bench $(if $(filter rvv,$(ISA)),uarch-bench) \
        $(if $(filter riscv64,$(HOST_ARCH)),tools)
 
 run-bench:

@@ -1,5 +1,5 @@
 // Copyright (C) 2020 Intel Corporation
-// Copyright (C) 2026 IPCEI-NXP A14 team (RISC-V port)
+// Modifications Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
 // SPDX-License-Identifier: Apache-2.0
 //
 // Public API: identical to Intel HEXL v1.2.6, plus an explicitly marked block

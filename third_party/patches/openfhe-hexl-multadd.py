@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
+# SPDX-License-Identifier: Apache-2.0
+#
 """Give OpenFHE a fused vector multiply-add, backed by rvv-hexl's EltwiseMultAddMod.
 
     OPENFHE_HEXL_MULADD=0|1 openfhe-hexl-multadd.py <staged openfhe-development tree>

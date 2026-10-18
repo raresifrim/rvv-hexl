@@ -1,5 +1,5 @@
 // Copyright (C) 2020 Intel Corporation
-// Copyright (C) 2026 IPCEI-NXP A14 team (RISC-V port)
+// Modifications Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
 // SPDX-License-Identifier: Apache-2.0
 //
 // Scalar number theory. Nothing here is RISC-V specific and nothing is on a

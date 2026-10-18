@@ -1,4 +1,4 @@
-// Copyright (C) 2026 IPCEI-NXP A14 team (RISC-V port)
+// Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
 // SPDX-License-Identifier: Apache-2.0
 //
 // Independent ground truth for the tests. Deliberately naive and written only

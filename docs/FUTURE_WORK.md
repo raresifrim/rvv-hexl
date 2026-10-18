@@ -45,8 +45,7 @@ together with **one polynomial per vector lane**: lane `k` computes the NTT of d
 **How to measure.**
 1. Standalone first: batched NTT with `B` = 4, 8, 16, 32 lanes against `B` calls of the current
    per-polynomial RVV32 kernel (N = 1024/2048, 27-bit q), on both clusters.
-2. If it pays, prototype the binfhe patch and run the IPCEI TFHE benches (`tfhe stress`,
-   `tfhe flags`, `tfhe lut`) against stock OpenFHE and the drop-in rvv-hexl build.
+2. If it pays, prototype the binfhe patch and run the blindloop TFHE benches (`tfhe_openfhe --mode flags|stress`) against stock OpenFHE and the drop-in rvv-hexl build.
 
 **Related.** Cross-limb batching for BFV/CKKS is the same idea with one RNS limb per lane, but
 it needs per-lane moduli and twiddles and competes with OpenFHE's OpenMP parallelism over limbs;

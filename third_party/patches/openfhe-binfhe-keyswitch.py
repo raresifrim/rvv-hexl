@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
+# SPDX-License-Identifier: Apache-2.0
+#
 """Vectorize binfhe's LWE key switching through NativeVector (OpenFHE v1.5.1).
 
     openfhe-binfhe-keyswitch.py <staged openfhe-development tree>

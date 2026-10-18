@@ -6,7 +6,9 @@ into OpenFHE through the same extension point Intel HEXL uses
 SEAL's own `SEAL_USE_INTEL_HEXL` option (no source changes on either side). It implements "Etapa 1" of the
 IPCEI A14 plan (SENTHIPoli D01, *Direcția de accelerare*): an RVV-aware HEXL backend,
 measured on the SpaceMiT K3 (X100 and A100 clusters) against stock OpenFHE and the no-RVV
-baseline.
+baseline. The protocol-level benchmarks that use it as a backend live in
+[blindloop](https://github.com/raresifrim/blindloop); this repository only benchmarks the
+library itself, like Intel HEXL does.
 
 **Status: complete.** Every function of the Intel HEXL 1.2.6 API is implemented: scalar number
 theory, the native kernels and the RVV kernels for all seven eltwise operations and the NTT
@@ -63,9 +65,8 @@ test/                self-contained tests with independent __int128 oracles
 test/seal/           seal-smoke.cpp: end-to-end SEAL check (make seal-check)
 bench/hexl/          HEXL-standard microbenchmarks (Google Benchmark)
 bench/uarch/         vector-unit microbenchmarks: cycles/insn, bandwidth, thread scaling (K3 tuning)
-bench/openfhe/       IPCEI OpenFHE benches (verbatim from ZKP+FHE Research @37a6844)
-bench/seal/          IPCEI SEAL benches (verbatim from ZKP+FHE Research @9d51ffd)
-bench/run.sh         benchmark matrix runner (ISA x OpenFHE/SEAL variant x RVV on/off x cluster)
+bench/tools/         ailaunch: runs a command on the K3's A100 cluster
+bench/run.sh         benchmark matrix runner (ISA x OpenFHE build x RVV on/off x cluster)
 third_party/         OpenFHE / openfhe-hexl / SEAL / Google Benchmark build scripts
 cmake/               HEXLConfig.cmake: lets OpenFHE and SEAL find this library as "HEXL 1.2.6"
 docs/                FUTURE_WORK.md: ideas beyond the drop-in API
@@ -91,7 +92,6 @@ selected by `NATIVE_SIZE` / `WITH_RVV_HEXL` (and `ISA`); every SEAL target on `W
 |---|---|
 | `make openfhe` | configure + build + install OpenFHE v1.5.1 into `build/openfhe/<ISA>/n<NATIVE_SIZE>[-rvvhexl]/` |
 | `make openfhe-check` | OpenFHE's `core_tests`, `pke_tests`, `binfhe_tests` for that build |
-| `make openfhe-bench` | the IPCEI benches against that build |
 | `make openfhe-all` | the comparison set: `n64`, `n32`, `n64-rvvhexl`, `n32-rvvhexl` |
 | `make openfhe-list` | what exists for this ISA (read from each install's `config_core.h`) |
 
@@ -99,13 +99,12 @@ selected by `NATIVE_SIZE` / `WITH_RVV_HEXL` (and `ISA`); every SEAL target on `W
 |---|---|
 | `make seal` | configure + build + install SEAL v4.1.2 (static) into `build/seal/<ISA>/{stock,rvvhexl}/`; `WITH_RVV_HEXL=ON` builds it with `SEAL_USE_INTEL_HEXL=ON` on top of rvv-hexl |
 | `make seal-check` | `test/seal/seal-smoke.cpp` (BFV + CKKS, checked exactly / within 1e-3) against that build; with `SEAL_TESTS=ON` also SEAL's `sealtest` |
-| `make seal-bench` | the IPCEI SEAL benches (`seal_ntt_bench`, BFV deployable and 60-bit) against that build |
 | `make seal-all` | the comparison pair: `stock`, `rvvhexl` |
 | `make seal-list` | what exists for this ISA (read from each install's `seal/util/config.h`) |
 
 | Everything | |
 |---|---|
-| `make bench` | `rvv-hexl-bench` + `uarch-bench` (rvv) + IPCEI benches for every OpenFHE and SEAL build + `ailaunch` |
+| `make bench` | `rvv-hexl-bench` + `uarch-bench` (rvv) + `ailaunch` |
 | `make run-bench` | `bench/run.sh` |
 | `make rvv-intrinsics-doc` | all RVA23 RVV intrinsics + `INDEX.md` + grep-able `rva23-intrinsics.tsv` in `docs/rvv_intrinsics/` (git-ignored) |
 | `make reconfigure` | forget the cached board/toolchain checks (after a compiler upgrade, or on another board) |
@@ -200,7 +199,7 @@ cannot see the target board, so pass `RISCV_MARCH=` for anything other than RVA2
 
 The RVV code can be compiled and tested without the board. With `riscv-gnu-toolchain`,
 `riscv-isa-sim` and `riscv-pk` installed (Homebrew tap `riscv-software-src/riscv`, already on the
-IPCEI Mac):
+development Mac):
 
 ```bash
 make CROSS=riscv64-unknown-elf- RISCV_MARCH=rv64gcv \
@@ -266,3 +265,13 @@ prebuilt route, with `INTEL_HEXL_HINT_DIR` pointing at the rvv-hexl install.
   external products call it (binfhe 1.03-1.17x on the X100); staging OpenFHE with
   `OPENFHE_HEXL_MULADD=0` keeps the two calls, as a baseline.
 * License: Apache-2.0, as upstream Intel HEXL (the public headers derive from it).
+
+## Copyright and license
+
+Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest.
+
+rvv-hexl is derived from [Intel HEXL](https://github.com/intel/hexl) 1.2.6,
+Copyright (C) 2020 Intel Corporation, and is distributed under the same
+[Apache License 2.0](LICENSE). Files that come from Intel HEXL keep Intel's copyright notice and
+carry a "Modifications Copyright" line for the changes; files written for the port carry the
+notice above. See [NOTICE](NOTICE).

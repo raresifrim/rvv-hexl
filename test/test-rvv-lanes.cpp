@@ -1,4 +1,4 @@
-// Copyright (C) 2026 IPCEI-NXP A14 team (RISC-V port)
+// Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
 // SPDX-License-Identifier: Apache-2.0
 //
 // The finished RVV kernels at every lane type (LMUL m1/m2/m4/m8, both storage

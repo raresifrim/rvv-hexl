@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
+# SPDX-License-Identifier: Apache-2.0
+#
 # docs/tools/fetch-rvv-intrinsics.sh — assemble the RVA23 RVV C-intrinsics reference in
 # docs/rvv_intrinsics/ (git-ignored) and build a searchable index of it.
 #

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
+# SPDX-License-Identifier: Apache-2.0
+#
 # mk/detect-riscv.sh — decide, once per toolchain/board, whether rvv-hexl can be built
 # with RVV and which -march strings to use. Called by mk/config.mk, which caches the
 # result in build/config/riscv-<key>.mk (`make reconfigure` forgets it).

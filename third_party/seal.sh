@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
+# SPDX-License-Identifier: Apache-2.0
+#
 # third_party/seal.sh — build / test one Microsoft SEAL configuration.
 #
 #   seal.sh build     configure + build + install the selected configuration
@@ -8,7 +11,7 @@
 #   WITH_RVV_HEXL    ON | OFF      ON: -DSEAL_USE_INTEL_HEXL=ON against rvv-hexl at HEXL_PREFIX
 #   SEAL_DIR         <dir>         build tree in <dir>/build, logs in <dir>/*.log
 #   SEAL_PREFIX      <dir>/install install prefix
-#   SEAL_TAG         v4.1.2        the SEAL release the IPCEI suite uses
+#   SEAL_TAG         v4.1.2        the SEAL release the blindloop suite uses
 #   SEAL_TESTS       ON | OFF      also build SEAL's own sealtest (needs libgtest-dev)
 #   ISA_FLAGS CXX CC JOBS
 #
@@ -21,8 +24,8 @@
 #   * SEAL_BUILD_DEPS=OFF: with ON, SEAL downloads Intel HEXL 1.2.5 itself (x86-only)
 #     instead of looking for ours. As a consequence SEAL's optional dependencies must be
 #     found or disabled: Microsoft GSL (API sugar only), zlib and Zstandard (compressed
-#     serialisation, which the IPCEI suite also turns off) are disabled.
-#   * static libseal (SEAL's default and what the IPCEI suite links), examples on.
+#     serialisation, which the blindloop suite also turns off) are disabled.
+#   * static libseal (SEAL's default and what the blindloop suite links), examples on.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

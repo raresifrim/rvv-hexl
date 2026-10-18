@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
+# Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
+# SPDX-License-Identifier: Apache-2.0
+#
 # bench/run.sh — run the benchmark matrix and collect every result in one folder.
 #
-#   bench/run.sh [--isa rvv,scalar] [--cluster x100,a100|none] [--suite hexl,ipcei,upstream,uarch]
+#   bench/run.sh [--isa rvv,scalar] [--cluster x100,a100|none] [--suite hexl,upstream,uarch]
 #                [--quick] [-o DIR]
 #
 # Matrix (each axis skips what has not been built):
@@ -20,7 +23,6 @@
 #
 # Suites:
 #   hexl      bench-hexl: HEXL-standard kernels (Google Benchmark JSON).
-#   ipcei     the IPCEI OpenFHE and SEAL benches, same arguments as ZKP+FHE Research/benchmark.sh
 #   upstream  OpenFHE's own Google-Benchmark suite (lib-benchmark, poly-benchmark-*,
 #             binfhe-ginx, VectorMath; + the *-hexl ones on rvv-hexl builds)
 #   uarch     bench-uarch (rvv only): vector-unit cycles/instruction, load/store
@@ -31,7 +33,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ISAS="" CLUSTERS="" SUITES="hexl,ipcei,upstream,uarch" QUICK=0 OUT=""
+ISAS="" CLUSTERS="" SUITES="hexl,upstream,uarch" QUICK=0 OUT=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --isa) ISAS="$2"; shift ;;
@@ -136,7 +138,7 @@ for cl in ${CLUSTERS//,/ }; do
       fi
     fi
 
-    # ---- IPCEI OpenFHE benches + upstream OpenFHE benchmarks ------------
+    # ---- upstream OpenFHE benchmarks (each OpenFHE build) ----------------
     for ofhe in "$ROOT/build/openfhe/$isa"/*/; do
       ofhe="${ofhe%/}"; v="$(basename "$ofhe")"
       cfg="$ofhe/install/include/openfhe/core/config_core.h"
@@ -151,29 +153,6 @@ for cl in ${CLUSTERS//,/ }; do
       for mode in "${modes[@]}"; do
         sfx="$v${mode:+-norvv}"
         envs=(LD_LIBRARY_PATH="$ldp" ${mode:+"$mode"})
-
-        if has "$SUITES" ipcei; then
-          b="$ROOT/build/bench-openfhe/$isa/$v"
-          if [ -d "$b" ]; then
-            if [ $QUICK = 1 ]; then R=1; S="--sensors 2 --width 8"; else R=3; S="--sensors 5 --width 32"; fi
-            if [ "$nint" != 32 ]; then   # 49/60-bit moduli need 64-bit words
-              run "$cl" "ntt 49-bit $sfx" "$OUT/ipcei-ntt49-$tag-$sfx.txt" \
-                env "${envs[@]}" "$b/openfhe_ntt_bench" 49 4096 8192 16384 32768
-              run "$cl" "ntt 27-bit $sfx" "$OUT/ipcei-ntt27-$tag-$sfx.txt" \
-                env "${envs[@]}" "$b/openfhe_ntt_bench" 27 1024 2048 4096
-              run "$cl" "bfv openmp sweep $sfx" "$OUT/ipcei-bfv-$tag-$sfx.txt" \
-                env "${envs[@]}" "$b/direction_a_lwe_openfhe_bench" --rounds $R --depth 10
-            fi
-            run "$cl" "tfhe stress $sfx" "$OUT/ipcei-tfhe-stress-$tag-$sfx.txt" \
-              env "${envs[@]}" OMP_NUM_THREADS=1 "$b/direction_a_tfhe_bench" $S --rounds $R --compress
-            run "$cl" "tfhe flags $sfx" "$OUT/ipcei-tfhe-flags-$tag-$sfx.txt" \
-              env "${envs[@]}" OMP_NUM_THREADS=1 "$b/direction_a_tfhe_bench" --sensors 5 --rounds $R --mode flags --compress
-            run "$cl" "tfhe lut $sfx" "$OUT/ipcei-tfhe-lut-$tag-$sfx.txt" \
-              env "${envs[@]}" OMP_NUM_THREADS=1 "$b/direction_a_tfhe_lut_bench"
-          else
-            echo "skip ipcei ($isa/$v): make ISA=$isa bench"
-          fi
-        fi
 
         if has "$SUITES" upstream; then
           ub="$ofhe/build/bin/benchmark"
@@ -192,30 +171,6 @@ for cl in ${CLUSTERS//,/ }; do
         fi
       done
     done
-
-    # ---- IPCEI SEAL benches (bfv_seal_deployable, bfv_seal_pinned_60bit, ntt_seal) ----
-    if has "$SUITES" ipcei; then
-      for sd in "$ROOT/build/seal/$isa"/*/; do
-        sd="${sd%/}"; sv="$(basename "$sd")"
-        cfg="$(ls "$sd"/install/include/SEAL-*/seal/util/config.h 2>/dev/null | head -1)"
-        [ -f "$cfg" ] || continue
-        b="$ROOT/build/bench-seal/$isa/$sv"
-        [ -x "$b/seal_ntt_bench" ] || { echo "skip seal ($isa/$sv): make ISA=$isa bench"; continue; }
-        smodes=("")
-        grep -q '^#define SEAL_USE_INTEL_HEXL' "$cfg" && [ "$isa" = rvv ] && smodes+=("HEXL_DISABLE_RVV=1")
-        if [ $QUICK = 1 ]; then SR=1; else SR=8; fi
-        for mode in "${smodes[@]}"; do
-          sfx="seal-$sv${mode:+-norvv}"
-          envs=(${mode:+"$mode"})
-          run "$cl" "seal ntt $sfx" "$OUT/ipcei-sealntt-$tag-$sfx.txt" \
-            env ${envs[@]+"${envs[@]}"} "$b/seal_ntt_bench" 49 4096 8192 16384 32768
-          run "$cl" "seal bfv deployable $sfx" "$OUT/ipcei-sealbfv-$tag-$sfx.txt" \
-            env ${envs[@]+"${envs[@]}"} "$b/direction_a_lwe_bench" --rounds $SR --pbits 32 --qprimes 5
-          run "$cl" "seal bfv 60-bit $sfx" "$OUT/ipcei-sealbfv60-$tag-$sfx.txt" \
-            env ${envs[@]+"${envs[@]}"} "$b/direction_a_lwe_bench_30bit" --rounds $SR --pbits 32 --qprimes 5 --limbbits 60
-        done
-      done
-    fi
   done
 done
 

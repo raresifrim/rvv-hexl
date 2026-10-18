@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
+// SPDX-License-Identifier: Apache-2.0
+//
 /* ailaunch — run a program on the SpaceMiT K3 A100 ("AI") cores.
  *
  * Mechanism (per github.com/brucehoult/k3_ai): write your own decimal PID to

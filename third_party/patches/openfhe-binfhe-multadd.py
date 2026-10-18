@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
+# SPDX-License-Identifier: Apache-2.0
+#
 """Make binfhe's external products accumulate with NativePoly::ModMulAddEq (OpenFHE v1.5.1).
 
     openfhe-binfhe-multadd.py <staged openfhe-development tree>

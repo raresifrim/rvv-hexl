@@ -1,3 +1,6 @@
+-- Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
+-- SPDX-License-Identifier: Apache-2.0
+--
 -- Project indent style, loaded by `make format` (nvim --headless --clean).
 -- Mirrors the maintainer's editor setup, so formatting on save and
 -- `make format` produce identical files:

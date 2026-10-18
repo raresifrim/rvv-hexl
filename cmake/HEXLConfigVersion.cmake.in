@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
+# SPDX-License-Identifier: Apache-2.0
+#
 # Version file for find_package(HEXL <version>): compatible with any request
 # <= @HEXL_VERSION@ in the 1.x series (same rule as upstream's SameMajorVersion).
 set(PACKAGE_VERSION "@HEXL_VERSION@")

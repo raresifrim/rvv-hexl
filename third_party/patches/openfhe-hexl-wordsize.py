@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
+# SPDX-License-Identifier: Apache-2.0
+#
 """Make the staged openfhe-hexl overlay (v1.5.1.0) independent of NATIVE_SIZE.
 
     openfhe-hexl-wordsize.py <staged openfhe-development tree>

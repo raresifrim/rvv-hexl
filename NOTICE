@@ -1,0 +1,7 @@
+rvv-hexl
+Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest.
+
+This product is a RISC-V (RVV 1.0) port of Intel HEXL 1.2.6
+(https://github.com/intel/hexl), Copyright (C) 2020 Intel Corporation,
+licensed under the Apache License, Version 2.0. Files derived from Intel HEXL
+retain Intel's copyright notice and state the modifications made for the port.

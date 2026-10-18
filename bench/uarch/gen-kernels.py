@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (C) 2026 IPCEI-NXP A14 team (RISC-V port)
+# Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
 # SPDX-License-Identifier: Apache-2.0
 """Generate the bench-uarch kernels: one assembly function per measurement.
 

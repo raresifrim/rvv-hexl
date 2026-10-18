@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
+# SPDX-License-Identifier: Apache-2.0
+#
 # third_party/openfhe.sh — build / test one OpenFHE configuration.
 #
 #   openfhe.sh build     configure + build + install the selected configuration
@@ -19,7 +22,7 @@
 # so OpenFHE's find_package(HEXL 1.2.6) picks up rvv-hexl instead of downloading
 # Intel HEXL from GitHub.
 #
-# Same conventions as the IPCEI suite (ZKP+FHE Research/cpp_benches/common):
+# Same conventions as the blindloop benchmark suite (benches/common):
 #   * WITH_NATIVEOPT=OFF + ISA flags injected by hand (OpenFHE's switch hardcodes
 #     -march=native, which GCC rejects on RISC-V).
 #   * Shared libraries only, for every configuration: the benches are byte-identical
@@ -84,7 +87,7 @@ fetch_stock() {
   patch_multd "$STOCK_SRC/src/core/include/math/hal/intnat/ubintnat.h"
 }
 
-# Same downstream patch as ZKP+FHE Research/cpp_benches/common/build_openfhe.sh:
+# Same downstream patch as blindloop's benches/common/build_openfhe.sh:
 # MultD()'s preprocessor chain covers riscv64 only via HAVE_INT128, which CMake turns
 # off at NATIVE_SIZE=32, so the stock32 build hits `#error Architecture not supported`.
 # Adds an explicit riscv64 arm. Idempotent; inert on other architectures.
