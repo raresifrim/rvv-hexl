@@ -146,6 +146,7 @@ stage_rvvhexl() {
   python3 "$HERE/patches/openfhe-binfhe-keyswitch.py" "$RVVHEXL_SRC"
   python3 "$HERE/patches/openfhe-hexl-multadd.py" "$RVVHEXL_SRC"   # switch: OPENFHE_HEXL_MULADD=0|1
   python3 "$HERE/patches/openfhe-binfhe-multadd.py" "$RVVHEXL_SRC"
+  python3 "$HERE/patches/openfhe-pke-keyswitch-multadd.py" "$RVVHEXL_SRC"
 }
 
 # build_openfhe <src> <label> [extra cmake args...]

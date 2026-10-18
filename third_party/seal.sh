@@ -99,9 +99,28 @@ build_seal() {
   return 0
 }
 
+# rvv-hexl patches (patches/seal-*.py): compiled only into HEXL builds, so applying them
+# to the shared source tree leaves the stock build unchanged. Switches, for A/B runs:
+#   SEAL_RVV_HEXL_KEYSWITCH=0|1 (default 1)  key switching on EltwiseMultAddMod
+#   SEAL_RVV_HEXL_BASECONV=0|1  (default 1)  RNS base conversion on EltwiseFMAMod
+patch_seal() {
+  python3 "$HERE/patches/seal-hexl-keyswitch.py" "$SEAL_SRC"
+  python3 "$HERE/patches/seal-hexl-baseconv.py" "$SEAL_SRC"
+}
+SEAL_DEFS=""
+for v in KEYSWITCH BASECONV; do
+  eval "val=\${SEAL_RVV_HEXL_$v:-}"
+  if [ -n "$val" ]; then
+    case "$val" in 0|1) ;; *) echo "ERROR: SEAL_RVV_HEXL_$v must be 0 or 1" >&2; exit 1 ;; esac
+    SEAL_DEFS="$SEAL_DEFS -DSEAL_RVV_HEXL_$v=$val"
+  fi
+done
+ISA_FLAGS="$ISA_FLAGS$SEAL_DEFS"
+
 case "${1:-}" in
   build)
     fetch_seal
+    patch_seal
     if [ "$WITH_RVV_HEXL" = ON ]; then
       HEXL_PREFIX="${HEXL_PREFIX:?HEXL_PREFIX must point at an rvv-hexl install}"
       [ -f "$HEXL_PREFIX/lib/cmake/hexl-1.2.6/HEXLConfig.cmake" ] \
