@@ -151,6 +151,23 @@ inline void Store(uint32_t* p, V v, size_t vl) {
 	__riscv_vse32(p, v, vl);
 }
 
+/// @brief The same register read as signed / unsigned lanes (no instruction):
+/// for the signed shifts (vsra, vssra) of kernels that keep their values in the
+/// unsigned lane types. One overload per lane type.
+#define HEXL_RVV_SIGN_CAST(T)                                                                          \
+	inline vint##T##_t AsSigned(vuint##T##_t v) { return __riscv_vreinterpret_v_u##T##_i##T(v); } \
+	inline vuint##T##_t AsUnsigned(vint##T##_t v) { return __riscv_vreinterpret_v_i##T##_u##T(v); }
+HEXL_RVV_SIGN_CAST(32mf2)
+HEXL_RVV_SIGN_CAST(32m1)
+HEXL_RVV_SIGN_CAST(32m2)
+HEXL_RVV_SIGN_CAST(32m4)
+HEXL_RVV_SIGN_CAST(32m8)
+HEXL_RVV_SIGN_CAST(64m1)
+HEXL_RVV_SIGN_CAST(64m2)
+HEXL_RVV_SIGN_CAST(64m4)
+HEXL_RVV_SIGN_CAST(64m8)
+#undef HEXL_RVV_SIGN_CAST
+
 // ---------------------------------------------------------------------------
 // e64 path (any modulus up to 62 bits). V = vuint64m1_t ... vuint64m8_t.
 // ---------------------------------------------------------------------------

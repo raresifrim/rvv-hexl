@@ -24,11 +24,11 @@
 namespace intel {
 namespace hexl {
 
-/// @brief STUB, a plain scalar version: one element at a time, OpenFHE's own
-/// shifts. Every kernel below calls it until its body is written, so the
-/// public function, the tests and the OpenFHE patch work from the start.
+/// @brief Reference: a plain scalar version, one element at a time with
+/// OpenFHE's own shifts (rgsw-acc.cpp). The lane tests compare the kernels
+/// against it; it is itself checked against an independent oracle.
 template <typename Word>
-inline void SignedDigitDecomposeStub(Word* const* result, const Word* operand,
+inline void SignedDigitDecomposeReference(Word* const* result, const Word* operand,
 		uint64_t n, uint64_t modulus, uint64_t log_base, uint64_t num_digits) {
 	using S = std::conditional_t<std::is_same_v<Word, uint32_t>, int32_t, int64_t>;
 	using U = std::make_unsigned_t<S>;

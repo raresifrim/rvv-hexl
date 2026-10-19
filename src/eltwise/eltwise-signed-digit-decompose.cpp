@@ -3,6 +3,8 @@
 
 #include "hexl/eltwise/eltwise-signed-digit-decompose.hpp"
 
+#include <type_traits>
+
 #include "eltwise/eltwise-signed-digit-decompose-internal.hpp"
 #include "hexl/logging/logging.hpp"
 #include "hexl/util/check.hpp"
@@ -76,11 +78,41 @@ void SignedDigitDecompose(uint32_t* const* result, const uint32_t* operand,
 // Native (scalar) kernel.
 // ---------------------------------------------------------------------------
 
+/// Blocks of kBlock elements, digit loop outside the element loop: each digit
+/// is one simple pass over a block (the centred values kept in a stack array),
+/// which compilers vectorise, and every operation is branch-free:
+///   centre: c = x - (q AND -(x >= floor(q/2)))
+///   next value: (c - r) >> g = (c + 2^(g-1)) >> g (r the signed low digit)
+///   digit: r = (c << (W - g)) >> (W - g), r mod q = r + (q AND (r >> (W - 1))).
 template <typename Word>
 void SignedDigitDecomposeNative(Word* const* result, const Word* operand,
 		uint64_t n, uint64_t modulus, uint64_t log_base, uint64_t num_digits) {
-	// STUB: replace with the native kernel
-	SignedDigitDecomposeStub<Word>(result, operand, n, modulus, log_base, num_digits);
+	using S = std::conditional_t<std::is_same_v<Word, uint32_t>, int32_t, int64_t>;
+	using U = std::make_unsigned_t<S>;
+	constexpr int kBits = static_cast<int>(sizeof(S) * 8);
+	constexpr uint64_t kBlock = 256;
+	const int g = static_cast<int>(log_base);
+	const int up = kBits - g;
+	const S q = static_cast<S>(modulus);
+	const S h = static_cast<S>(S{1} << (g - 1));
+	const U q_half = static_cast<U>(modulus >> 1);
+	S c[kBlock];
+	for (uint64_t j0 = 0; j0 < n; j0 += kBlock) {
+		const uint64_t m = n - j0 < kBlock ? n - j0 : kBlock;
+		const Word* x = operand + j0;
+		for (uint64_t j = 0; j < m; ++j) {
+			const S centred = static_cast<S>(x[j]) - (q & -static_cast<S>(static_cast<U>(x[j]) >= q_half));
+			c[j] = (centred + h) >> g;  // the dropped lowest digit
+		}
+		for (uint64_t d = 0; d < num_digits; ++d) {
+			Word* out = result[d] + j0;
+			for (uint64_t j = 0; j < m; ++j) {
+				const S r = static_cast<S>(static_cast<U>(c[j]) << up) >> up;
+				c[j] = (c[j] + h) >> g;
+				out[j] = static_cast<Word>(r + (q & (r >> (kBits - 1))));
+			}
+		}
+	}
 }
 
 template void SignedDigitDecomposeNative<uint64_t>(uint64_t* const*, const uint64_t*, uint64_t, uint64_t, uint64_t, uint64_t);

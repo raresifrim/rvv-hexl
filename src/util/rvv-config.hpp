@@ -104,10 +104,12 @@ using FMAMod32 = vuint32m4_t;   // <= m4
 using MultAddMod64 = vuint64m4_t;
 using MultAddMod32 = vuint32m4_t;     // RVV32 on uint32_t storage
 using MultAddMod32U64 = vuint32m4_t;  // RVV32 on uint64_t storage (<= m4)
-				// SignedDigitDecompose (rvv-hexl extension, binfhe): m4 until BM_Lanes_SignedDigitDecompose
-				// has been measured on both clusters.
-using SignedDigitDecompose64 = vuint64m4_t;
-using SignedDigitDecompose32 = vuint32m4_t;     // RVV32 on uint32_t storage
+// SignedDigitDecompose (rvv-hexl extension, binfhe), BM_Lanes_SignedDigitDecompose (2026-10-19,
+// ns per call, X100 / A100): e64 m4 8422 / 6249, m8 8472 / 5399; e32 on uint32_t m4 5796 / 4002,
+// m8 5713 / 3521; e32 on uint64_t (narrowing, <= m4) m2 11002 / 6802, m4 10012 / 5717. m8 is
+// even on the X100 and 12-14% faster on the A100: m8, and u32m4 on uint64_t storage.
+using SignedDigitDecompose64 = vuint64m8_t;
+using SignedDigitDecompose32 = vuint32m8_t;     // RVV32 on uint32_t storage
 using SignedDigitDecompose32U64 = vuint32m4_t;  // RVV32 on uint64_t storage (<= m4)
 
 // ---- NTT -------------------------------------------------------------------

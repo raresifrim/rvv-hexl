@@ -218,7 +218,7 @@ void CheckMultAddMod(const char* lane) {
 }
 
 /// SignedDigitDecompose's RVV kernels against the scalar version
-/// (SignedDigitDecomposeStub, itself checked against an independent oracle in
+/// (SignedDigitDecomposeReference, itself checked against an independent oracle in
 /// test-eltwise.cpp), at the STD128 shape (27-bit q, g = 7, 3 digits) and at
 /// the edges of each lane width. e64 lanes: RVV64; e32 lanes: RVV32 (q < 2^31).
 template <typename Word, class V>
@@ -237,7 +237,7 @@ void CheckSignedDigitDecompose(const char* lane) {
 			std::vector<std::vector<Word>> got(s.digits, std::vector<Word>(n)), want = got;
 			std::vector<Word*> pg(s.digits), pw(s.digits);
 			for (uint64_t d = 0; d < s.digits; ++d) { pg[d] = got[d].data(); pw[d] = want[d].data(); }
-			intel::hexl::SignedDigitDecomposeStub<Word>(pw.data(), x.data(), n, s.q, s.g, s.digits);
+			intel::hexl::SignedDigitDecomposeReference<Word>(pw.data(), x.data(), n, s.q, s.g, s.digits);
 			if constexpr (kE64) {
 				intel::hexl::SignedDigitDecomposeRVV64<V>(pg.data(), x.data(), n, s.q, s.g, s.digits);
 			} else {
