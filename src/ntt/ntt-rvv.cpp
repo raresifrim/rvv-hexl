@@ -15,8 +15,10 @@
 //            per block, last stage with N^{-1} folded in.
 // Without tables for this n and VL (and always for rvv::ntt::PerBlock) every
 // stage runs per block. Contract and twiddle layouts: ntt-rvv-small-span.hpp.
-// Next steps after the small spans: a 32-bit scratch pass for RVV32 on
-// uint64_t storage, and radix-4 for the large spans (two stages per pass).
+// RVV32 on uint64_t storage (OpenFHE NATIVE_SIZE=64 with a modulus < 2^30)
+// runs on a 32-bit scratch: narrowed once on the way in, widened once on the
+// way out, every stage on uint32_t (see NttScratch32 below).
+// Next step: radix-4 for the large spans (two stages per pass).
 
 #include "ntt/ntt-internal.hpp"
 
@@ -29,6 +31,7 @@
 #include "ntt/ntt-rvv-fused-slides.hpp"
 #include "ntt/ntt-rvv-small-span.hpp"
 #include "ntt/ntt-rvv-stages.hpp"
+#include "hexl/util/aligned-allocator.hpp"
 #include "ntt/ntt-rvv-transposed.hpp"
 #include "util/rvv-util.hpp"
 
@@ -95,6 +98,20 @@ inline void InverseSmallSpanRVV64(uint64_t* result, const uint64_t* operand,
 	}
 }
 
+// The 32-bit scratch of the RVV32 transforms on uint64_t storage. In place on
+// uint64_t words every stage narrows its loads and widens its stores (e64
+// loads and stores at twice the LMUL, vnsrl and vzext, 4 vsetvli per strip,
+// twice the memory traffic); on the scratch the stages are plain e32, and the
+// conversion costs two passes per transform instead of one per stage.
+// Measured per large stage, N = 1024 (asm review, 2026-10-19): 2.40x on the
+// X100, 1.57x on the A100. One buffer per thread (OpenFHE may transform from
+// OpenMP threads), grown to the largest n seen, never shrunk.
+inline uint32_t* NttScratch32(uint64_t n) {
+	thread_local AlignedVector64<uint32_t> scratch;
+	if (scratch.size() < n) scratch.resize(n);
+	return scratch.data();
+}
+
 template <typename Word, class V, class SmallSpan>
 void ForwardTransformToBitReverseRVV32(Word* result,
 		const Word* operand, uint64_t n,
@@ -103,6 +120,14 @@ void ForwardTransformToBitReverseRVV32(Word* result,
 		uint64_t input_mod_factor,
 		uint64_t output_mod_factor,
 		const NttSmallSpanTables<SmallSpan, uint32_t>* small_span) {
+	if constexpr (std::is_same_v<Word, uint64_t>) {   // on the 32-bit scratch
+		uint32_t* scratch = NttScratch32(n);
+		CopyRVV32<uint32_t, V>(scratch, operand, n);   // narrow
+		ForwardTransformToBitReverseRVV32<uint32_t, V, SmallSpan>(scratch, scratch, n, modulus, w, w_precon,
+				input_mod_factor, output_mod_factor, small_span);
+		CopyRVV32<uint64_t, V>(result, scratch, n);    // widen
+		return;
+	}
 	const uint32_t modulus32 = static_cast<uint32_t>(modulus);
 	CopyRVV32<Word, V>(result, operand, n);   // then in place
 	if constexpr (!std::is_same_v<SmallSpan, rvv::ntt::PerBlock>) {
@@ -127,6 +152,14 @@ void InverseTransformFromBitReverseRVV32(Word* result,
 	// Mirror of the RVV32 forward: Gentleman-Sande in 32-bit lanes, 32-bit
 	// twiddle tables in stage order, Harvey lazy butterflies in [0, 2q), and
 	// the N^{-1} scaling folded into the last stage.
+	if constexpr (std::is_same_v<Word, uint64_t>) {   // on the 32-bit scratch
+		uint32_t* scratch = NttScratch32(n);
+		CopyRVV32<uint32_t, V>(scratch, operand, n);   // narrow
+		InverseTransformFromBitReverseRVV32<uint32_t, V, SmallSpan>(scratch, scratch, n, modulus, w_inv, w_inv_precon,
+				input_mod_factor, output_mod_factor, small_span);
+		CopyRVV32<uint64_t, V>(result, scratch, n);    // widen
+		return;
+	}
 	const uint32_t modulus32 = static_cast<uint32_t>(modulus);
 	if constexpr (!std::is_same_v<SmallSpan, rvv::ntt::PerBlock>) {
 		if (UseSmallSpan(small_span, n, SmallSpanLanes<SmallSpan, V>())) {
@@ -184,7 +217,7 @@ void InverseTransformFromBitReverseRVV64(
 
 // Every lane type and strategy, so tests and benchmarks can compare them; the
 // public NTT uses the defaults from src/util/rvv-config.hpp. RVV32 on uint64_t
-// storage stops at u32m4 (the narrowing load needs e64 at twice the LMUL).
+// storage stops at u32m4 (the narrowing copy needs e64 at twice the LMUL).
 #define HEXL_NTT_RVV32(Word, V, S)                                                                  \
 	template void ForwardTransformToBitReverseRVV32<Word, V, S>(                                  \
 			Word*, const Word*, uint64_t, uint64_t, const uint32_t*, const uint32_t*, uint64_t,   \

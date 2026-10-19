@@ -18,6 +18,8 @@
 #include <riscv_vector.h>
 #include <stdint.h>
 
+#include <type_traits>
+
 #include "hexl/number-theory/number-theory.hpp"
 #include "util/rvv-util.hpp"
 
@@ -28,10 +30,15 @@ namespace hexl {
 // RVV32
 // ---------------------------------------------------------------------------
 
-/// result = operand (n words); nothing when they alias.
-template <typename Word, class V>
-inline void CopyRVV32(Word* result, const Word* operand, uint64_t n) {
-	if (result == operand) return;
+/// result = operand (n words); nothing when they alias. The source word may
+/// differ from the destination's (values < 2^32): uint64_t -> uint32_t narrows,
+/// uint32_t -> uint64_t widens (the 32-bit scratch of the RVV32 NTT on
+/// uint64_t storage, ntt-rvv.cpp).
+template <typename Word, class V, typename Src = Word>
+inline void CopyRVV32(Word* result, const Src* operand, uint64_t n) {
+	if constexpr (std::is_same_v<Word, Src>) {
+		if (result == operand) return;
+	}
 	for (size_t vl; n > 0; n -= vl, operand += vl, result += vl){
 		vl = rvv::SetVl<V>(n);
 		V v = rvv::Load32<V>(operand, vl);   // plain vle32 or narrowing load, by Word
