@@ -180,6 +180,14 @@ using Ntt64 = NttBestLanes<NttSmallSpan64>::Ntt64;        // RVV64 NTT
 using Ntt32 = NttBestLanes<NttSmallSpan32>::Ntt32;        // RVV32 NTT on uint32_t storage
 using Ntt32U64 = NttBestLanes<NttSmallSpan32>::Ntt32U64;  // RVV32 NTT on uint64_t storage
 
+// FP64 NTT path (src/ntt/ntt-rvv-fp64.hpp), for 2^30 <= q < 2^50: the K3 runs
+// FP64 FMA at 4 elements per cycle against 1 for the e64 integer multiply
+// (vfmadd.vf / vmul.vx at m1, 16 chains, both clusters, 2026-10-20). Off until
+// the FP64 kernels are written and measured against Ntt64; the lane type is a
+// placeholder until BM_Lanes_NttF64 has been measured on both clusters.
+inline constexpr bool kNttFp64 = false;
+using NttF64 = vfloat64m2_t;
+
 }  // namespace cfg
 
 /// Lane type of a kernel whose SEW follows its storage word.

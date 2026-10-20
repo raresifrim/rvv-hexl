@@ -13,6 +13,7 @@
 #include "hexl/util/aligned-allocator.hpp"
 #include "hexl/util/check.hpp"
 #include "ntt/ntt-internal.hpp"
+#include "ntt/ntt-rvv-fp64.hpp"
 #include "ntt/ntt-rvv-small-span.hpp"
 #include "util/cpu-features.hpp"
 
@@ -144,6 +145,9 @@ void NTT::ComputeRootOfUnityPowers() {
 	// configured lane types (reads VLMAX, so only with V at run time).
 	m_rvv_small_span.reset();
 	if (has_rvv) m_rvv_small_span = BuildNttSmallSpanSet(*this);
+	// the FP64 tables, when the FP64 path runs for this modulus (ntt-rvv-fp64.hpp)
+	m_rvv_fp64.reset();
+	if (UseNttFp64(m_q, m_degree)) m_rvv_fp64 = BuildNttFp64Tables(*this);
 #endif
 	// m_avx512_* and m_precon52_* stay empty: x86 AVX-512 only.
 }
@@ -192,7 +196,13 @@ void NTT::ComputeForward(uint64_t* result, const uint64_t* operand,
 #ifdef HEXL_HAS_RVV
 	if (has_rvv) {
 		const NttSmallSpanSet* ss = SmallSpanSet(m_rvv_small_span);
-		if (m_q < s_max_fwd_32_modulus) {
+		if (m_rvv_fp64) {  // UseNttFp64: switched on and 2^30 <= q < 2^50
+			HEXL_VLOG(3, "Calling ForwardTransformToBitReverseRVVF64");
+			ForwardTransformToBitReverseRVVF64(result, operand, m_degree, m_q,
+					*static_cast<const NttFp64Tables*>(m_rvv_fp64.get()), m_root_of_unity_powers.data(),
+					m_precon64_root_of_unity_powers.data(), input_mod_factor, output_mod_factor,
+					ss ? ss->rvv64.get() : nullptr);
+		} else if (m_q < s_max_fwd_32_modulus) {
 			HEXL_VLOG(3, "Calling ForwardTransformToBitReverseRVV32");
 			ForwardTransformToBitReverseRVV32<uint64_t>(
 					result, operand, m_degree, m_q, m_rvv32_root_of_unity_powers.data(),
@@ -231,7 +241,13 @@ void NTT::ComputeInverse(uint64_t* result, const uint64_t* operand,
 #ifdef HEXL_HAS_RVV
 	if (has_rvv) {
 		const NttSmallSpanSet* ss = SmallSpanSet(m_rvv_small_span);
-		if (m_q < s_max_inv_32_modulus) {
+		if (m_rvv_fp64) {  // UseNttFp64: switched on and 2^30 <= q < 2^50
+			HEXL_VLOG(3, "Calling InverseTransformFromBitReverseRVVF64");
+			InverseTransformFromBitReverseRVVF64(result, operand, m_degree, m_q,
+					*static_cast<const NttFp64Tables*>(m_rvv_fp64.get()), m_inv_root_of_unity_powers.data(),
+					m_precon64_inv_root_of_unity_powers.data(), input_mod_factor, output_mod_factor,
+					ss ? ss->rvv64.get() : nullptr);
+		} else if (m_q < s_max_inv_32_modulus) {
 			HEXL_VLOG(3, "Calling InverseTransformFromBitReverseRVV32");
 			InverseTransformFromBitReverseRVV32<uint64_t>(
 					result, operand, m_degree, m_q,

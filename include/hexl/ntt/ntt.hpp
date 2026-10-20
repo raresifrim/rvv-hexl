@@ -371,6 +371,11 @@ private:
 	// the PerBlock strategy, or when N is too small for the strategy. Immutable
 	// once built, so copies of the NTT object share it.
 	std::shared_ptr<const void> m_rvv_small_span;
+
+	// rvv-hexl: FP64 twiddle tables (an NttFp64Tables, src/ntt/ntt-rvv-fp64.hpp),
+	// built only when the FP64 path runs for this modulus (UseNttFp64); null
+	// otherwise. Type-erased like m_rvv_small_span.
+	std::shared_ptr<const void> m_rvv_fp64;
 };
 
 }  // namespace hexl

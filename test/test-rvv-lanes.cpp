@@ -35,6 +35,7 @@
 #include "eltwise/eltwise-sub-mod-internal.hpp"
 #include "hexl/ntt/ntt.hpp"
 #include "ntt/ntt-internal.hpp"
+#include "ntt/ntt-rvv-fp64.hpp"
 #include "ntt/ntt-rvv-small-span.hpp"
 #include "util/rvv-util.hpp"
 #include "util/util-internal.hpp"
@@ -381,6 +382,34 @@ struct NttCase {
 	std::vector<uint64_t> in, want;
 };
 
+/// The NTT cases at one (N, q): forward and inverse at every mod factor (at
+/// large N, `big`: (1, 1) and lazy only), alternating in and out of place.
+void AddNttCases(std::vector<NttCase>& cs, uint64_t n, uint64_t q, bool big) {
+	auto ntt = std::make_shared<const intel::hexl::NTT>(n, q);
+	const std::vector<std::pair<uint64_t, uint64_t>> fwd_factors =
+		big ? std::vector<std::pair<uint64_t, uint64_t>>{{1, 1}, {4, 4}}
+	: std::vector<std::pair<uint64_t, uint64_t>>{{1, 1}, {2, 4}, {4, 1}, {4, 4}};
+	const std::vector<std::pair<uint64_t, uint64_t>> inv_factors =
+		big ? std::vector<std::pair<uint64_t, uint64_t>>{{1, 1}, {2, 2}}
+	: std::vector<std::pair<uint64_t, uint64_t>>{{1, 1}, {2, 2}, {1, 2}, {2, 1}};
+	for (bool forward : {true, false}) {
+		bool in_place = true;  // alternates, starting out of place
+		for (auto [imf, omf] : forward ? fwd_factors : inv_factors) {
+			in_place = !in_place;
+			NttCase c{ntt, n, q, imf, omf, forward, in_place, O::Random(n, imf * q), {}};
+			c.in[0] = imf * q - 1;
+			c.want = c.in;
+			for (auto& x : c.want) x %= q;
+			if (forward) {
+				intel::hexl::ReferenceForwardTransformToBitReverse(c.want.data(), n, q, ntt->GetRootOfUnityPowers().data());
+			} else {
+				intel::hexl::ReferenceInverseTransformFromBitReverse(c.want.data(), n, q, ntt->GetInvRootOfUnityPowers().data());
+			}
+			cs.push_back(std::move(c));
+		}
+	}
+}
+
 /// N = 2 .. 4096 at three moduli and all mod factors; N = 16384 and 65536 at
 /// the largest modulus, (1, 1) and lazy (every strategy at large N). e32 lanes: q < 2^30; e64: q up to 2^62.
 const std::vector<NttCase>& NttCases(bool e32) {
@@ -396,31 +425,7 @@ const std::vector<NttCase>& NttCases(bool e32) {
 			e32 ? std::vector<uint64_t>{O::NttPrime(19, n), O::NttPrime(26, n), O::Primes(1, 29, false, n)[0]}
 		: std::vector<uint64_t>{O::Primes(1, 30, true, n)[0], O::NttPrime(49, n), O::Primes(1, 61, false, n)[0]};
 		if (big) moduli.erase(moduli.begin(), moduli.end() - 1);
-		for (uint64_t q : moduli) {
-			auto ntt = std::make_shared<const intel::hexl::NTT>(n, q);
-			const std::vector<std::pair<uint64_t, uint64_t>> fwd_factors =
-				big ? std::vector<std::pair<uint64_t, uint64_t>>{{1, 1}, {4, 4}}
-			: std::vector<std::pair<uint64_t, uint64_t>>{{1, 1}, {2, 4}, {4, 1}, {4, 4}};
-			const std::vector<std::pair<uint64_t, uint64_t>> inv_factors =
-				big ? std::vector<std::pair<uint64_t, uint64_t>>{{1, 1}, {2, 2}}
-			: std::vector<std::pair<uint64_t, uint64_t>>{{1, 1}, {2, 2}, {1, 2}, {2, 1}};
-			for (bool forward : {true, false}) {
-				bool in_place = true;  // alternates, starting out of place
-				for (auto [imf, omf] : forward ? fwd_factors : inv_factors) {
-					in_place = !in_place;
-					NttCase c{ntt, n, q, imf, omf, forward, in_place, O::Random(n, imf * q), {}};
-					c.in[0] = imf * q - 1;
-					c.want = c.in;
-					for (auto& x : c.want) x %= q;
-					if (forward) {
-						intel::hexl::ReferenceForwardTransformToBitReverse(c.want.data(), n, q, ntt->GetRootOfUnityPowers().data());
-					} else {
-						intel::hexl::ReferenceInverseTransformFromBitReverse(c.want.data(), n, q, ntt->GetInvRootOfUnityPowers().data());
-					}
-					cs.push_back(std::move(c));
-				}
-			}
-		}
+		for (uint64_t q : moduli) AddNttCases(cs, n, q, big);
 	}
 	return cs;
 }
@@ -477,6 +482,55 @@ void CheckNtt(const char* lane, const char* strategy) {
 			CHECK_EQ(got < bound && got % c.q == c.want[i], true,
 					<< dir << " " << lane << " " << strategy << " n=" << c.n << " q=" << c.q << " imf=" << c.imf
 					<< " omf=" << c.omf << (c.in_place ? " in place" : "") << " i=" << i << ": got " << got
+					<< ", want " << c.want[i] << " (mod q), below " << bound);
+		}
+	}
+}
+
+/// The FP64 NTT cases: the e64 cases whose modulus the FP64 path takes
+/// (NttFp64Applicable: the 30- and 49-bit primes up to N = 4096), and the
+/// largest NTT prime below 2^50, where 4q is closest to the 2^52 bound.
+const std::vector<NttCase>& NttFp64Cases() {
+	static std::vector<NttCase> cs;
+	if (!cs.empty()) return cs;
+	for (const NttCase& c : NttCases(false))
+		if (intel::hexl::NttFp64Applicable(c.q, c.n)) cs.push_back(c);
+	std::vector<uint64_t> sizes{2, 16, 1024};
+	if (!hexltest::g_quick) sizes.push_back(16384);
+	for (uint64_t n : sizes) AddNttCases(cs, n, O::Primes(1, 49, false, n)[0], n > 4096);
+	return cs;
+}
+
+/// The FP64 forward and inverse kernels at lane type VF (vfloat64m1_t ..
+/// m8_t), same contract and checks as CheckNtt.
+template <class VF>
+void CheckNttF64(const char* lane) {
+	const intel::hexl::NTT* built = nullptr;
+	std::shared_ptr<const intel::hexl::NttFp64Tables> fp;
+	for (const NttCase& c : NttFp64Cases()) {
+		const intel::hexl::NTT& ntt = *c.ntt;
+		if (&ntt != built) {  // the tables once per (N, q)
+			fp = intel::hexl::BuildNttFp64Tables(ntt);
+			built = &ntt;
+			CHECK_EQ(fp->w.size(), ntt.GetRootOfUnityPowers().size(), << "tables " << lane << " n=" << c.n);
+		}
+		const std::vector<uint64_t> in = c.in;
+		std::vector<uint64_t> out = c.in_place ? in : std::vector<uint64_t>(c.n);
+		const uint64_t* operand = c.in_place ? out.data() : in.data();
+		if (c.forward) {
+			intel::hexl::ForwardTransformToBitReverseRVVF64<VF>(out.data(), operand, c.n, c.q, *fp,
+					ntt.GetRootOfUnityPowers().data(), ntt.GetPrecon64RootOfUnityPowers().data(), c.imf, c.omf);
+		} else {
+			intel::hexl::InverseTransformFromBitReverseRVVF64<VF>(out.data(), operand, c.n, c.q, *fp,
+					ntt.GetInvRootOfUnityPowers().data(), ntt.GetPrecon64InvRootOfUnityPowers().data(), c.imf, c.omf);
+		}
+		const char* dir = c.forward ? "forward" : "inverse";
+		if (!c.in_place) CHECK_VEC_EQ(c.in, in, << "operand modified " << dir << " " << lane << " n=" << c.n);
+		const uint64_t bound = (c.forward ? (c.omf == 1 ? 1 : 4) : c.omf) * c.q;
+		for (uint64_t i = 0; i < c.n; ++i) {
+			CHECK_EQ(out[i] < bound && out[i] % c.q == c.want[i], true,
+					<< "FP64 " << dir << " " << lane << " n=" << c.n << " q=" << c.q << " imf=" << c.imf
+					<< " omf=" << c.omf << (c.in_place ? " in place" : "") << " i=" << i << ": got " << out[i]
 					<< ", want " << c.want[i] << " (mod q), below " << bound);
 		}
 	}
@@ -691,5 +745,14 @@ TEST(RvvLanes_NttFusedSlides) { HEXL_FOR_EACH_NTT_LANE(intel::hexl::rvv::ntt::Fu
 	TEST(RvvLanes_Ntt##S) { HEXL_FOR_EACH_NTT_LANE(intel::hexl::rvv::ntt::S, #S); }
 HEXL_RVV_NTT_TRANSPOSED_SHAPES(HEXL_TRANSPOSED_TEST);
 #undef HEXL_TRANSPOSED_TEST
+
+// The FP64 path (stubs until the kernels are written: they run the e64 kernel)
+TEST(RvvLanes_NttFp64) {
+	CHECK_EQ(NttFp64Cases().empty(), false, << "no FP64-eligible NTT case");
+	CheckNttF64<vfloat64m1_t>("f64m1");
+	CheckNttF64<vfloat64m2_t>("f64m2");
+	CheckNttF64<vfloat64m4_t>("f64m4");
+	CheckNttF64<vfloat64m8_t>("f64m8");
+}
 
 #endif  // HEXL_HAS_RVV

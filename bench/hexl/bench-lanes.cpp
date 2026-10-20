@@ -12,11 +12,15 @@
 // argument, rvv-config.hpp NttSmallSpan*), so the default can be picked per
 // platform: bench-hexl --benchmark_filter=BM_Lanes_Ntt
 //
+// The FP64 NTT path at every lane type against the e64 integer kernel at its
+// default lanes, at the same 49-bit prime: --benchmark_filter=BM_Lanes_NttF64
+//
 // Calls the internal RVV kernels directly (needs -Isrc): the public API only
 // runs the default lanes. Correctness of every lane is in test-rvv-lanes.cpp.
 
 #include <stdint.h>
 
+#include <memory>
 #include <type_traits>
 #include <vector>
 
@@ -33,6 +37,7 @@
 #include "eltwise/eltwise-sub-mod-internal.hpp"
 #include "hexl/ntt/ntt.hpp"
 #include "ntt/ntt-internal.hpp"
+#include "ntt/ntt-rvv-fp64.hpp"
 #include "ntt/ntt-rvv-small-span.hpp"
 #include "util/rvv-util.hpp"
 #endif
@@ -283,6 +288,64 @@ void BM_Lanes_NttInverse(benchmark::State& state) {
 	state.SetItemsProcessed(state.iterations() * k.n);
 }
 
+/// The FP64 NTT path (ntt-rvv-fp64.hpp) at lane type VF, or with VF = void
+/// the e64 integer kernel it replaces (rvv::cfg::Ntt64, NttSmallSpan64), both
+/// at a 49-bit prime (inside [2^30, 2^50)), in place and fully reduced.
+template <class VF>
+struct NttF64Lane {
+	using S64 = intel::hexl::rvv::cfg::NttSmallSpan64;
+	uint64_t n, q;
+	intel::hexl::NTT ntt;
+	std::shared_ptr<const intel::hexl::NttFp64Tables> fp;
+	intel::hexl::NttFp64IntSmallSpan tables;
+	intel::hexl::AlignedVector64<uint64_t> x;
+
+	explicit NttF64Lane(benchmark::State& state)
+		: n(state.range(0)), q(hexlbench::Prime(49, n)), ntt(n, q), fp(intel::hexl::BuildNttFp64Tables(ntt)),
+		tables(intel::hexl::BuildNttSmallSpanTables<S64, uint64_t>(
+					ntt, intel::hexl::SmallSpanLanes<S64, intel::hexl::rvv::cfg::Ntt64>())),
+		x(hexlbench::RandomW<uint64_t>(n, q)) {}
+
+	void Forward() {
+		if constexpr (std::is_void_v<VF>) {
+			intel::hexl::ForwardTransformToBitReverseRVV64(x.data(), x.data(), n, q, ntt.GetRootOfUnityPowers().data(),
+					ntt.GetPrecon64RootOfUnityPowers().data(), 1, 1, &tables);
+		} else {
+			intel::hexl::ForwardTransformToBitReverseRVVF64<VF>(x.data(), x.data(), n, q, *fp,
+					ntt.GetRootOfUnityPowers().data(), ntt.GetPrecon64RootOfUnityPowers().data(), 1, 1, &tables);
+		}
+	}
+	void Inverse() {
+		if constexpr (std::is_void_v<VF>) {
+			intel::hexl::InverseTransformFromBitReverseRVV64(x.data(), x.data(), n, q,
+					ntt.GetInvRootOfUnityPowers().data(), ntt.GetPrecon64InvRootOfUnityPowers().data(), 1, 1, &tables);
+		} else {
+			intel::hexl::InverseTransformFromBitReverseRVVF64<VF>(x.data(), x.data(), n, q, *fp,
+					ntt.GetInvRootOfUnityPowers().data(), ntt.GetPrecon64InvRootOfUnityPowers().data(), 1, 1, &tables);
+		}
+	}
+};
+
+template <class VF>
+void BM_Lanes_NttF64Forward(benchmark::State& state) {
+	NttF64Lane<VF> k(state);
+	for (auto _ : state) {
+		k.Forward();
+		benchmark::ClobberMemory();
+	}
+	state.SetItemsProcessed(state.iterations() * k.n);
+}
+
+template <class VF>
+void BM_Lanes_NttF64Inverse(benchmark::State& state) {
+	NttF64Lane<VF> k(state);
+	for (auto _ : state) {
+		k.Inverse();
+		benchmark::ClobberMemory();
+	}
+	state.SetItemsProcessed(state.iterations() * k.n);
+}
+
 // short names for the benchmark labels
 using PerBlock = intel::hexl::rvv::ntt::PerBlock;
 using FusedSlides = intel::hexl::rvv::ntt::FusedSlides;
@@ -347,5 +410,16 @@ HEXL_NTT_LANES(BM_Lanes_NttInverse, FusedSlides);
 #define HEXL_TRANSPOSED_INV(S) HEXL_NTT_LANES(BM_Lanes_NttInverse, S);
 HEXL_RVV_NTT_TRANSPOSED_SHAPES(HEXL_TRANSPOSED_INV);
 #undef HEXL_TRANSPOSED_INV
+
+// FP64 path: void = the e64 integer baseline
+#define HEXL_NTT_F64_LANES(BM)                                       \
+	BENCHMARK_TEMPLATE(BM, void)->Arg(1024)->Arg(4096)->Arg(16384);         \
+	BENCHMARK_TEMPLATE(BM, vfloat64m1_t)->Arg(1024)->Arg(4096)->Arg(16384); \
+	BENCHMARK_TEMPLATE(BM, vfloat64m2_t)->Arg(1024)->Arg(4096)->Arg(16384); \
+	BENCHMARK_TEMPLATE(BM, vfloat64m4_t)->Arg(1024)->Arg(4096)->Arg(16384); \
+	BENCHMARK_TEMPLATE(BM, vfloat64m8_t)->Arg(1024)->Arg(4096)->Arg(16384)
+HEXL_NTT_F64_LANES(BM_Lanes_NttF64Forward);
+HEXL_NTT_F64_LANES(BM_Lanes_NttF64Inverse);
+#undef HEXL_NTT_F64_LANES
 
 #endif  // HEXL_HAS_RVV
