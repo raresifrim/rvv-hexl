@@ -112,6 +112,17 @@ using SignedDigitDecompose64 = vuint64m8_t;
 using SignedDigitDecompose32 = vuint32m8_t;     // RVV32 on uint32_t storage
 using SignedDigitDecompose32U64 = vuint32m4_t;  // RVV32 on uint64_t storage (<= m4)
 
+// FP64 eltwise path (src/util/fp64-mod.hpp), for 2^30 <= q < 2^50, 64-bit
+// storage: EltwiseMultMod / FMAMod / MultAddMod on the FP64 FMA (4 elements per
+// cycle on the K3) instead of the e64 integer multiply (1). Off until the FP64
+// kernels are written and measured against MultMod64 / FMAMod64 /
+// MultAddMod64; the lane types are placeholders until BM_Lanes_*F64 has been
+// measured on both clusters.
+inline constexpr bool kEltwiseFp64 = false;
+using MultModF64 = vfloat64m4_t;
+using FMAModF64 = vfloat64m4_t;
+using MultAddModF64 = vfloat64m4_t;
+
 // ---- NTT -------------------------------------------------------------------
 // How the small-span NTT stages (span t < VLMAX) run, one strategy for the RVV64
 // kernels and one for both RVV32 kernels (see rvv::ntt above and

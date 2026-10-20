@@ -12,6 +12,7 @@
 #include "hexl/number-theory/number-theory.hpp"
 #include "hexl/util/check.hpp"
 #include "util/cpu-features.hpp"
+#include "util/fp64-mod.hpp"
 
 namespace intel {
 namespace hexl {
@@ -39,7 +40,14 @@ void EltwiseMultMod(uint64_t* result, const uint64_t* operand1,
 
 #ifdef HEXL_HAS_RVV
 		if (has_rvv) {
-			if (modulus < kMaxModulusRVV32) {
+			if (UseEltwiseFp64(modulus)) {  // switched on and 2^30 <= q < 2^50
+				HEXL_VLOG(3, "Calling EltwiseMultModRVVF64");
+				switch (input_mod_factor) {
+					case 1: EltwiseMultModRVVF64<1>(result, operand1, operand2, n, modulus); break;
+					case 2: EltwiseMultModRVVF64<2>(result, operand1, operand2, n, modulus); break;
+					case 4: EltwiseMultModRVVF64<4>(result, operand1, operand2, n, modulus); break;
+				}
+			} else if (modulus < kMaxModulusRVV32) {
 				HEXL_VLOG(3, "Calling EltwiseMultModRVV32<uint64_t>");
 				switch (input_mod_factor) {
 					case 1: EltwiseMultModRVV32<uint64_t, 1>(result, operand1, operand2, n, modulus); break;

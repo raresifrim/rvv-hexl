@@ -29,6 +29,7 @@
 #include "eltwise/eltwise-add-mod-internal.hpp"
 #include "eltwise/eltwise-cmp-add-internal.hpp"
 #include "eltwise/eltwise-cmp-sub-mod-internal.hpp"
+#include "eltwise/eltwise-fma-mod-internal.hpp"
 #include "eltwise/eltwise-mult-add-mod-internal.hpp"
 #include "eltwise/eltwise-mult-mod-internal.hpp"
 #include "eltwise/eltwise-signed-digit-decompose-internal.hpp"
@@ -37,6 +38,7 @@
 #include "ntt/ntt-internal.hpp"
 #include "ntt/ntt-rvv-fp64.hpp"
 #include "ntt/ntt-rvv-small-span.hpp"
+#include "util/fp64-mod.hpp"
 #include "util/rvv-util.hpp"
 #include "util/util-internal.hpp"
 #endif
@@ -215,6 +217,54 @@ void CheckMultAddMod(const char* lane) {
 		CheckMultAddModImf<Word, 1, V>(lane, q);
 		CheckMultAddModImf<Word, 2, V>(lane, q);
 		CheckMultAddModImf<Word, 4, V>(lane, q);
+	}
+}
+
+/// The FP64 eltwise kernels (EltwiseMultMod / FMAMod / MultAddMod RVVF64) at
+/// input mod factor Imf, all inputs anywhere in [0, Imf * q): FMAMod with and
+/// without the addend (arg3 == nullptr), MultAddMod also accumulating in place.
+template <int Imf, class VF>
+void CheckEltwiseF64Imf(const char* lane, uint64_t q) {
+	for (size_t n : kSizes) {
+		auto a = O::Random(n, Imf * q), b = O::Random(n, Imf * q), c = O::Random(n, Imf * q);
+		a[0] = Imf * q - 1; b[0] = Imf * q - 1; c[0] = Imf * q - 1;
+		const uint64_t s = Imf * q - 1 - O::Random(1, q)[0];  // FMAMod's scalar, also < Imf * q
+		std::vector<uint64_t> mul(n), fma(n), fma0(n), mad(n), acc = c;
+		if constexpr (Imf <= 4) {
+			intel::hexl::EltwiseMultModRVVF64<Imf, VF>(mul.data(), a.data(), b.data(), n, q);
+			intel::hexl::EltwiseMultAddModRVVF64<Imf, VF>(mad.data(), a.data(), b.data(), c.data(), n, q);
+			intel::hexl::EltwiseMultAddModRVVF64<Imf, VF>(acc.data(), a.data(), b.data(), acc.data(), n, q);
+		}
+		intel::hexl::EltwiseFMAModRVVF64<Imf, VF>(fma.data(), a.data(), s, c.data(), n, q);
+		intel::hexl::EltwiseFMAModRVVF64<Imf, VF>(fma0.data(), a.data(), s, nullptr, n, q);
+		for (size_t i = 0; i < n; ++i) {
+			const uint64_t ab = O::MulMod(a[i] % q, b[i] % q, q), as = O::MulMod(a[i] % q, s % q, q);
+			const auto where = [&](const char* k) {
+				return std::string(k) + " " + lane + " imf=" + std::to_string(Imf) + " n=" + std::to_string(n) +
+					" q=" + std::to_string(q) + " i=" + std::to_string(i);
+			};
+			if constexpr (Imf <= 4) {
+				CHECK_EQ(mul[i], ab, << where("MultModF64"));
+				CHECK_EQ(mad[i], O::AddMod(ab, c[i] % q, q), << where("MultAddModF64"));
+				CHECK_EQ(acc[i], O::AddMod(ab, c[i] % q, q), << where("MultAddModF64 (result==arg3)"));
+			}
+			CHECK_EQ(fma[i], O::AddMod(as, c[i] % q, q), << where("FMAModF64"));
+			CHECK_EQ(fma0[i], as, << where("FMAModF64 (no addend)"));
+		}
+	}
+}
+
+/// At the moduli the FP64 path takes: its two ends and two inside.
+template <class VF>
+void CheckEltwiseF64(const char* lane) {
+	const std::vector<uint64_t> moduli{O::PrimeAbove(intel::hexl::kFp64MinModulus), O::NttPrime(40, 1),
+		O::NttPrime(49, 1), O::PrimeBelow(intel::hexl::kFp64MaxModulus)};
+	for (uint64_t q : moduli) {
+		CHECK_EQ(intel::hexl::ModMulFp64Applicable(q), true, << "test modulus " << q);
+		CheckEltwiseF64Imf<1, VF>(lane, q);
+		CheckEltwiseF64Imf<2, VF>(lane, q);
+		CheckEltwiseF64Imf<4, VF>(lane, q);
+		CheckEltwiseF64Imf<8, VF>(lane, q);  // FMAMod only
 	}
 }
 
@@ -707,6 +757,14 @@ TEST(RvvLanes_MultAddMod) {
 	CheckMultAddMod<uint64_t, vuint32m1_t>("u64->u32m1");
 	CheckMultAddMod<uint64_t, vuint32m2_t>("u64->u32m2");
 	CheckMultAddMod<uint64_t, vuint32m4_t>("u64->u32m4");
+}
+
+// The FP64 eltwise path (stubs until the kernels are written: they run the e64 kernels)
+TEST(RvvLanes_EltwiseFp64) {
+	CheckEltwiseF64<vfloat64m1_t>("f64m1");
+	CheckEltwiseF64<vfloat64m2_t>("f64m2");
+	CheckEltwiseF64<vfloat64m4_t>("f64m4");
+	CheckEltwiseF64<vfloat64m8_t>("f64m8");
 }
 
 TEST(RvvLanes_SignedDigitDecompose) {

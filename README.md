@@ -278,14 +278,17 @@ prebuilt route, with `INTEL_HEXL_HINT_DIR` pointing at the rvv-hexl install.
   otherwise. Against OpenFHE's loop at STD128 (`BM_SignedDigitDecompose` vs
   `BM_SignedDigitDecomposeOpenFHELoop`, N = 1024, g = 7, 3 digits): 3.4x (X100) and 16.6x (A100) on
   uint64_t storage, 11.9x and 35x on uint32_t.
-* FP64 NTT path (scaffolding, off): for 2^30 <= q < 2^50 the butterfly's modular multiply can run
-  on the FP64 FMA (Harvey's double-precision NTT), which the K3 retires at 4 elements per cycle
-  against 1 for the e64 integer multiply (`results/ntt-width-2026-10-20`). `src/ntt/ntt-rvv-fp64.hpp`
-  has the conditions (`NttFp64Applicable`, `UseNttFp64`), the double twiddle tables and the
-  kernel templates at `vfloat64m1_t`..`m8_t`, whose bodies are stubs that run the e64 kernel;
-  `NTT` dispatches to them when `rvv::cfg::kNttFp64` is on. Tests: `RvvLanes_NttFp64`; benchmark:
-  `BM_Lanes_NttF64*` (the `void` row is the integer baseline). No FP32 path: q < 2^22 only, and
-  no faster than the e32 integer lanes (`fma-throughput32.txt`).
+* FP64 paths (scaffolding, off): for 2^30 <= q < 2^50 the modular multiply can run on the FP64
+  FMA (Harvey's double-precision method), which the K3 retires at 4 elements per cycle against 1
+  for the e64 integer multiply (`results/ntt-width-2026-10-20`). `src/util/fp64-mod.hpp` has the
+  method and the shared condition (`ModMulFp64Applicable`); the NTT (`src/ntt/ntt-rvv-fp64.hpp`:
+  `NttFp64Applicable`, `UseNttFp64`, double twiddle tables) and `EltwiseMultMod` / `FMAMod` /
+  `MultAddMod` (`src/eltwise/eltwise-fp64-rvv.cpp`, `UseEltwiseFp64`) have kernel templates at
+  `vfloat64m1_t`..`m8_t` whose bodies are stubs that run the e64 kernels. The public functions
+  dispatch to them when `rvv::cfg::kNttFp64` / `kEltwiseFp64` are on. Tests: `RvvLanes_NttFp64`,
+  `RvvLanes_EltwiseFp64`; benchmarks: `--benchmark_filter=F64` (the `void` rows are the integer
+  baselines). Below 2^30 (binfhe's 27-bit Q) the e32 integer lanes stay faster; no FP32 path: q
+  < 2^22 only, and no faster than the e32 integer lanes (`fma-throughput32.txt`).
 * License: Apache-2.0, as upstream Intel HEXL (the public headers derive from it).
 
 ## Copyright and license

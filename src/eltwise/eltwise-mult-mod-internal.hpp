@@ -41,6 +41,14 @@ template <int InputModFactor, class V = rvv::cfg::MultMod64>
 void EltwiseMultModRVV64(uint64_t* result, const uint64_t* operand1,
 		const uint64_t* operand2, uint64_t n,
 		uint64_t modulus);
+
+/// @brief RVV, FP64 lanes (rvv-hexl extension, STUB: calls
+/// EltwiseMultModRVV64): the modular product on the FP64 FMA, for
+/// ModMulFp64Applicable moduli (util/fp64-mod.hpp). 64-bit storage; same
+/// contract as EltwiseMultModRVV64. VF: vfloat64m1_t .. vfloat64m8_t.
+template <int InputModFactor, class VF = rvv::cfg::MultModF64>
+void EltwiseMultModRVVF64(uint64_t* result, const uint64_t* operand1,
+		const uint64_t* operand2, uint64_t n, uint64_t modulus);
 #endif
 
 }  // namespace hexl

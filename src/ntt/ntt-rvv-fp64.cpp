@@ -21,11 +21,11 @@ namespace intel {
 namespace hexl {
 
 // The bounds of the path, checked at compile time in every build.
-static_assert(!NttFp64Applicable(kNttFp64MinModulus - 1, 1024), "below 2^30: the e32 lanes");
-static_assert(NttFp64Applicable(kNttFp64MinModulus, 1024) && NttFp64Applicable(kNttFp64MaxModulus - 1, 1024));
-static_assert(!NttFp64Applicable(kNttFp64MaxModulus, 1024), "2^50 and above: the e64 integer lanes");
-static_assert(4 * (kNttFp64MaxModulus - 1) < (1ULL << 52), "lazy values must be exact doubles");
-static_assert(!NttFp64Applicable(kNttFp64MinModulus, 1) && !NttFp64Applicable(kNttFp64MinModulus, 768));
+static_assert(!NttFp64Applicable(kFp64MinModulus - 1, 1024), "below 2^30: the e32 lanes");
+static_assert(NttFp64Applicable(kFp64MinModulus, 1024) && NttFp64Applicable(kFp64MaxModulus - 1, 1024));
+static_assert(!NttFp64Applicable(kFp64MaxModulus, 1024), "2^50 and above: the e64 integer lanes");
+static_assert(4 * (kFp64MaxModulus - 1) < (1ULL << 52), "lazy values must be exact doubles");
+static_assert(!NttFp64Applicable(kFp64MinModulus, 1) && !NttFp64Applicable(kFp64MinModulus, 768));
 
 std::shared_ptr<const NttFp64Tables> BuildNttFp64Tables(const NTT& ntt) {
 	const uint64_t n = ntt.GetDegree(), q = ntt.GetModulus();

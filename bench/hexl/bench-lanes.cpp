@@ -12,8 +12,9 @@
 // argument, rvv-config.hpp NttSmallSpan*), so the default can be picked per
 // platform: bench-hexl --benchmark_filter=BM_Lanes_Ntt
 //
-// The FP64 NTT path at every lane type against the e64 integer kernel at its
-// default lanes, at the same 49-bit prime: --benchmark_filter=BM_Lanes_NttF64
+// The FP64 paths at every lane type against the e64 integer kernels at their
+// default lanes, at the same 49-bit prime: --benchmark_filter=F64 (NTT:
+// BM_Lanes_NttF64*, eltwise: BM_Lanes_{MultMod,FMAMod,MultAddMod}F64).
 //
 // Calls the internal RVV kernels directly (needs -Isrc): the public API only
 // runs the default lanes. Correctness of every lane is in test-rvv-lanes.cpp.
@@ -31,6 +32,7 @@
 #include "eltwise/eltwise-add-mod-internal.hpp"
 #include "eltwise/eltwise-cmp-add-internal.hpp"
 #include "eltwise/eltwise-cmp-sub-mod-internal.hpp"
+#include "eltwise/eltwise-fma-mod-internal.hpp"
 #include "eltwise/eltwise-mult-add-mod-internal.hpp"
 #include "eltwise/eltwise-mult-mod-internal.hpp"
 #include "eltwise/eltwise-signed-digit-decompose-internal.hpp"
@@ -346,6 +348,61 @@ void BM_Lanes_NttF64Inverse(benchmark::State& state) {
 	state.SetItemsProcessed(state.iterations() * k.n);
 }
 
+/// The FP64 eltwise kernels at lane type VF, or with VF = void the e64 integer
+/// kernels they replace (rvv::cfg::MultMod64 / FMAMod64 / MultAddMod64), at a
+/// 49-bit prime (inside [2^30, 2^50)), input_mod_factor 1, n = kN.
+constexpr size_t kF64Bits = 49;
+
+template <class VF>
+void BM_Lanes_MultModF64(benchmark::State& state) {
+	const uint64_t q = hexlbench::Prime(kF64Bits, 1);
+	auto a = hexlbench::RandomW<uint64_t>(kN, q), b = hexlbench::RandomW<uint64_t>(kN, q), r = a;
+	for (auto _ : state) {
+		if constexpr (std::is_void_v<VF>) {
+			intel::hexl::EltwiseMultModRVV64<1>(r.data(), a.data(), b.data(), kN, q);
+		} else {
+			intel::hexl::EltwiseMultModRVVF64<1, VF>(r.data(), a.data(), b.data(), kN, q);
+		}
+		benchmark::ClobberMemory();
+	}
+	state.SetItemsProcessed(state.iterations() * kN);
+}
+
+/// EltwiseFMAMod with the addend (arg3 != nullptr), out of place.
+template <class VF>
+void BM_Lanes_FMAModF64(benchmark::State& state) {
+	const uint64_t q = hexlbench::Prime(kF64Bits, 1);
+	auto a = hexlbench::RandomW<uint64_t>(kN, q), c = hexlbench::RandomW<uint64_t>(kN, q), r = a;
+	const uint64_t s = hexlbench::RandomW<uint64_t>(1, q)[0];
+	for (auto _ : state) {
+		if constexpr (std::is_void_v<VF>) {
+			intel::hexl::EltwiseFMAModRVV64<1>(r.data(), a.data(), s, c.data(), kN, q);
+		} else {
+			intel::hexl::EltwiseFMAModRVVF64<1, VF>(r.data(), a.data(), s, c.data(), kN, q);
+		}
+		benchmark::ClobberMemory();
+	}
+	state.SetItemsProcessed(state.iterations() * kN);
+}
+
+/// EltwiseMultAddMod accumulating in place (result == arg3), as binfhe and
+/// the key switching call it.
+template <class VF>
+void BM_Lanes_MultAddModF64(benchmark::State& state) {
+	const uint64_t q = hexlbench::Prime(kF64Bits, 1);
+	auto a = hexlbench::RandomW<uint64_t>(kN, q), b = hexlbench::RandomW<uint64_t>(kN, q),
+	     acc = hexlbench::RandomW<uint64_t>(kN, q);
+	for (auto _ : state) {
+		if constexpr (std::is_void_v<VF>) {
+			intel::hexl::EltwiseMultAddModRVV64<1>(acc.data(), a.data(), b.data(), acc.data(), kN, q);
+		} else {
+			intel::hexl::EltwiseMultAddModRVVF64<1, VF>(acc.data(), a.data(), b.data(), acc.data(), kN, q);
+		}
+		benchmark::ClobberMemory();
+	}
+	state.SetItemsProcessed(state.iterations() * kN);
+}
+
 // short names for the benchmark labels
 using PerBlock = intel::hexl::rvv::ntt::PerBlock;
 using FusedSlides = intel::hexl::rvv::ntt::FusedSlides;
@@ -421,5 +478,15 @@ HEXL_RVV_NTT_TRANSPOSED_SHAPES(HEXL_TRANSPOSED_INV);
 HEXL_NTT_F64_LANES(BM_Lanes_NttF64Forward);
 HEXL_NTT_F64_LANES(BM_Lanes_NttF64Inverse);
 #undef HEXL_NTT_F64_LANES
+#define HEXL_ELTWISE_F64_LANES(BM)       \
+	BENCHMARK_TEMPLATE(BM, void);         \
+	BENCHMARK_TEMPLATE(BM, vfloat64m1_t); \
+	BENCHMARK_TEMPLATE(BM, vfloat64m2_t); \
+	BENCHMARK_TEMPLATE(BM, vfloat64m4_t); \
+	BENCHMARK_TEMPLATE(BM, vfloat64m8_t)
+HEXL_ELTWISE_F64_LANES(BM_Lanes_MultModF64);
+HEXL_ELTWISE_F64_LANES(BM_Lanes_FMAModF64);
+HEXL_ELTWISE_F64_LANES(BM_Lanes_MultAddModF64);
+#undef HEXL_ELTWISE_F64_LANES
 
 #endif  // HEXL_HAS_RVV
