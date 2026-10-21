@@ -356,3 +356,98 @@ BENCHMARK_TEMPLATE(BM_SignedDigitDecomposeOpenFHELoop, uint32_t)
 	->Args({1024, 7, 3})->Args({2048, 7, 3})->Args({1024, 10, 2})->ArgNames({"n", "g", "digits"});
 #endif
 #endif
+
+#ifdef HEXL_RVV_HAS_BASE_CONVERT
+	// ---- approximate RNS base conversion (rvv-hexl extension; OpenFHE HYBRID key switching) ----
+	// The shapes of blindloop's ckks_openfhe (N = 8192, Q = 46 + 37 + 36 + 37, P = 60, one limb
+	// per digit): shape 0 = ModUp of a 36-bit digit to the other limbs and P (1 -> 4), shape 1 =
+	// ModDown of P to Q (1 -> 4), shape 2 = a 3-limb digit to 5 limbs (larger dnum). Against
+	// OpenFHE's own loop (dcrtpoly-impl.h, v1.5.1, the HAVE_INT128 + OpenMP branch): Shoup for
+	// y_i, 128-bit products summed, one 128-bit Barrett reduction per output limb.
+	struct BaseConvSetup {
+		uint64_t n;
+		std::vector<uint64_t> q, p, q_hat_inv, q_hat_mod_p;
+		std::vector<intel::hexl::AlignedVector64<uint64_t>> x, y;
+		std::vector<const uint64_t*> in;
+		std::vector<uint64_t*> out;
+		explicit BaseConvSetup(benchmark::State& state) : n(state.range(0)) {
+			const uint64_t N = n;
+			switch (state.range(1)) {
+				case 0: q = {Prime(36, N)}; p = {Prime(46, N), Prime(37, N), hexltest::oracle::NttPrime(37, N, 1), Prime(59, N)}; break;
+				case 1: q = {Prime(59, N)}; p = {Prime(46, N), Prime(37, N), Prime(36, N), hexltest::oracle::NttPrime(37, N, 1)}; break;
+				default: q = {Prime(46, N), Prime(37, N), Prime(36, N)};
+					p = {hexltest::oracle::NttPrime(37, N, 1), Prime(59, N), hexltest::oracle::NttPrime(59, N, 1),
+						hexltest::oracle::NttPrime(46, N, 1), hexltest::oracle::NttPrime(36, N, 1)};
+			}
+			const size_t L = q.size(), K = p.size();
+			q_hat_inv.resize(L);
+			q_hat_mod_p.resize(L * K);
+			for (size_t i = 0; i < L; ++i) {
+				uint64_t h = 1;
+				for (size_t k = 0; k < L; ++k)
+					if (k != i) h = hexltest::oracle::MulMod(h, q[k] % q[i], q[i]);
+				q_hat_inv[i] = hexltest::oracle::InvModPrime(h, q[i]);
+				for (size_t j = 0; j < K; ++j) {
+					uint64_t hp = 1;
+					for (size_t k = 0; k < L; ++k)
+						if (k != i) hp = hexltest::oracle::MulMod(hp, q[k] % p[j], p[j]);
+					q_hat_mod_p[i * K + j] = hp;
+				}
+			}
+			for (size_t i = 0; i < L; ++i) x.push_back(RandomW<uint64_t>(n, q[i]));
+			y.assign(K, intel::hexl::AlignedVector64<uint64_t>(n));
+			for (auto& v : x) in.push_back(v.data());
+			for (auto& v : y) out.push_back(v.data());
+		}
+	};
+
+	static void BM_BaseConvert(benchmark::State& state) {
+		BaseConvSetup s(state);
+		const auto run = [&] {
+			BaseConvert(s.out.data(), s.in.data(), s.n, s.q.data(), s.q.size(), s.p.data(), s.p.size(),
+					s.q_hat_inv.data(), s.q_hat_mod_p.data());
+		};
+		HEXL_BENCH_PROBE(state, run());
+		for (auto _ : state) {
+			run();
+			benchmark::ClobberMemory();
+		}
+		state.SetItemsProcessed(static_cast<int64_t>(state.iterations() * s.n));
+	}
+
+	static void BM_BaseConvertOpenFHELoop(benchmark::State& state) {
+		using u128 = unsigned __int128;
+		BaseConvSetup s(state);
+		const size_t L = s.q.size(), K = s.p.size();
+		std::vector<uint64_t> precon(L);
+		std::vector<u128> mu(K);  // OpenFHE's modpBarrettMu: floor(2^128 / p_j)
+		for (size_t i = 0; i < L; ++i) precon[i] = MultiplyFactor(s.q_hat_inv[i], 64, s.q[i]).BarrettFactor();
+		for (size_t j = 0; j < K; ++j) mu[j] = ~u128{0} / s.p[j];
+		std::vector<u128> sum(K);
+		for (auto _ : state) {
+			for (uint64_t k = 0; k < s.n; ++k) {
+				std::fill(sum.begin(), sum.end(), u128{0});
+				for (size_t i = 0; i < L; ++i) {
+					const uint64_t y = MultiplyMod(s.x[i][k], s.q_hat_inv[i], precon[i], s.q[i]);  // ModMulFastConst
+					for (size_t j = 0; j < K; ++j) sum[j] += static_cast<u128>(y) * s.q_hat_mod_p[i * K + j];
+				}
+				for (size_t j = 0; j < K; ++j) {  // BarrettUint128ModUint64: (a * mu) >> 128, low word
+					const u128 a = sum[j];
+					const uint64_t a_lo = static_cast<uint64_t>(a), a_hi = static_cast<uint64_t>(a >> 64);
+					const uint64_t m_lo = static_cast<uint64_t>(mu[j]), m_hi = static_cast<uint64_t>(mu[j] >> 64);
+					const u128 mid = (static_cast<u128>(a_lo) * m_lo >> 64) + static_cast<u128>(a_lo) * m_hi +
+						static_cast<u128>(a_hi) * m_lo;
+					const uint64_t qt = a_hi * m_hi + static_cast<uint64_t>(mid >> 64);
+					uint64_t r = a_lo - qt * s.p[j];
+					while (r >= s.p[j]) r -= s.p[j];
+					s.out[j][k] = r;
+				}
+			}
+			benchmark::ClobberMemory();
+		}
+		state.SetItemsProcessed(static_cast<int64_t>(state.iterations() * s.n));
+	}
+
+BENCHMARK(BM_BaseConvert)->ArgsProduct({{8192, 16384}, {0, 1, 2}})->ArgNames({"n", "shape"});
+BENCHMARK(BM_BaseConvertOpenFHELoop)->ArgsProduct({{8192, 16384}, {0, 1, 2}})->ArgNames({"n", "shape"});
+#endif

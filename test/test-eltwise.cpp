@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // hexl/eltwise: all seven public functions, plus the rvv-hexl extensions
-// EltwiseMultAddMod and SignedDigitDecompose, every size tail, every modulus class, every input/output
+// EltwiseMultAddMod, SignedDigitDecompose and BaseConvert, every size tail, every modulus class, every input/output
 // mod factor, out-of-place AND in-place (OpenFHE calls almost everything with
 // result == operand1).
 //
@@ -13,6 +13,8 @@
 // function's documented preconditions.
 
 #include <type_traits>
+#include <utility>
+#include <vector>
 
 #include "hexl/hexl.hpp"
 #include "oracle.hpp"
@@ -391,6 +393,89 @@ void RunSignedDigitDecompose() {
 }
 #endif
 
+#ifdef HEXL_RVV_HAS_BASE_CONVERT
+/// The constants of a base conversion from first principles: Q_i = prod_{k != i} q_k,
+/// q_hat_inv[i] = Q_i^{-1} mod q_i, q_hat_mod_p[i * K + j] = Q_i mod p_j.
+struct BaseConvertCase {
+	std::vector<uint64_t> q, p, q_hat_inv, q_hat_mod_p;
+	BaseConvertCase(std::vector<uint64_t> q_, std::vector<uint64_t> p_) : q(std::move(q_)), p(std::move(p_)) {
+		const size_t L = q.size(), K = p.size();
+		q_hat_inv.resize(L);
+		q_hat_mod_p.resize(L * K);
+		for (size_t i = 0; i < L; ++i) {
+			uint64_t hat_qi = 1;
+			for (size_t k = 0; k < L; ++k)
+				if (k != i) hat_qi = O::MulMod(hat_qi, q[k] % q[i], q[i]);
+			q_hat_inv[i] = O::InvModPrime(hat_qi, q[i]);
+			for (size_t j = 0; j < K; ++j) {
+				uint64_t hat_pj = 1;
+				for (size_t k = 0; k < L; ++k)
+					if (k != i) hat_pj = O::MulMod(hat_pj, q[k] % p[j], p[j]);
+				q_hat_mod_p[i * K + j] = hat_pj;
+			}
+		}
+	}
+};
+
+/// BaseConvert (rvv-hexl extension, OpenFHE key switching): the defining sum
+/// in plain modular arithmetic for every shape, and for L <= 2 (the CRT value
+/// X < Q fits in 128 bits) that each output is X + u Q mod p_j with 0 <= u < L,
+/// i.e. that this is OpenFHE's approximate conversion. Input limbs larger and
+/// smaller than the output limbs (y_i >= p_j and y_i < p_j), up to 2^60.
+void RunBaseConvert() {
+	using u128 = unsigned __int128;
+	const std::pair<size_t, size_t> shapes[] = {{1, 1}, {1, 4}, {2, 3}, {4, 1}, {4, 5}, {3, 8}, {16, 3}};
+	const std::pair<size_t, size_t> bits[] = {{36, 46}, {59, 30}, {30, 59}, {46, 59}, {59, 58}};
+	for (auto [L, K] : shapes) {
+		for (auto [bq, bp] : bits) {
+			const BaseConvertCase c(O::Primes(L, bq, true, 1), O::Primes(K, bp, false, 1));
+			for (size_t n : O::EltwiseSizes()) {
+				std::vector<std::vector<uint64_t>> x(L);
+				for (size_t i = 0; i < L; ++i) {
+					x[i] = O::Random(n, c.q[i]);
+					x[i][0] = c.q[i] - 1;
+					if (n > 1) x[i][1] = 0;
+				}
+				std::vector<std::vector<uint64_t>> got(K, std::vector<uint64_t>(n, 0x5A5A5A5A5A5A5A5AULL));
+				std::vector<const uint64_t*> in(L);
+				std::vector<uint64_t*> out(K);
+				for (size_t i = 0; i < L; ++i) in[i] = x[i].data();
+				for (size_t j = 0; j < K; ++j) out[j] = got[j].data();
+				BaseConvert(out.data(), in.data(), n, c.q.data(), L, c.p.data(), K, c.q_hat_inv.data(),
+						c.q_hat_mod_p.data());
+				for (size_t k = 0; k < n; ++k) {
+					for (size_t j = 0; j < K; ++j) {
+						uint64_t want = 0;
+						for (size_t i = 0; i < L; ++i) {
+							const uint64_t y = O::MulMod(x[i][k], c.q_hat_inv[i], c.q[i]);
+							want = O::AddMod(want, O::MulMod(y % c.p[j], c.q_hat_mod_p[i * K + j], c.p[j]), c.p[j]);
+						}
+						CHECK_EQ(got[j][k], want, << "BaseConvert L=" << L << " K=" << K << " bits=" << bq << "/" << bp
+								<< " n=" << n << " j=" << j << " k=" << k);
+					}
+					if (L <= 2) {  // X = the CRT value of (x_0, .., x_{L-1}), Q < 2^120
+						u128 Q = 1;
+						for (size_t i = 0; i < L; ++i) Q *= c.q[i];
+						u128 X = 0;
+						for (size_t i = 0; i < L; ++i) {
+							const uint64_t y = O::MulMod(x[i][k], c.q_hat_inv[i], c.q[i]);
+							X = (X + static_cast<u128>(y) * (Q / c.q[i])) % Q;
+						}
+						for (size_t j = 0; j < K; ++j) {
+							bool found = false;
+							for (size_t u = 0; u < L && !found; ++u)
+								found = got[j][k] == static_cast<uint64_t>((X + u * Q) % c.p[j]);
+							CHECK_EQ(found, true, << "BaseConvert is not X + uQ mod p: L=" << L << " K=" << K << " bits="
+									<< bq << "/" << bp << " n=" << n << " j=" << j << " k=" << k);
+						}
+					}
+				}
+			}
+		}
+	}
+}
+#endif
+
 }  // namespace
 
 TEST(Eltwise_AddMod) { RunAddSub<uint64_t>(true); }
@@ -406,6 +491,9 @@ TEST(Eltwise_MultAddMod) { RunMultAddMod<uint64_t>(); }
 #endif
 #ifdef HEXL_RVV_HAS_SIGNED_DIGIT_DECOMPOSE
 TEST(Eltwise_SignedDigitDecompose) { RunSignedDigitDecompose<uint64_t>(); }
+#endif
+#ifdef HEXL_RVV_HAS_BASE_CONVERT
+TEST(Eltwise_BaseConvert) { RunBaseConvert(); }
 #endif
 
 #ifdef HEXL_RVV_HAS_32BIT_API

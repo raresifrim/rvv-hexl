@@ -27,6 +27,7 @@
 #if defined(__has_include)
 #if __has_include("util/rvv-util.hpp")
 #include "eltwise/eltwise-add-mod-internal.hpp"
+#include "eltwise/eltwise-base-convert-internal.hpp"
 #include "eltwise/eltwise-cmp-add-internal.hpp"
 #include "eltwise/eltwise-cmp-sub-mod-internal.hpp"
 #include "eltwise/eltwise-fma-mod-internal.hpp"
@@ -217,6 +218,55 @@ void CheckMultAddMod(const char* lane) {
 		CheckMultAddModImf<Word, 1, V>(lane, q);
 		CheckMultAddModImf<Word, 2, V>(lane, q);
 		CheckMultAddModImf<Word, 4, V>(lane, q);
+	}
+}
+
+/// BaseConvert's RVV kernel at lane type V against BaseConvertReference (OpenFHE's
+/// 128-bit arithmetic), at OpenFHE CKKS shapes (ModUp 1 -> 4, ModDown 1 -> 4,
+/// a wider 3 -> 5) and a long input (16 -> 2), input limbs larger and smaller
+/// than the output limbs, every tail size.
+template <class V>
+void CheckBaseConvert(const char* lane) {
+	const std::pair<size_t, size_t> shapes[] = {{1, 4}, {3, 5}, {16, 2}};
+	const std::pair<size_t, size_t> bits[] = {{36, 59}, {59, 36}, {46, 46}};
+	for (auto [L, K] : shapes) {
+		for (auto [bq, bp] : bits) {
+			const auto q = O::Primes(L, bq, true, 1), p = O::Primes(K, bp, false, 1);
+			std::vector<uint64_t> q_hat_inv(L), q_hat_mod_p(L * K);
+			for (size_t i = 0; i < L; ++i) {
+				uint64_t h = 1;
+				for (size_t k = 0; k < L; ++k)
+					if (k != i) h = O::MulMod(h, q[k] % q[i], q[i]);
+				q_hat_inv[i] = O::InvModPrime(h, q[i]);
+				for (size_t j = 0; j < K; ++j) {
+					uint64_t hp = 1;
+					for (size_t k = 0; k < L; ++k)
+						if (k != i) hp = O::MulMod(hp, q[k] % p[j], p[j]);
+					q_hat_mod_p[i * K + j] = hp;
+				}
+			}
+			const auto args = intel::hexl::MakeBaseConvertArgs(q.data(), L, p.data(), K, q_hat_inv.data(),
+					q_hat_mod_p.data());
+			for (size_t n : kSizes) {
+				std::vector<std::vector<uint64_t>> x(L), got(K, std::vector<uint64_t>(n)), want = got;
+				std::vector<const uint64_t*> in(L);
+				std::vector<uint64_t*> out(K), ref(K);
+				for (size_t i = 0; i < L; ++i) {
+					x[i] = O::Random(n, q[i]);
+					x[i][0] = q[i] - 1;
+					in[i] = x[i].data();
+				}
+				for (size_t j = 0; j < K; ++j) {
+					out[j] = got[j].data();
+					ref[j] = want[j].data();
+				}
+				intel::hexl::BaseConvertRVV64<V>(out.data(), in.data(), n, args);
+				intel::hexl::BaseConvertReference(ref.data(), in.data(), n, args);
+				for (size_t j = 0; j < K; ++j)
+					CHECK_VEC_EQ(want[j], got[j], << "BaseConvert " << lane << " L=" << L << " K=" << K << " bits=" << bq
+							<< "/" << bp << " n=" << n << " j=" << j);
+			}
+		}
 	}
 }
 
@@ -757,6 +807,14 @@ TEST(RvvLanes_MultAddMod) {
 	CheckMultAddMod<uint64_t, vuint32m1_t>("u64->u32m1");
 	CheckMultAddMod<uint64_t, vuint32m2_t>("u64->u32m2");
 	CheckMultAddMod<uint64_t, vuint32m4_t>("u64->u32m4");
+}
+
+// BaseConvert (stub until the kernel is written: it runs the native kernel)
+TEST(RvvLanes_BaseConvert) {
+	CheckBaseConvert<vuint64m1_t>("u64m1");
+	CheckBaseConvert<vuint64m2_t>("u64m2");
+	CheckBaseConvert<vuint64m4_t>("u64m4");
+	CheckBaseConvert<vuint64m8_t>("u64m8");
 }
 
 // The FP64 eltwise path (stubs until the kernels are written: they run the e64 kernels)

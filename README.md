@@ -278,6 +278,16 @@ prebuilt route, with `INTEL_HEXL_HINT_DIR` pointing at the rvv-hexl install.
   otherwise. Against OpenFHE's loop at STD128 (`BM_SignedDigitDecompose` vs
   `BM_SignedDigitDecomposeOpenFHELoop`, N = 1024, g = 7, 3 digits): 3.4x (X100) and 16.6x (A100) on
   uint64_t storage, 11.9x and 35x on uint32_t.
+* `BaseConvert` (`HEXL_RVV_HAS_BASE_CONVERT`, 64-bit storage) is an rvv-hexl extension: OpenFHE's
+  approximate RNS base conversion (`ApproxSwitchCRTBasis`, run by HYBRID key switching in ModUp
+  and ModDown) on whole vectors of coefficients, bit for bit OpenFHE's result. Scalar in
+  OpenFHE (128-bit sums and Barrett reductions): 15% (X100) and 33% (A100) of the CKKS central
+  node's FHE time after rvv-hexl (blindloop `ckks_openfhe` profiles). The native kernel uses
+  Shoup products with lazy sums; the RVV kernel (`src/eltwise/eltwise-base-convert-rvv.cpp`) is
+  a stub that runs it. `openfhe-pke-baseconv.py` routes OpenFHE to it with
+  `OPENFHE_HEXL_BASECONV=1` (default 0 while the RVV kernel is a stub). Tests:
+  `Eltwise_BaseConvert`, `RvvLanes_BaseConvert`; benchmarks: `BM_BaseConvert` against
+  `BM_BaseConvertOpenFHELoop` (OpenFHE's loop), `BM_Lanes_BaseConvert`.
 * FP64 paths (scaffolding, off): for 2^30 <= q < 2^50 the modular multiply can run on the FP64
   FMA (Harvey's double-precision method), which the K3 retires at 4 elements per cycle against 1
   for the e64 integer multiply (`results/ntt-width-2026-10-20`). `src/util/fp64-mod.hpp` has the

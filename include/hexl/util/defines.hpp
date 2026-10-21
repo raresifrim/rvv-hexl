@@ -38,3 +38,6 @@
 // SignedDigitDecompose: OpenFHE binfhe's signed gadget decomposition, both storage
 // words (include/hexl/eltwise/eltwise-signed-digit-decompose.hpp).
 #define HEXL_RVV_HAS_SIGNED_DIGIT_DECOMPOSE 1
+// BaseConvert: the approximate RNS base conversion of OpenFHE's key switching
+// (include/hexl/eltwise/eltwise-base-convert.hpp), 64-bit storage.
+#define HEXL_RVV_HAS_BASE_CONVERT 1

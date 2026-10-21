@@ -30,6 +30,7 @@
 #if defined(__has_include)
 #if __has_include("util/rvv-config.hpp")
 #include "eltwise/eltwise-add-mod-internal.hpp"
+#include "eltwise/eltwise-base-convert-internal.hpp"
 #include "eltwise/eltwise-cmp-add-internal.hpp"
 #include "eltwise/eltwise-cmp-sub-mod-internal.hpp"
 #include "eltwise/eltwise-fma-mod-internal.hpp"
@@ -403,6 +404,34 @@ void BM_Lanes_MultAddModF64(benchmark::State& state) {
 	state.SetItemsProcessed(state.iterations() * kN);
 }
 
+/// BaseConvert's RVV kernel at lane type V (or, with V = void, the native
+/// kernel), at blindloop ckks_openfhe's ModUp shape: N = 8192, a 36-bit digit
+/// to 4 limbs (46, 37, 37, 59 bits).
+template <class V>
+void BM_Lanes_BaseConvert(benchmark::State& state) {
+	namespace O = hexltest::oracle;
+	const uint64_t n = 8192;
+	const std::vector<uint64_t> q{hexlbench::Prime(36, n)},
+	      p{hexlbench::Prime(46, n), hexlbench::Prime(37, n), O::NttPrime(37, n, 1), hexlbench::Prime(59, n)};
+	std::vector<uint64_t> q_hat_inv{1}, q_hat_mod_p(p.size(), 1);  // L = 1: Q_0 = 1
+	const auto args = intel::hexl::MakeBaseConvertArgs(q.data(), 1, p.data(), p.size(), q_hat_inv.data(),
+			q_hat_mod_p.data());
+	auto x = hexlbench::RandomW<uint64_t>(n, q[0]);
+	std::vector<intel::hexl::AlignedVector64<uint64_t>> y(p.size(), intel::hexl::AlignedVector64<uint64_t>(n));
+	const uint64_t* in[1] = {x.data()};
+	std::vector<uint64_t*> out;
+	for (auto& v : y) out.push_back(v.data());
+	for (auto _ : state) {
+		if constexpr (std::is_void_v<V>) {
+			intel::hexl::BaseConvertNative(out.data(), in, n, args);
+		} else {
+			intel::hexl::BaseConvertRVV64<V>(out.data(), in, n, args);
+		}
+		benchmark::ClobberMemory();
+	}
+	state.SetItemsProcessed(state.iterations() * n);
+}
+
 // short names for the benchmark labels
 using PerBlock = intel::hexl::rvv::ntt::PerBlock;
 using FusedSlides = intel::hexl::rvv::ntt::FusedSlides;
@@ -478,6 +507,13 @@ HEXL_RVV_NTT_TRANSPOSED_SHAPES(HEXL_TRANSPOSED_INV);
 HEXL_NTT_F64_LANES(BM_Lanes_NttF64Forward);
 HEXL_NTT_F64_LANES(BM_Lanes_NttF64Inverse);
 #undef HEXL_NTT_F64_LANES
+// BaseConvert: void = the native kernel
+BENCHMARK_TEMPLATE(BM_Lanes_BaseConvert, void);
+BENCHMARK_TEMPLATE(BM_Lanes_BaseConvert, vuint64m1_t);
+BENCHMARK_TEMPLATE(BM_Lanes_BaseConvert, vuint64m2_t);
+BENCHMARK_TEMPLATE(BM_Lanes_BaseConvert, vuint64m4_t);
+BENCHMARK_TEMPLATE(BM_Lanes_BaseConvert, vuint64m8_t);
+
 #define HEXL_ELTWISE_F64_LANES(BM)       \
 	BENCHMARK_TEMPLATE(BM, void);         \
 	BENCHMARK_TEMPLATE(BM, vfloat64m1_t); \

@@ -43,6 +43,9 @@
 #     and patches/openfhe-binfhe-multadd.py makes binfhe's external products accumulate with it.
 #     By default it runs as one rvv-hexl EltwiseMultAddMod call; OPENFHE_HEXL_MULADD=0 keeps
 #     the two calls it replaces (EltwiseMultMod + EltwiseAddMod), as a comparison baseline.
+#   * patches/openfhe-pke-baseconv.py makes the overlay's ApproxSwitchCRTBasis (HYBRID key
+#     switching: ModUp, ModDown) one rvv-hexl BaseConvert call. Off by default
+#     (OPENFHE_HEXL_BASECONV=1 turns it on) while rvv-hexl's RVV kernel is a stub.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -148,6 +151,7 @@ stage_rvvhexl() {
   python3 "$HERE/patches/openfhe-binfhe-multadd.py" "$RVVHEXL_SRC"
   python3 "$HERE/patches/openfhe-pke-keyswitch-multadd.py" "$RVVHEXL_SRC"
   python3 "$HERE/patches/openfhe-binfhe-decompose.py" "$RVVHEXL_SRC"   # switch: OPENFHE_HEXL_DECOMPOSE=0|1
+  python3 "$HERE/patches/openfhe-pke-baseconv.py" "$RVVHEXL_SRC"   # switch: OPENFHE_HEXL_BASECONV=0|1 (default 0)
 }
 
 # build_openfhe <src> <label> [extra cmake args...]
