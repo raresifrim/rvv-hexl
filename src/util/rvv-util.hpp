@@ -191,6 +191,23 @@ inline VF LoadF64(const double* p, size_t vl) {
 	}
 }
 
+/// @brief A vector of VF with every lane set to x (vfmv.v.f), for the FP64
+/// kernels' constants (q, the 2^52 + 2^51 rounding constant): set once outside
+/// the loop at VLMAX, used with the .vv intrinsics.
+template <class VF>
+inline VF SplatF64(double x, size_t vl) {
+	static_assert(IsF64<VF>, "rvv::SplatF64<VF>: VF must be vfloat64m1_t..m8_t");
+	if constexpr (std::is_same_v<VF, vfloat64m1_t>) {
+		return __riscv_vfmv_v_f_f64m1(x, vl);
+	} else if constexpr (std::is_same_v<VF, vfloat64m2_t>) {
+		return __riscv_vfmv_v_f_f64m2(x, vl);
+	} else if constexpr (std::is_same_v<VF, vfloat64m4_t>) {
+		return __riscv_vfmv_v_f_f64m4(x, vl);
+	} else {
+		return __riscv_vfmv_v_f_f64m8(x, vl);
+	}
+}
+
 /// @brief Unit-stride store of vl doubles (lane type deduced from v).
 template <class VF>
 inline void Store(double* p, VF v, size_t vl) {

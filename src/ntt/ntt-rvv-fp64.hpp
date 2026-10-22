@@ -37,9 +37,16 @@ constexpr bool NttFp64Applicable(uint64_t modulus, uint64_t n) {
 
 /// FP64 twiddle tables of one NTT object: its root-of-unity tables (same orders
 /// as NTT::GetRootOfUnityPowers / GetInvRootOfUnityPowers) as doubles, q and 1/q.
+/// Each twiddle w comes with its quotient factor w / q, the FP counterpart of a
+/// Shoup factor: the butterfly's quotient is round(y * (w / q)), which does not
+/// wait for the product y * w. The last inverse stage has N^{-1} folded in, as
+/// in the integer kernels (InverseLastStageRVV64).
 struct NttFp64Tables {
-	AlignedVector64<double> w, w_inv;
-	double q = 0, q_inv = 0;
+	AlignedVector64<double> w, w_inv;                // w < q < 2^50: exact
+	AlignedVector64<double> w_over_q, w_inv_over_q;  // fl(w / q): relative error <= 2^-53
+	double q = 0, q_inv = 0;                         // q, fl(1 / q)
+	double n_inv = 0, n_inv_over_q = 0;              // N^{-1} mod q, fl(N^{-1} / q)
+	double wn_inv = 0, wn_inv_over_q = 0;            // w_inv[n - 1] N^{-1} mod q (last inverse twiddle), / q
 };
 
 /// Builds the FP64 tables of `ntt` (its modulus must satisfy NttFp64Applicable).

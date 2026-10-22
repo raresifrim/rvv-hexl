@@ -8,6 +8,7 @@
 
 #include "ntt/ntt-rvv-fp64.hpp"
 
+#include "hexl/number-theory/number-theory.hpp"
 #include "hexl/util/check.hpp"
 #include "ntt/ntt-internal.hpp"
 
@@ -30,16 +31,30 @@ static_assert(!NttFp64Applicable(kFp64MinModulus, 1) && !NttFp64Applicable(kFp64
 std::shared_ptr<const NttFp64Tables> BuildNttFp64Tables(const NTT& ntt) {
 	const uint64_t n = ntt.GetDegree(), q = ntt.GetModulus();
 	HEXL_CHECK(NttFp64Applicable(q, n), "BuildNttFp64Tables: modulus " << q << " outside [2^30, 2^50)");
-	(void)n;
 	auto t = std::make_shared<NttFp64Tables>();
 	const auto& w = ntt.GetRootOfUnityPowers();
 	const auto& wi = ntt.GetInvRootOfUnityPowers();
+	const double qd = static_cast<double>(q);
 	t->w.resize(w.size());
+	t->w_over_q.resize(w.size());
 	t->w_inv.resize(wi.size());
-	for (size_t i = 0; i < w.size(); ++i) t->w[i] = static_cast<double>(w[i]);   // < q < 2^50: exact
-	for (size_t i = 0; i < wi.size(); ++i) t->w_inv[i] = static_cast<double>(wi[i]);
-	t->q = static_cast<double>(q);
-	t->q_inv = 1.0 / static_cast<double>(q);
+	t->w_inv_over_q.resize(wi.size());
+	for (size_t i = 0; i < w.size(); ++i) {
+		t->w[i] = static_cast<double>(w[i]);  // < q < 2^50: exact
+		t->w_over_q[i] = t->w[i] / qd;        // one correctly rounded division of exact values
+	}
+	for (size_t i = 0; i < wi.size(); ++i) {
+		t->w_inv[i] = static_cast<double>(wi[i]);
+		t->w_inv_over_q[i] = t->w_inv[i] / qd;
+	}
+	t->q = qd;
+	t->q_inv = 1.0 / qd;
+	const uint64_t n_inv = InverseMod(n, q);
+	const uint64_t wn_inv = MultiplyMod(wi[n - 1], n_inv, q);  // as InverseLastStageRVV64
+	t->n_inv = static_cast<double>(n_inv);
+	t->n_inv_over_q = t->n_inv / qd;
+	t->wn_inv = static_cast<double>(wn_inv);
+	t->wn_inv_over_q = t->wn_inv / qd;
 	return t;
 }
 

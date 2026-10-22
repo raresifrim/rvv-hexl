@@ -779,6 +779,10 @@ void CheckF64Helpers(const char* lane) {
 			const size_t vl = rvv::SetVl<VU>(n - i);
 			rvv::Store(dout.data() + i, rvv::LoadF64<VF>(d.data() + i, vl), vl);
 			const VF x = __riscv_vfcvt_f(rvv::Load<VU>(u.data() + i, vl), vl);
+			std::vector<double> sp(vl, 0.0);
+			rvv::Store(sp.data(), rvv::SplatF64<VF>(0x1.8p52, vl), vl);
+			for (size_t k = 0; k < vl; ++k)
+				CHECK_EQ(sp[k] == 0x1.8p52, true, << "SplatF64 " << lane << " vl=" << vl << " k=" << k);
 			rvv::Store(uout.data() + i, __riscv_vfcvt_xu(x, vl), vl);
 			i += vl;
 		}
@@ -897,6 +901,34 @@ TEST(RvvLanes_NttFusedSlides) { HEXL_FOR_EACH_NTT_LANE(intel::hexl::rvv::ntt::Fu
 	TEST(RvvLanes_Ntt##S) { HEXL_FOR_EACH_NTT_LANE(intel::hexl::rvv::ntt::S, #S); }
 HEXL_RVV_NTT_TRANSPOSED_SHAPES(HEXL_TRANSPOSED_TEST);
 #undef HEXL_TRANSPOSED_TEST
+
+// BuildNttFp64Tables: the doubles are the integer tables exactly, each w / q
+// the correctly rounded quotient, N^{-1} and the last inverse twiddle as in
+// InverseLastStageRVV64.
+TEST(RvvLanes_NttFp64Tables) {
+	const intel::hexl::NTT* seen = nullptr;
+	for (const NttCase& c : NttFp64Cases()) {
+		if (c.ntt.get() == seen) continue;
+		seen = c.ntt.get();
+		const auto fp = intel::hexl::BuildNttFp64Tables(*c.ntt);
+		const auto& w = c.ntt->GetRootOfUnityPowers();
+		const auto& wi = c.ntt->GetInvRootOfUnityPowers();
+		const double qd = static_cast<double>(c.q);
+		CHECK_EQ(fp->w.size() == w.size() && fp->w_over_q.size() == w.size() && fp->w_inv.size() == wi.size() &&
+				fp->w_inv_over_q.size() == wi.size(), true, << "table sizes n=" << c.n);
+		for (size_t i = 0; i < w.size(); ++i) {
+			CHECK_EQ(static_cast<uint64_t>(fp->w[i]), w[i], << "w n=" << c.n << " i=" << i);
+			CHECK_EQ(fp->w_over_q[i] == fp->w[i] / qd, true, << "w / q n=" << c.n << " i=" << i);
+			CHECK_EQ(static_cast<uint64_t>(fp->w_inv[i]), wi[i], << "w_inv n=" << c.n << " i=" << i);
+			CHECK_EQ(fp->w_inv_over_q[i] == fp->w_inv[i] / qd, true, << "w_inv / q n=" << c.n << " i=" << i);
+		}
+		const uint64_t n_inv = static_cast<uint64_t>(fp->n_inv);
+		CHECK_EQ(O::MulMod(n_inv, c.n % c.q, c.q), uint64_t{1}, << "N^-1 n=" << c.n << " q=" << c.q);
+		CHECK_EQ(static_cast<uint64_t>(fp->wn_inv), O::MulMod(wi[c.n - 1], n_inv, c.q), << "w_inv[n-1] N^-1 n=" << c.n);
+		CHECK_EQ(fp->q == qd && fp->q_inv == 1.0 / qd && fp->n_inv_over_q == fp->n_inv / qd &&
+				fp->wn_inv_over_q == fp->wn_inv / qd, true, << "scalars n=" << c.n);
+	}
+}
 
 // The FP64 path (stubs until the kernels are written: they run the e64 kernel)
 TEST(RvvLanes_NttFp64) {
