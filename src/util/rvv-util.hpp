@@ -151,6 +151,53 @@ inline void Store(uint32_t* p, V v, size_t vl) {
 	__riscv_vse32(p, v, vl);
 }
 
+// ---------------------------------------------------------------------------
+// FP64 lanes, for the FP64 paths (util/fp64-mod.hpp): VF is vfloat64m1_t..m8_t.
+// The uint64_t data goes through the e64 lane type with the same LMUL (UintOf):
+//   using VU = rvv::UintOf<VF>;
+//   size_t vl = rvv::SetVl<VU>(n);
+//   VF x = __riscv_vfcvt_f(rvv::Load<VU>(p, vl), vl);   // exact below 2^53
+//   rvv::Store(p, __riscv_vfcvt_xu(r, vl), vl);
+// The double tables load with LoadF64<VF> and store with Store(double*, ...);
+// the arithmetic uses the overloaded intrinsics, which follow VF.
+// ---------------------------------------------------------------------------
+
+/// @brief The e64 integer lane type with VF's LMUL (vfloat64m2_t -> vuint64m2_t),
+/// the return type of the overloaded vfcvt.xu.f.
+template <class VF>
+using UintOf = decltype(__riscv_vfcvt_xu(std::declval<VF>(), size_t{}));
+
+/// @brief The FP64 lane type with V's LMUL (vuint64m2_t -> vfloat64m2_t), the
+/// return type of the overloaded vfcvt.f.xu.
+template <class V>
+using F64Of = decltype(__riscv_vfcvt_f(std::declval<V>(), size_t{}));
+
+template <class VF>
+constexpr bool IsF64 = std::is_same_v<VF, vfloat64m1_t> || std::is_same_v<VF, vfloat64m2_t> ||
+	std::is_same_v<VF, vfloat64m4_t> || std::is_same_v<VF, vfloat64m8_t>;
+
+/// @brief Unit-stride load of vl doubles as lane type VF.
+template <class VF>
+inline VF LoadF64(const double* p, size_t vl) {
+	static_assert(IsF64<VF>, "rvv::LoadF64<VF>: VF must be vfloat64m1_t..m8_t");
+	if constexpr (std::is_same_v<VF, vfloat64m1_t>) {
+		return __riscv_vle64_v_f64m1(p, vl);
+	} else if constexpr (std::is_same_v<VF, vfloat64m2_t>) {
+		return __riscv_vle64_v_f64m2(p, vl);
+	} else if constexpr (std::is_same_v<VF, vfloat64m4_t>) {
+		return __riscv_vle64_v_f64m4(p, vl);
+	} else {
+		return __riscv_vle64_v_f64m8(p, vl);
+	}
+}
+
+/// @brief Unit-stride store of vl doubles (lane type deduced from v).
+template <class VF>
+inline void Store(double* p, VF v, size_t vl) {
+	static_assert(IsF64<VF>, "rvv::Store(double*, v): v must be an f64 vector");
+	__riscv_vse64(p, v, vl);
+}
+
 /// @brief The same register read as signed / unsigned lanes (no instruction):
 /// for the signed shifts (vsra, vssra) of kernels that keep their values in the
 /// unsigned lane types. One overload per lane type.

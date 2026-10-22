@@ -760,6 +760,42 @@ void CheckSmallSpanLayouts(const char* name) {
 	CHECK<uint32_t, vuint32m4_t>("u32m4");             \
 	CHECK<uint32_t, vuint32m8_t>("u32m8")
 
+/// The FP64 lane helpers (rvv-util.hpp): UintOf / F64Of map VF and its e64 lane
+/// type both ways at the same LMUL; LoadF64 / Store(double*) round-trip
+/// doubles; uint64_t -> double -> uint64_t through vfcvt is exact below 2^53.
+/// Every tail length up to three registers.
+template <class VF, class VU>
+void CheckF64Helpers(const char* lane) {
+	static_assert(std::is_same_v<rvv::UintOf<VF>, VU> && std::is_same_v<rvv::F64Of<VU>, VF>);
+	static_assert(rvv::IsF64<VF> && !rvv::IsF64<VU>);
+	const size_t vlmax = rvv::VlMax<VU>();
+	for (size_t n = 1; n <= 3 * vlmax; ++n) {
+		auto u = O::Random(n, 1ULL << 53);
+		u[0] = (1ULL << 53) - 1;
+		std::vector<double> d(n), dout(n, -1.0);
+		for (size_t i = 0; i < n; ++i) d[i] = static_cast<double>(u[i]) * 0.5;
+		std::vector<uint64_t> uout(n, ~0ULL);
+		for (size_t i = 0; i < n;) {
+			const size_t vl = rvv::SetVl<VU>(n - i);
+			rvv::Store(dout.data() + i, rvv::LoadF64<VF>(d.data() + i, vl), vl);
+			const VF x = __riscv_vfcvt_f(rvv::Load<VU>(u.data() + i, vl), vl);
+			rvv::Store(uout.data() + i, __riscv_vfcvt_xu(x, vl), vl);
+			i += vl;
+		}
+		for (size_t i = 0; i < n; ++i) {
+			CHECK_EQ(dout[i] == d[i], true, << "LoadF64/Store(double*) " << lane << " n=" << n << " i=" << i);
+			CHECK_EQ(uout[i], u[i], << "u64 -> f64 -> u64 " << lane << " n=" << n << " i=" << i);
+		}
+	}
+}
+
+TEST(RvvLanes_F64Helpers) {
+	CheckF64Helpers<vfloat64m1_t, vuint64m1_t>("f64m1");
+	CheckF64Helpers<vfloat64m2_t, vuint64m2_t>("f64m2");
+	CheckF64Helpers<vfloat64m4_t, vuint64m4_t>("f64m4");
+	CheckF64Helpers<vfloat64m8_t, vuint64m8_t>("f64m8");
+}
+
 TEST(RvvLanes_SetVlLoadStore) {
 	CheckSetVlLoadStore<vuint64m1_t, uint64_t>("u64m1", __riscv_vsetvlmax_e64m1());
 	CheckSetVlLoadStore<vuint64m2_t, uint64_t>("u64m2", __riscv_vsetvlmax_e64m2());
