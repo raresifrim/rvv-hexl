@@ -119,13 +119,18 @@ using BaseConvert64 = vuint64m2_t;
 
 // FP64 eltwise path (src/util/fp64-mod.hpp), for 2^30 <= q < 2^50, 64-bit
 // storage: EltwiseMultMod / FMAMod / MultAddMod on the FP64 FMA (4 elements per
-// cycle on the K3) instead of the e64 integer multiply (1). Off until the FP64
-// kernels are written and measured against MultMod64 / FMAMod64 /
-// MultAddMod64; the lane types are placeholders until BM_Lanes_*F64 has been
-// measured on both clusters.
+// cycle on the K3) instead of the e64 integer multiply (1). Off until measured
+// on the protocol. BM_Lanes_*F64 (n = 4096, 49-bit q, 2026-10-22, median of 5;
+// gain over the integer kernel at its default lanes, X100 / A100 / geomean;
+// rvv-hexl results/eltwise-fp64-2026-10-22):
+//                 m1                 m2                 m4                 m8
+//   MultMod     0.56 / 0.64 / 0.60  1.07 / 0.92 / 1.00  1.64 / 1.23 / 1.42  1.60 / 1.39 / 1.49
+//   FMAMod      0.41 / 0.63 / 0.51  0.76 / 0.91 / 0.83  1.17 / 1.19 / 1.18  1.16 / 1.31 / 1.23
+//   MultAddMod  0.54 / 0.70 / 0.61  0.98 / 1.04 / 1.01  1.37 / 1.28 / 1.32  1.14 / 1.39 / 1.26
+// The X100 peaks at m4, the A100 at m8; the defaults are the best geomean.
 inline constexpr bool kEltwiseFp64 = false;
-using MultModF64 = vfloat64m4_t;
-using FMAModF64 = vfloat64m4_t;
+using MultModF64 = vfloat64m8_t;
+using FMAModF64 = vfloat64m8_t;
 using MultAddModF64 = vfloat64m4_t;
 
 // ---- NTT -------------------------------------------------------------------
