@@ -1,5 +1,5 @@
 // Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
-// SPDX-License-Identifier: Apache-2.0
+// All rights reserved.
 //
 // src/util/rvv-util.hpp: one test per helper (each overload separately), so a
 // helper can be checked the moment it is written, before any kernel uses it.

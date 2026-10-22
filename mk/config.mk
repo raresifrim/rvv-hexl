@@ -1,5 +1,5 @@
 # Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
-# SPDX-License-Identifier: Apache-2.0
+# All rights reserved.
 #
 # mk/config.mk — toolchain, ISA variant and directory layout.
 # Included by the top-level Makefile. Every variable can be overridden on the

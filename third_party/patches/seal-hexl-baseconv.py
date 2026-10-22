@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
-# SPDX-License-Identifier: Apache-2.0
+# All rights reserved.
 #
 """Make SEAL's RNS base conversion use EltwiseReduceMod / EltwiseFMAMod (SEAL v4.1.2).
 

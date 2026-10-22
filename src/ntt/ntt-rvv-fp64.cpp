@@ -1,5 +1,5 @@
 // Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
-// SPDX-License-Identifier: Apache-2.0
+// All rights reserved.
 //
 // FP64 NTT path (rvv-hexl extension): the tables, and the RVV kernels, which
 // are STUBS until written (algorithm and conditions: ntt-rvv-fp64.hpp). The

@@ -1,5 +1,5 @@
 // Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
-// SPDX-License-Identifier: Apache-2.0
+// All rights reserved.
 //
 // The finished RVV kernels at every lane type (LMUL m1/m2/m4/m8, both storage
 // words), checked against the __int128 oracle. The public API runs only the

@@ -1,5 +1,5 @@
 // Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
-// SPDX-License-Identifier: Apache-2.0
+// All rights reserved.
 //
 // Minimal self-contained test harness (no GoogleTest: builds with plain make,
 // runs under spike + pk, and needs nothing installed on the K3).

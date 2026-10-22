@@ -1,5 +1,5 @@
 // Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
-// SPDX-License-Identifier: Apache-2.0
+// All rights reserved.
 //
 // The lane type (SEW + LMUL) of every RVV kernel, in one place.
 //

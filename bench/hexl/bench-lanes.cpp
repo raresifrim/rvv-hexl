@@ -1,5 +1,5 @@
 // Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
-// SPDX-License-Identifier: Apache-2.0
+// All rights reserved.
 //
 // LMUL sweep of the finished RVV kernels: each kernel at every lane type
 // (vuint64m1_t..m8_t for 64-bit storage, vuint32m1_t..m8_t for 32-bit

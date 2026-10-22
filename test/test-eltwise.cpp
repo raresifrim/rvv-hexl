@@ -1,5 +1,5 @@
 // Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
-// SPDX-License-Identifier: Apache-2.0
+// All rights reserved.
 //
 // hexl/eltwise: all seven public functions, plus the rvv-hexl extensions
 // EltwiseMultAddMod, SignedDigitDecompose and BaseConvert, every size tail, every modulus class, every input/output

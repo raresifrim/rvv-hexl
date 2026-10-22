@@ -1,5 +1,5 @@
 // Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
-// SPDX-License-Identifier: Apache-2.0
+// All rights reserved.
 //
 // Elementwise microbenchmarks, one per public function, at upstream HEXL's
 // sizes (1024 / 4096 / 16384) and at both RVV dispatch classes (27-bit -> e32

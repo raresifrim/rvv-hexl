@@ -1,5 +1,5 @@
 // Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
-// SPDX-License-Identifier: Apache-2.0
+// All rights reserved.
 //
 // FP64 NTT path (rvv-hexl extension, SCAFFOLDING: the kernels are stubs that
 // call the e64 integer kernels). For moduli between 2^30 and 2^50 the

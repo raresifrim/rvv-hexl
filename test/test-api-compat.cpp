@@ -1,5 +1,5 @@
 // Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
-// SPDX-License-Identifier: Apache-2.0
+// All rights reserved.
 //
 // Compile-time proof of drop-in compatibility. Each static_cast below only
 // compiles if a function with EXACTLY the upstream Intel HEXL v1.2.6 signature

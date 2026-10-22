@@ -1,5 +1,5 @@
 // Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
-// SPDX-License-Identifier: Apache-2.0
+// All rights reserved.
 //
 // bench-hexl entry point. Standard Google Benchmark flags apply, e.g.
 //   bench-hexl --benchmark_filter=NTT --benchmark_format=json --benchmark_out=r.json

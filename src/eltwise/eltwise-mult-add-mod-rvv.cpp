@@ -1,5 +1,5 @@
 // Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
-// SPDX-License-Identifier: Apache-2.0
+// All rights reserved.
 //
 // RVV kernels for EltwiseMultAddMod (rvv-hexl extension):
 //   result[i] = (arg1[i] * arg2[i] + arg3[i]) mod modulus

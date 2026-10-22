@@ -1,5 +1,5 @@
 // Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
-// SPDX-License-Identifier: Apache-2.0
+// All rights reserved.
 //
 // Kernels behind BaseConvert (rvv-hexl extension): OpenFHE's approximate RNS
 // base conversion (see the public header). 64-bit storage only (OpenFHE's CKKS

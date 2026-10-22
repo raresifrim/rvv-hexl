@@ -1,5 +1,5 @@
 // Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
-// SPDX-License-Identifier: Apache-2.0
+// All rights reserved.
 //
 // RISC-V counterpart of upstream's util/cpu-features.hpp (which asks
 // google/cpu_features for AVX512DQ/IFMA/VBMI2).

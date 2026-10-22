@@ -1,5 +1,5 @@
 // Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
-// SPDX-License-Identifier: Apache-2.0
+// All rights reserved.
 //
 // RVV NTT kernels: the RISC-V counterpart of upstream's fwd-ntt-avx512.cpp /
 // inv-ntt-avx512.cpp.

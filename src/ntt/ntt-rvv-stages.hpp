@@ -1,5 +1,5 @@
 // Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
-// SPDX-License-Identifier: Apache-2.0
+// All rights reserved.
 //
 // The strategy-independent pieces of the RVV NTT kernels: the per-block stage
 // loops (each block's t butterflies as strips of vl <= t), which run the

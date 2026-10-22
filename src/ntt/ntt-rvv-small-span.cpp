@@ -1,5 +1,5 @@
 // Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
-// SPDX-License-Identifier: Apache-2.0
+// All rights reserved.
 //
 // Builders of the small-span twiddle layouts (layouts: ntt-rvv-small-span.hpp).
 // Scalar gathers from the NTT tables, once per NTT object.

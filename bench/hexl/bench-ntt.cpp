@@ -1,5 +1,5 @@
 // Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
-// SPDX-License-Identifier: Apache-2.0
+// All rights reserved.
 //
 // NTT microbenchmarks: in-place, fully reduced (1, 1) mod factors, i.e.
 // exactly the call OpenFHE's HEXL backend makes.

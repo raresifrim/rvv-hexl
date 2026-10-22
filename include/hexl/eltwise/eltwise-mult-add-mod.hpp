@@ -1,5 +1,5 @@
 // Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
-// SPDX-License-Identifier: Apache-2.0
+// All rights reserved.
 //
 // rvv-hexl extension, NOT part of Intel HEXL: element-wise fused multiply-add
 // of three vectors. Guard uses with #ifdef HEXL_RVV_HAS_MULT_ADD_MOD.

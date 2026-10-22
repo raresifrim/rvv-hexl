@@ -299,14 +299,17 @@ prebuilt route, with `INTEL_HEXL_HINT_DIR` pointing at the rvv-hexl install.
   `RvvLanes_EltwiseFp64`; benchmarks: `--benchmark_filter=F64` (the `void` rows are the integer
   baselines). Below 2^30 (binfhe's 27-bit Q) the e32 integer lanes stay faster; no FP32 path: q
   < 2^22 only, and no faster than the e32 integer lanes (`fma-throughput32.txt`).
-* License: Apache-2.0, as upstream Intel HEXL (the public headers derive from it).
+* License: proprietary, all rights reserved, except the files derived from Intel HEXL, which
+  remain Apache-2.0 (see Copyright and license).
 
 ## Copyright and license
 
 Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest.
+All rights reserved. rvv-hexl is proprietary: see [LICENSE](LICENSE).
 
-rvv-hexl is derived from [Intel HEXL](https://github.com/intel/hexl) 1.2.6,
-Copyright (C) 2020 Intel Corporation, and is distributed under the same
-[Apache License 2.0](LICENSE). Files that come from Intel HEXL keep Intel's copyright notice and
-carry a "Modifications Copyright" line for the changes; files written for the port carry the
-notice above. See [NOTICE](NOTICE).
+The exception are the files derived from [Intel HEXL](https://github.com/intel/hexl) 1.2.6,
+Copyright (C) 2020 Intel Corporation: they keep Intel's copyright notice, carry a "Modifications
+Copyright" line for the changes and remain under the
+[Apache License 2.0](LICENSES/Apache-2.0.txt) (their header says `SPDX-License-Identifier:
+Apache-2.0`). Files written for the port carry the notice above and "All rights reserved". See
+[NOTICE](NOTICE).

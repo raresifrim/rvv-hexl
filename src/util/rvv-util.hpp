@@ -1,5 +1,5 @@
 // Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
-// SPDX-License-Identifier: Apache-2.0
+// All rights reserved.
 //
 // RVV building blocks shared by the eltwise and NTT kernels.
 // RISC-V counterpart of upstream's util/avx512-util.hpp.

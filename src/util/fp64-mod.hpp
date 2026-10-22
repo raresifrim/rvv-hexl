@@ -1,5 +1,5 @@
 // Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
-// SPDX-License-Identifier: Apache-2.0
+// All rights reserved.
 //
 // When a modular multiply may run on the FP64 FMA instead of the e64 integer
 // multiplier (rvv-hexl extension, shared by the NTT and the eltwise kernels).

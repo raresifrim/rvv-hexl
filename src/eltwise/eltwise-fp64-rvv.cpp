@@ -1,5 +1,5 @@
 // Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
-// SPDX-License-Identifier: Apache-2.0
+// All rights reserved.
 //
 // FP64 eltwise kernels (rvv-hexl extension): EltwiseMultMod, EltwiseFMAMod and
 // EltwiseMultAddMod on the FP64 FMA, for 2^30 <= q < 2^50 (method and

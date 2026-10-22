@@ -1,5 +1,5 @@
 // Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
-// SPDX-License-Identifier: Apache-2.0
+// All rights reserved.
 //
 // Kernels behind SignedDigitDecompose (rvv-hexl extension): the approximate
 // signed gadget decomposition of OpenFHE binfhe (see the public header). Per

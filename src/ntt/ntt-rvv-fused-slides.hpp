@@ -1,5 +1,5 @@
 // Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
-// SPDX-License-Identifier: Apache-2.0
+// All rights reserved.
 //
 // Small-span stages, strategy rvv::ntt::FusedSlides. Contract, terms and the
 // twiddle layout: ntt-rvv-small-span.hpp. The kernels call these only when
