@@ -3,8 +3,7 @@
 RISC-V (RVV 1.0) port of [Intel HEXL](https://github.com/intel/hexl) v1.2.6, built to plug
 into OpenFHE through the same extension point Intel HEXL uses
 ([openfhe-hexl](https://github.com/openfheorg/openfhe-hexl)), and into Microsoft SEAL through
-SEAL's own `SEAL_USE_INTEL_HEXL` option (no source changes on either side). It implements "Etapa 1" of the
-IPCEI A14 plan (SENTHIPoli D01, *Direcția de accelerare*): an RVV-aware HEXL backend,
+SEAL's own `SEAL_USE_INTEL_HEXL` option (no source changes on either side). It implements an RVV-aware HEXL backend,
 measured on the SpaceMiT K3 (X100 and A100 clusters) against stock OpenFHE and the no-RVV
 baseline. The protocol-level benchmarks that use it as a backend live in
 [blindloop](https://github.com/raresifrim/blindloop); this repository only benchmarks the
@@ -15,8 +14,7 @@ theory, the native kernels and the RVV kernels for all seven eltwise operations 
 (forward and inverse, 64- and 32-bit lanes). The RVV NTT kernels are a first version whose
 small-span stages (span below the vector length) still run underfilled; two strategies for them,
 fused slides and a transposed layout, are selectable in `src/util/rvv-config.hpp` (layouts and
-contract in `src/ntt/ntt-rvv-small-span.hpp`), with stub bodies for now.
-Ideas beyond the drop-in API are collected in [docs/FUTURE_WORK.md](docs/FUTURE_WORK.md).
+contract in `src/ntt/ntt-rvv-small-span.hpp`).
 
 ```
 OpenFHE (NATIVE_SIZE 64|32) ── openfhe-hexl HAL ──┐
