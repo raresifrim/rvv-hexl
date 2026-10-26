@@ -46,8 +46,8 @@ void EltwiseMultAddModRVV64(uint64_t* result, const uint64_t* arg1,
 		const uint64_t* arg2, const uint64_t* arg3, uint64_t n,
 		uint64_t modulus);
 
-/// @brief RVV, FP64 lanes (rvv-hexl extension, STUB: calls
-/// EltwiseMultAddModRVV64): for ModMulFp64Applicable moduli
+/// @brief RVV, FP64 lanes (rvv-hexl extension, eltwise-fp64-rvv.cpp): for
+/// ModMulFp64Applicable moduli
 /// (util/fp64-mod.hpp), the addend joining the FP64 remainder exactly. Same
 /// contract as EltwiseMultAddModRVV64 (result may alias arg3).
 /// VF: vfloat64m1_t .. vfloat64m8_t.

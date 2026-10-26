@@ -36,9 +36,9 @@ template <int InputModFactor, class V = rvv::cfg::FMAMod64>
 void EltwiseFMAModRVV64(uint64_t* result, const uint64_t* arg1, uint64_t arg2,
 		const uint64_t* arg3, uint64_t n, uint64_t modulus);
 
-/// @brief RVV, FP64 lanes (rvv-hexl extension, STUB: calls
-/// EltwiseFMAModRVV64): for ModMulFp64Applicable moduli (util/fp64-mod.hpp),
-/// with arg2 * (1/q) precomputed once per call. Same contract as
+/// @brief RVV, FP64 lanes (rvv-hexl extension, eltwise-fp64-rvv.cpp): for
+/// ModMulFp64Applicable moduli (util/fp64-mod.hpp), arg2 reduced to [0, q)
+/// once per call, the addend folded into the quotient estimate. Same contract as
 /// EltwiseFMAModRVV64 (arg3 may be nullptr; InputModFactor up to 8, 8q < 2^53).
 /// VF: vfloat64m1_t .. vfloat64m8_t.
 template <int InputModFactor, class VF = rvv::cfg::FMAModF64>
