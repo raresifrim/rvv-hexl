@@ -8,6 +8,8 @@
 // RVV32: 32-bit lanes on either storage word (rvv::Load32 / Store32).
 // RVV64: 64-bit lanes on uint64_t storage.
 // Harvey lazy butterflies: forward values in [0, 4q), inverse in [0, 2q).
+// FP64: the stages on a double scratch, signed ranges (forward (-2q, 2q),
+// inverse [-q, q]), and the strips that convert in and out of it.
 
 #pragma once
 
@@ -252,6 +254,91 @@ inline void InverseLastStageRVV64(uint64_t* result, uint64_t n, uint64_t modulus
 		rvv::Store(result + j, Xr, vl);
 		rvv::Store(result + j + t, Yr, vl);
 	}
+}
+
+// ---------------------------------------------------------------------------
+// FP64 (ntt-rvv-fp64.hpp): the transform runs on a double scratch f (integers
+// as doubles), with signed lazy ranges (rvv::FwdButterflyF64 /
+// InvButterflyF64): forward (-2q, 2q), inverse [-q, q]. VF = vfloat64m1_t ..
+// m8_t; the uint64_t side goes through rvv::UintOf<VF>.
+// ---------------------------------------------------------------------------
+
+/// The forward input as FP64: [0, F q) -> [0, 2q), F = input_mod_factor 1, 2
+/// or 4 (4 reduced once in integer lanes: the multiply needs |y| <= 2q).
+template <class VF>
+inline void ForwardInputRVVF64(double* f, const uint64_t* operand, uint64_t n, uint64_t modulus,
+		uint64_t input_mod_factor) {
+	using VU = rvv::UintOf<VF>;
+	for (size_t vl; n > 0; n -= vl, operand += vl, f += vl){
+		vl = rvv::SetVl<VU>(n);
+		VU v = rvv::Load<VU>(operand, vl);
+		if (input_mod_factor == 4) v = rvv::ReduceFromTwice(v, 2*modulus, vl);   // [0, 2q)
+		rvv::Store(f, __riscv_vfcvt_f(v, vl), vl);
+	}
+}
+
+/// Forward stages t = t_hi .. t_lo on f, in place, per block; (-2q, 2q) out
+/// ([0, 2q) from ForwardInputRVVF64 in). w, w_over_q: NttFp64Tables::w and
+/// w_over_q, bit-reversed as the integer table.
+template <class VF>
+inline void ForwardStagesRVVF64(double* f, uint64_t n, uint64_t modulus,
+		const double* w, const double* w_over_q,
+		uint64_t t_hi, uint64_t t_lo) {
+	using VU = rvv::UintOf<VF>;
+	const size_t vlmax = rvv::VlMax<VU>();
+	const VF Qv = rvv::SplatF64<VF>(static_cast<double>(modulus), vlmax);
+	const VF Cv = rvv::SplatF64<VF>(0x1.8p52, vlmax);
+	for (uint64_t t = t_hi; t >= t_lo; t >>= 1){                  // stages (t_lo >= 1)
+		const uint64_t m = n/(2*t);
+		for (uint64_t i = 0; i < m; i++){                          // m blocks
+			const double W = w[m + i];
+			const double Wq = w_over_q[m + i];
+			double* x = f + 2*i*t;
+			for (size_t j = 0, vl; j < t; j += vl){                   // t butterflies
+				vl = rvv::SetVl<VU>(t - j);
+				VF X = rvv::LoadF64<VF>(x + j, vl);
+				VF Y = rvv::LoadF64<VF>(x + j + t, vl);
+				X = __riscv_vfsub(X, __riscv_vfsgnj(Qv, X, vl), vl);                 // [-q, q]
+				VF h = __riscv_vfmul(Y, W, vl);                                       // Y W rounded
+				VF l = __riscv_vfmsub(Y, W, h, vl);                                   // Y W - h, exact
+				VF T = __riscv_vfsub(__riscv_vfmadd(Y, Wq, Cv, vl), Cv, vl);         // round(Y W / q)
+				T = __riscv_vfadd(__riscv_vfnmsac(h, Qv, T, vl), l, vl);             // Y W mod q, (-q, q)
+				VF Xr = __riscv_vfadd(X, T, vl);                                      // (-2q, 2q)
+				VF Yr = __riscv_vfsub(X, T, vl);
+				rvv::Store(x + j, Xr, vl);
+				rvv::Store(x + j + t, Yr, vl);
+			}
+		}
+	}
+}
+
+/// One strip of the forward output: (-2q, 2q) -> [0, q) for output_mod_factor
+/// 1, [0, 2q) for 4. Folded to [-q, q) (strict above: |v| < 2q), + q, then
+/// unsigned: no negative lanes.
+template <class VF>
+__attribute__((always_inline)) inline rvv::UintOf<VF> ForwardOutputF64(VF v, VF qv, uint64_t modulus,
+		uint64_t output_mod_factor, size_t vl) {
+	const rvv::UintOf<VF> u = __riscv_vfcvt_xu(__riscv_vfadd(rvv::ReduceFromTwiceF64(v, qv, vl), qv, vl), vl);  // [0, 2q)
+	return output_mod_factor == 1 ? rvv::ReduceFromTwice(u, modulus, vl) : u;
+}
+
+/// result = f in the forward output range (ForwardOutputF64).
+template <class VF>
+inline void ForwardOutputRVVF64(uint64_t* result, const double* f, uint64_t n, uint64_t modulus,
+		uint64_t output_mod_factor) {
+	using VU = rvv::UintOf<VF>;
+	const VF Qv = rvv::SplatF64<VF>(static_cast<double>(modulus), rvv::VlMax<VU>());
+	for (size_t vl; n > 0; n -= vl, f += vl, result += vl){
+		vl = rvv::SetVl<VU>(n);
+		rvv::Store(result, ForwardOutputF64(rvv::LoadF64<VF>(f, vl), Qv, modulus, output_mod_factor, vl), vl);
+	}
+}
+
+/// One strip of the inverse input: [0, 2q) (input_mod_factor 1 or 2) ->
+/// [-q, q), the inverse butterflies' range.
+template <class VF>
+__attribute__((always_inline)) inline VF InverseInputF64(rvv::UintOf<VF> u, VF qv, size_t vl) {
+	return __riscv_vfsub(__riscv_vfcvt_f(u, vl), qv, vl);
 }
 
 }  // namespace hexl

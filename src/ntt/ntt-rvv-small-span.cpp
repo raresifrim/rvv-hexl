@@ -13,10 +13,10 @@
 namespace intel {
 namespace hexl {
 
-template <class Strategy, typename E>
+template <class Strategy, typename E, typename Src>
 NttSmallSpanTables<Strategy, E> BuildNttSmallSpanTables(
-		uint64_t n, uint64_t vl, const uint64_t* w, const uint64_t* w_precon,
-		const uint64_t* w_inv, const uint64_t* w_inv_precon) {
+		uint64_t n, uint64_t vl, const Src* w, const Src* w_precon,
+		const Src* w_inv, const Src* w_inv_precon) {
 	NttSmallSpanTables<Strategy, E> tw;
 	tw.n = n;
 	if (!SmallSpanRuns<Strategy>(n, vl)) return tw;  // vl = 0: the kernels run per block
@@ -96,11 +96,20 @@ HEXL_SMALL_SPAN_TABLES(rvv::ntt::PerBlock, uint32_t);
 HEXL_SMALL_SPAN_TABLES(rvv::ntt::PerBlock, uint64_t);
 HEXL_SMALL_SPAN_TABLES(rvv::ntt::FusedSlides, uint32_t);
 HEXL_SMALL_SPAN_TABLES(rvv::ntt::FusedSlides, uint64_t);
+// FP64: double twiddles and w / q (ntt-rvv-fp64.hpp)
+#define HEXL_SMALL_SPAN_TABLES_F64(S)                                                \
+	template NttSmallSpanTables<S, double> BuildNttSmallSpanTables<S, double>(   \
+			uint64_t, uint64_t, const double*, const double*, const double*,     \
+			const double*)
+HEXL_SMALL_SPAN_TABLES_F64(rvv::ntt::PerBlock);
+HEXL_SMALL_SPAN_TABLES_F64(rvv::ntt::FusedSlides);
 #define HEXL_TRANSPOSED_TABLES(S)                \
 	HEXL_SMALL_SPAN_TABLES(rvv::ntt::S, uint32_t); \
-HEXL_SMALL_SPAN_TABLES(rvv::ntt::S, uint64_t);
+HEXL_SMALL_SPAN_TABLES(rvv::ntt::S, uint64_t); \
+HEXL_SMALL_SPAN_TABLES_F64(rvv::ntt::S);
 HEXL_RVV_NTT_TRANSPOSED_SHAPES(HEXL_TRANSPOSED_TABLES);
 #undef HEXL_TRANSPOSED_TABLES
+#undef HEXL_SMALL_SPAN_TABLES_F64
 #undef HEXL_SMALL_SPAN_TABLES
 
 }  // namespace hexl

@@ -602,24 +602,30 @@ const std::vector<NttCase>& NttFp64Cases() {
 }
 
 /// The FP64 forward and inverse kernels at lane type VF (vfloat64m1_t ..
-/// m8_t), same contract and checks as CheckNtt.
-template <class VF>
-void CheckNttF64(const char* lane) {
+/// m8_t) and small-span strategy S (forward; the inverse is a stub), S's
+/// tables built for the lanes it runs at under VF. Same checks as CheckNtt.
+template <class VF, class S>
+void CheckNttF64(const char* lane, const char* strategy) {
+	const uint64_t vl = intel::hexl::SmallSpanLanes<S, intel::hexl::rvv::UintOf<VF>>();
 	const intel::hexl::NTT* built = nullptr;
 	std::shared_ptr<const intel::hexl::NttFp64Tables> fp;
+	intel::hexl::NttSmallSpanTables<S, double> tables;
 	for (const NttCase& c : NttFp64Cases()) {
 		const intel::hexl::NTT& ntt = *c.ntt;
 		if (&ntt != built) {  // the tables once per (N, q)
 			fp = intel::hexl::BuildNttFp64Tables(ntt);
+			tables = intel::hexl::BuildNttSmallSpanTablesF64<S>(*fp, vl);
 			built = &ntt;
 			CHECK_EQ(fp->w.size(), ntt.GetRootOfUnityPowers().size(), << "tables " << lane << " n=" << c.n);
+			CHECK_EQ(tables.vl, intel::hexl::SmallSpanRuns<S>(c.n, vl) ? vl : 0,
+					<< "tables " << lane << " " << strategy << " n=" << c.n);
 		}
 		const std::vector<uint64_t> in = c.in;
 		std::vector<uint64_t> out = c.in_place ? in : std::vector<uint64_t>(c.n);
 		const uint64_t* operand = c.in_place ? out.data() : in.data();
 		if (c.forward) {
-			intel::hexl::ForwardTransformToBitReverseRVVF64<VF>(out.data(), operand, c.n, c.q, *fp,
-					ntt.GetRootOfUnityPowers().data(), ntt.GetPrecon64RootOfUnityPowers().data(), c.imf, c.omf);
+			intel::hexl::ForwardTransformToBitReverseRVVF64<VF, S>(out.data(), operand, c.n, c.q, *fp, c.imf, c.omf,
+					&tables);
 		} else {
 			intel::hexl::InverseTransformFromBitReverseRVVF64<VF>(out.data(), operand, c.n, c.q, *fp,
 					ntt.GetInvRootOfUnityPowers().data(), ntt.GetPrecon64InvRootOfUnityPowers().data(), c.imf, c.omf);
@@ -629,7 +635,7 @@ void CheckNttF64(const char* lane) {
 		const uint64_t bound = (c.forward ? (c.omf == 1 ? 1 : 4) : c.omf) * c.q;
 		for (uint64_t i = 0; i < c.n; ++i) {
 			CHECK_EQ(out[i] < bound && out[i] % c.q == c.want[i], true,
-					<< "FP64 " << dir << " " << lane << " n=" << c.n << " q=" << c.q << " imf=" << c.imf
+					<< "FP64 " << dir << " " << lane << " " << strategy << " n=" << c.n << " q=" << c.q << " imf=" << c.imf
 					<< " omf=" << c.omf << (c.in_place ? " in place" : "") << " i=" << i << ": got " << out[i]
 					<< ", want " << c.want[i] << " (mod q), below " << bound);
 		}
@@ -930,13 +936,20 @@ TEST(RvvLanes_NttFp64Tables) {
 	}
 }
 
-// The FP64 path (stubs until the kernels are written: they run the e64 kernel)
-TEST(RvvLanes_NttFp64) {
-	CHECK_EQ(NttFp64Cases().empty(), false, << "no FP64-eligible NTT case");
-	CheckNttF64<vfloat64m1_t>("f64m1");
-	CheckNttF64<vfloat64m2_t>("f64m2");
-	CheckNttF64<vfloat64m4_t>("f64m4");
-	CheckNttF64<vfloat64m8_t>("f64m8");
-}
+// The FP64 path, every lane type and strategy (the inverse is a stub until
+// written: it runs the e64 kernel)
+#define HEXL_FOR_EACH_NTT_F64_LANE(S, NAME)                    \
+	CHECK_EQ(NttFp64Cases().empty(), false, << "no FP64-eligible NTT case"); \
+	CheckNttF64<vfloat64m1_t, S>("f64m1", NAME);              \
+	CheckNttF64<vfloat64m2_t, S>("f64m2", NAME);              \
+	CheckNttF64<vfloat64m4_t, S>("f64m4", NAME);              \
+	CheckNttF64<vfloat64m8_t, S>("f64m8", NAME)
+TEST(RvvLanes_NttFp64PerBlock) { HEXL_FOR_EACH_NTT_F64_LANE(intel::hexl::rvv::ntt::PerBlock, "PerBlock"); }
+TEST(RvvLanes_NttFp64FusedSlides) { HEXL_FOR_EACH_NTT_F64_LANE(intel::hexl::rvv::ntt::FusedSlides, "FusedSlides"); }
+#define HEXL_TRANSPOSED_TEST(S) \
+	TEST(RvvLanes_NttFp64##S) { HEXL_FOR_EACH_NTT_F64_LANE(intel::hexl::rvv::ntt::S, #S); }
+HEXL_RVV_NTT_TRANSPOSED_SHAPES(HEXL_TRANSPOSED_TEST);
+#undef HEXL_TRANSPOSED_TEST
+#undef HEXL_FOR_EACH_NTT_F64_LANE
 
 #endif  // HEXL_HAS_RVV

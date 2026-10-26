@@ -112,7 +112,8 @@ namespace intel {
 namespace hexl {
 
 /// @brief Small-span twiddles of Strategy for one (N, q) and one lane count.
-/// E = uint32_t for the RVV32 kernels, uint64_t for RVV64.
+/// E = uint32_t for the RVV32 kernels, uint64_t for RVV64, double for FP64
+/// (whose *_precon fields hold w / q, the FP64 quotient factors).
 template <class Strategy, typename E>
 struct NttSmallSpanTables {
 	uint64_t n = 0;
@@ -176,11 +177,14 @@ inline bool UseSmallSpan(const NttSmallSpanTables<Strategy, E>* tables, uint64_t
 ///   w, w_precon:          forward table (bit-reversed) and its Shoup factors
 ///   w_inv, w_inv_precon:  inverse table (stage order) and its Shoup factors
 /// The Shoup factors must be the ones for E: 32-bit (Precon32) for uint32_t,
-/// 64-bit (Precon64) for uint64_t. Scalar, runs once per NTT object.
-template <class Strategy, typename E>
+/// 64-bit (Precon64) for uint64_t. E = double (the FP64 kernels,
+/// ntt-rvv-fp64.hpp) takes double sources: NttFp64Tables' twiddles and, in
+/// place of the Shoup factors, their w / q (BuildNttSmallSpanTablesF64).
+/// Scalar, runs once per NTT object.
+template <class Strategy, typename E, typename Src>
 NttSmallSpanTables<Strategy, E> BuildNttSmallSpanTables(
-		uint64_t n, uint64_t lanes, const uint64_t* w, const uint64_t* w_precon,
-		const uint64_t* w_inv, const uint64_t* w_inv_precon);
+		uint64_t n, uint64_t lanes, const Src* w, const Src* w_precon,
+		const Src* w_inv, const Src* w_inv_precon);
 
 /// @brief Same, from an NTT object's tables (tests, benchmarks).
 template <class Strategy, typename E>

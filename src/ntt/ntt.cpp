@@ -198,10 +198,9 @@ void NTT::ComputeForward(uint64_t* result, const uint64_t* operand,
 		const NttSmallSpanSet* ss = SmallSpanSet(m_rvv_small_span);
 		if (m_rvv_fp64) {  // UseNttFp64: switched on and 2^30 <= q < 2^50
 			HEXL_VLOG(3, "Calling ForwardTransformToBitReverseRVVF64");
-			ForwardTransformToBitReverseRVVF64(result, operand, m_degree, m_q,
-					*static_cast<const NttFp64Tables*>(m_rvv_fp64.get()), m_root_of_unity_powers.data(),
-					m_precon64_root_of_unity_powers.data(), input_mod_factor, output_mod_factor,
-					ss ? ss->rvv64.get() : nullptr);
+			const NttFp64Tables& fp = *static_cast<const NttFp64Tables*>(m_rvv_fp64.get());
+			ForwardTransformToBitReverseRVVF64(result, operand, m_degree, m_q, fp, input_mod_factor,
+					output_mod_factor, fp.small_span.get());
 		} else if (m_q < s_max_fwd_32_modulus) {
 			HEXL_VLOG(3, "Calling ForwardTransformToBitReverseRVV32");
 			ForwardTransformToBitReverseRVV32<uint64_t>(

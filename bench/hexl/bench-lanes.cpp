@@ -291,31 +291,40 @@ void BM_Lanes_NttInverse(benchmark::State& state) {
 	state.SetItemsProcessed(state.iterations() * k.n);
 }
 
-/// The FP64 NTT path (ntt-rvv-fp64.hpp) at lane type VF, or with VF = void
-/// the e64 integer kernel it replaces (rvv::cfg::Ntt64, NttSmallSpan64), both
-/// at a 49-bit prime (inside [2^30, 2^50)), in place and fully reduced.
-template <class VF>
+/// The FP64 NTT path (ntt-rvv-fp64.hpp) at lane type VF and small-span
+/// strategy S (forward; the inverse is a stub), or with VF = void the e64
+/// integer kernel it replaces (rvv::cfg::Ntt64, NttSmallSpan64), both at a
+/// 49-bit prime (inside [2^30, 2^50)), in place and fully reduced.
+template <class VF, class S = intel::hexl::rvv::cfg::NttSmallSpanF64>
 struct NttF64Lane {
 	using S64 = intel::hexl::rvv::cfg::NttSmallSpan64;
+	using SF = std::conditional_t<std::is_void_v<VF>, intel::hexl::rvv::ntt::PerBlock, S>;
 	uint64_t n, q;
 	intel::hexl::NTT ntt;
 	std::shared_ptr<const intel::hexl::NttFp64Tables> fp;
 	intel::hexl::NttFp64IntSmallSpan tables;
+	intel::hexl::NttSmallSpanTables<SF, double> fp_tables;
 	intel::hexl::AlignedVector64<uint64_t> x;
 
 	explicit NttF64Lane(benchmark::State& state)
 		: n(state.range(0)), q(hexlbench::Prime(49, n)), ntt(n, q), fp(intel::hexl::BuildNttFp64Tables(ntt)),
 		tables(intel::hexl::BuildNttSmallSpanTables<S64, uint64_t>(
 					ntt, intel::hexl::SmallSpanLanes<S64, intel::hexl::rvv::cfg::Ntt64>())),
-		x(hexlbench::RandomW<uint64_t>(n, q)) {}
+		x(hexlbench::RandomW<uint64_t>(n, q)) {
+			if constexpr (!std::is_void_v<VF>) {
+				fp_tables = intel::hexl::BuildNttSmallSpanTablesF64<S>(
+						*fp, intel::hexl::SmallSpanLanes<S, intel::hexl::rvv::UintOf<VF>>());
+				if (!std::is_same_v<S, intel::hexl::rvv::ntt::PerBlock> && fp_tables.vl == 0)
+					state.SetLabel("N too small for the strategy: per block");
+			}
+		}
 
 	void Forward() {
 		if constexpr (std::is_void_v<VF>) {
 			intel::hexl::ForwardTransformToBitReverseRVV64(x.data(), x.data(), n, q, ntt.GetRootOfUnityPowers().data(),
 					ntt.GetPrecon64RootOfUnityPowers().data(), 1, 1, &tables);
 		} else {
-			intel::hexl::ForwardTransformToBitReverseRVVF64<VF>(x.data(), x.data(), n, q, *fp,
-					ntt.GetRootOfUnityPowers().data(), ntt.GetPrecon64RootOfUnityPowers().data(), 1, 1, &tables);
+			intel::hexl::ForwardTransformToBitReverseRVVF64<VF, S>(x.data(), x.data(), n, q, *fp, 1, 1, &fp_tables);
 		}
 	}
 	void Inverse() {
@@ -329,9 +338,9 @@ struct NttF64Lane {
 	}
 };
 
-template <class VF>
+template <class VF, class S>
 void BM_Lanes_NttF64Forward(benchmark::State& state) {
-	NttF64Lane<VF> k(state);
+	NttF64Lane<VF, S> k(state);
 	for (auto _ : state) {
 		k.Forward();
 		benchmark::ClobberMemory();
@@ -497,14 +506,25 @@ HEXL_NTT_LANES(BM_Lanes_NttInverse, FusedSlides);
 HEXL_RVV_NTT_TRANSPOSED_SHAPES(HEXL_TRANSPOSED_INV);
 #undef HEXL_TRANSPOSED_INV
 
-// FP64 path: void = the e64 integer baseline
+// FP64 path: void = the e64 integer baseline; forward per strategy
 #define HEXL_NTT_F64_LANES(BM)                                       \
 	BENCHMARK_TEMPLATE(BM, void)->Arg(1024)->Arg(4096)->Arg(16384);         \
 	BENCHMARK_TEMPLATE(BM, vfloat64m1_t)->Arg(1024)->Arg(4096)->Arg(16384); \
 	BENCHMARK_TEMPLATE(BM, vfloat64m2_t)->Arg(1024)->Arg(4096)->Arg(16384); \
 	BENCHMARK_TEMPLATE(BM, vfloat64m4_t)->Arg(1024)->Arg(4096)->Arg(16384); \
 	BENCHMARK_TEMPLATE(BM, vfloat64m8_t)->Arg(1024)->Arg(4096)->Arg(16384)
-HEXL_NTT_F64_LANES(BM_Lanes_NttF64Forward);
+#define HEXL_NTT_F64_FWD_LANES(S)                                                                     \
+	BENCHMARK_TEMPLATE(BM_Lanes_NttF64Forward, vfloat64m1_t, S)->Arg(1024)->Arg(4096)->Arg(16384); \
+	BENCHMARK_TEMPLATE(BM_Lanes_NttF64Forward, vfloat64m2_t, S)->Arg(1024)->Arg(4096)->Arg(16384); \
+	BENCHMARK_TEMPLATE(BM_Lanes_NttF64Forward, vfloat64m4_t, S)->Arg(1024)->Arg(4096)->Arg(16384); \
+	BENCHMARK_TEMPLATE(BM_Lanes_NttF64Forward, vfloat64m8_t, S)->Arg(1024)->Arg(4096)->Arg(16384)
+BENCHMARK_TEMPLATE(BM_Lanes_NttF64Forward, void, PerBlock)->Arg(1024)->Arg(4096)->Arg(16384);
+HEXL_NTT_F64_FWD_LANES(PerBlock);
+HEXL_NTT_F64_FWD_LANES(FusedSlides);
+#define HEXL_TRANSPOSED_F64_FWD(S) HEXL_NTT_F64_FWD_LANES(S);
+HEXL_RVV_NTT_TRANSPOSED_SHAPES(HEXL_TRANSPOSED_F64_FWD);
+#undef HEXL_TRANSPOSED_F64_FWD
+#undef HEXL_NTT_F64_FWD_LANES
 HEXL_NTT_F64_LANES(BM_Lanes_NttF64Inverse);
 #undef HEXL_NTT_F64_LANES
 // BaseConvert: void = the native kernel

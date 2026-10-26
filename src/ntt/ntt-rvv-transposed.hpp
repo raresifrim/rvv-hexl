@@ -912,6 +912,379 @@ HEXL_RVV_TILE_FN void InverseTransposedRVV64(uint64_t* result,
 	}
 }
 
+// ---------------------------------------------------------------------------
+// FP64 (ntt-rvv-fp64.hpp): rows of VT = the FP64 lane type at LMUL Lmul
+// (rvv::F64Of<TransposedLane<S, VU>>), loaded and stored with strided
+// accesses as above. Tables E = double: fwd / inv the twiddles, fwd_precon /
+// inv_precon their w / q. The conversions fuse into the tile load / store:
+// forward reads the double scratch and writes uint64_t result in the output
+// range, inverse reads uint64_t operand and writes the scratch.
+// ---------------------------------------------------------------------------
+
+/// Forward stages t = Rows/2 .. 1, FP64: f ((-2q, 2q), after the per-block
+/// stages) into result, in the range of output_mod_factor.
+template <class VF, class S>
+HEXL_RVV_TILE_FN void ForwardTransposedRVVF64(uint64_t* result, const double* f, uint64_t n,
+		uint64_t modulus,
+		const NttSmallSpanTables<S, double>& tables,
+		uint64_t output_mod_factor) {
+	static_assert(rvv::ntt::kIsTransposed<S>, "S must be a rvv::ntt::Transposed shape");
+	using VT = rvv::F64Of<TransposedLane<S, rvv::UintOf<VF>>>;
+	const register uint64_t vl = tables.vl;
+	const register uint64_t stride = n/vl;
+	const register uint64_t Rows = S::kRows;
+	const register uint64_t tile = vl * Rows;
+	const register double* tw  = tables.fwd.data();
+	const register double* twq = tables.fwd_precon.data();   // w / q
+	const VT Qv = rvv::SplatF64<VT>(static_cast<double>(modulus), vl);
+	const VT Cv = rvv::SplatF64<VT>(0x1.8p52, vl);
+	if constexpr (S::kRows == 4) {
+		for (uint64_t c = 0; c < n/tile; ++c){
+			VT r0 = rvv::LoadStridedF64<VT>(f + c * Rows + 0, stride, vl);
+			VT r1 = rvv::LoadStridedF64<VT>(f + c * Rows + 1, stride, vl);
+			VT r2 = rvv::LoadStridedF64<VT>(f + c * Rows + 2, stride, vl);
+			VT r3 = rvv::LoadStridedF64<VT>(f + c * Rows + 3, stride, vl);
+
+			VT W, Wq;
+			// stage t = 2
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::FwdButterflyF64(r0, r2, W, Wq, Qv, Cv, vl);
+			rvv::FwdButterflyF64(r1, r3, W, Wq, Qv, Cv, vl);
+
+			// stage t = 1, 2 row groups
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::FwdButterflyF64(r0, r1, W, Wq, Qv, Cv, vl);   // group 0
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::FwdButterflyF64(r2, r3, W, Wq, Qv, Cv, vl);   // group 1
+
+			rvv::StoreStrided(result + c * Rows + 0, stride, ForwardOutputF64(r0, Qv, modulus, output_mod_factor, vl), vl);
+			rvv::StoreStrided(result + c * Rows + 1, stride, ForwardOutputF64(r1, Qv, modulus, output_mod_factor, vl), vl);
+			rvv::StoreStrided(result + c * Rows + 2, stride, ForwardOutputF64(r2, Qv, modulus, output_mod_factor, vl), vl);
+			rvv::StoreStrided(result + c * Rows + 3, stride, ForwardOutputF64(r3, Qv, modulus, output_mod_factor, vl), vl);
+		}
+	} else if constexpr (S::kRows == 8) {
+		for (uint64_t c = 0; c < n/tile; ++c){
+			VT r0 = rvv::LoadStridedF64<VT>(f + c * Rows + 0, stride, vl);
+			VT r1 = rvv::LoadStridedF64<VT>(f + c * Rows + 1, stride, vl);
+			VT r2 = rvv::LoadStridedF64<VT>(f + c * Rows + 2, stride, vl);
+			VT r3 = rvv::LoadStridedF64<VT>(f + c * Rows + 3, stride, vl);
+			VT r4 = rvv::LoadStridedF64<VT>(f + c * Rows + 4, stride, vl);
+			VT r5 = rvv::LoadStridedF64<VT>(f + c * Rows + 5, stride, vl);
+			VT r6 = rvv::LoadStridedF64<VT>(f + c * Rows + 6, stride, vl);
+			VT r7 = rvv::LoadStridedF64<VT>(f + c * Rows + 7, stride, vl);
+
+			VT W, Wq;
+			// stage t = 4
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::FwdButterflyF64(r0, r4, W, Wq, Qv, Cv, vl);
+			rvv::FwdButterflyF64(r1, r5, W, Wq, Qv, Cv, vl);
+			rvv::FwdButterflyF64(r2, r6, W, Wq, Qv, Cv, vl);
+			rvv::FwdButterflyF64(r3, r7, W, Wq, Qv, Cv, vl);
+
+			// stage t = 2, 2 row groups
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::FwdButterflyF64(r0, r2, W, Wq, Qv, Cv, vl);   // group 0
+			rvv::FwdButterflyF64(r1, r3, W, Wq, Qv, Cv, vl);
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::FwdButterflyF64(r4, r6, W, Wq, Qv, Cv, vl);   // group 1
+			rvv::FwdButterflyF64(r5, r7, W, Wq, Qv, Cv, vl);
+
+			// stage t = 1, 4 row groups
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::FwdButterflyF64(r0, r1, W, Wq, Qv, Cv, vl);   // group 0
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::FwdButterflyF64(r2, r3, W, Wq, Qv, Cv, vl);   // group 1
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::FwdButterflyF64(r4, r5, W, Wq, Qv, Cv, vl);   // group 2
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::FwdButterflyF64(r6, r7, W, Wq, Qv, Cv, vl);   // group 3
+
+			rvv::StoreStrided(result + c * Rows + 0, stride, ForwardOutputF64(r0, Qv, modulus, output_mod_factor, vl), vl);
+			rvv::StoreStrided(result + c * Rows + 1, stride, ForwardOutputF64(r1, Qv, modulus, output_mod_factor, vl), vl);
+			rvv::StoreStrided(result + c * Rows + 2, stride, ForwardOutputF64(r2, Qv, modulus, output_mod_factor, vl), vl);
+			rvv::StoreStrided(result + c * Rows + 3, stride, ForwardOutputF64(r3, Qv, modulus, output_mod_factor, vl), vl);
+			rvv::StoreStrided(result + c * Rows + 4, stride, ForwardOutputF64(r4, Qv, modulus, output_mod_factor, vl), vl);
+			rvv::StoreStrided(result + c * Rows + 5, stride, ForwardOutputF64(r5, Qv, modulus, output_mod_factor, vl), vl);
+			rvv::StoreStrided(result + c * Rows + 6, stride, ForwardOutputF64(r6, Qv, modulus, output_mod_factor, vl), vl);
+			rvv::StoreStrided(result + c * Rows + 7, stride, ForwardOutputF64(r7, Qv, modulus, output_mod_factor, vl), vl);
+		}
+	} else if constexpr (S::kRows == 16) {
+		for (uint64_t c = 0; c < n/tile; ++c){
+			VT r0 = rvv::LoadStridedF64<VT>(f + c * Rows + 0, stride, vl);
+			VT r1 = rvv::LoadStridedF64<VT>(f + c * Rows + 1, stride, vl);
+			VT r2 = rvv::LoadStridedF64<VT>(f + c * Rows + 2, stride, vl);
+			VT r3 = rvv::LoadStridedF64<VT>(f + c * Rows + 3, stride, vl);
+			VT r4 = rvv::LoadStridedF64<VT>(f + c * Rows + 4, stride, vl);
+			VT r5 = rvv::LoadStridedF64<VT>(f + c * Rows + 5, stride, vl);
+			VT r6 = rvv::LoadStridedF64<VT>(f + c * Rows + 6, stride, vl);
+			VT r7 = rvv::LoadStridedF64<VT>(f + c * Rows + 7, stride, vl);
+			VT r8 = rvv::LoadStridedF64<VT>(f + c * Rows + 8, stride, vl);
+			VT r9 = rvv::LoadStridedF64<VT>(f + c * Rows + 9, stride, vl);
+			VT r10 = rvv::LoadStridedF64<VT>(f + c * Rows + 10, stride, vl);
+			VT r11 = rvv::LoadStridedF64<VT>(f + c * Rows + 11, stride, vl);
+			VT r12 = rvv::LoadStridedF64<VT>(f + c * Rows + 12, stride, vl);
+			VT r13 = rvv::LoadStridedF64<VT>(f + c * Rows + 13, stride, vl);
+			VT r14 = rvv::LoadStridedF64<VT>(f + c * Rows + 14, stride, vl);
+			VT r15 = rvv::LoadStridedF64<VT>(f + c * Rows + 15, stride, vl);
+
+			VT W, Wq;
+			// stage t = 8
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::FwdButterflyF64(r0, r8, W, Wq, Qv, Cv, vl);
+			rvv::FwdButterflyF64(r1, r9, W, Wq, Qv, Cv, vl);
+			rvv::FwdButterflyF64(r2, r10, W, Wq, Qv, Cv, vl);
+			rvv::FwdButterflyF64(r3, r11, W, Wq, Qv, Cv, vl);
+			rvv::FwdButterflyF64(r4, r12, W, Wq, Qv, Cv, vl);
+			rvv::FwdButterflyF64(r5, r13, W, Wq, Qv, Cv, vl);
+			rvv::FwdButterflyF64(r6, r14, W, Wq, Qv, Cv, vl);
+			rvv::FwdButterflyF64(r7, r15, W, Wq, Qv, Cv, vl);
+
+			// stage t = 4, 2 row groups
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::FwdButterflyF64(r0, r4, W, Wq, Qv, Cv, vl);   // group 0
+			rvv::FwdButterflyF64(r1, r5, W, Wq, Qv, Cv, vl);
+			rvv::FwdButterflyF64(r2, r6, W, Wq, Qv, Cv, vl);
+			rvv::FwdButterflyF64(r3, r7, W, Wq, Qv, Cv, vl);
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::FwdButterflyF64(r8, r12, W, Wq, Qv, Cv, vl);   // group 1
+			rvv::FwdButterflyF64(r9, r13, W, Wq, Qv, Cv, vl);
+			rvv::FwdButterflyF64(r10, r14, W, Wq, Qv, Cv, vl);
+			rvv::FwdButterflyF64(r11, r15, W, Wq, Qv, Cv, vl);
+
+			// stage t = 2, 4 row groups
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::FwdButterflyF64(r0, r2, W, Wq, Qv, Cv, vl);   // group 0
+			rvv::FwdButterflyF64(r1, r3, W, Wq, Qv, Cv, vl);
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::FwdButterflyF64(r4, r6, W, Wq, Qv, Cv, vl);   // group 1
+			rvv::FwdButterflyF64(r5, r7, W, Wq, Qv, Cv, vl);
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::FwdButterflyF64(r8, r10, W, Wq, Qv, Cv, vl);   // group 2
+			rvv::FwdButterflyF64(r9, r11, W, Wq, Qv, Cv, vl);
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::FwdButterflyF64(r12, r14, W, Wq, Qv, Cv, vl);   // group 3
+			rvv::FwdButterflyF64(r13, r15, W, Wq, Qv, Cv, vl);
+
+			// stage t = 1, 8 row groups
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::FwdButterflyF64(r0, r1, W, Wq, Qv, Cv, vl);   // group 0
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::FwdButterflyF64(r2, r3, W, Wq, Qv, Cv, vl);   // group 1
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::FwdButterflyF64(r4, r5, W, Wq, Qv, Cv, vl);   // group 2
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::FwdButterflyF64(r6, r7, W, Wq, Qv, Cv, vl);   // group 3
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::FwdButterflyF64(r8, r9, W, Wq, Qv, Cv, vl);   // group 4
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::FwdButterflyF64(r10, r11, W, Wq, Qv, Cv, vl);   // group 5
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::FwdButterflyF64(r12, r13, W, Wq, Qv, Cv, vl);   // group 6
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::FwdButterflyF64(r14, r15, W, Wq, Qv, Cv, vl);   // group 7
+
+			rvv::StoreStrided(result + c * Rows + 0, stride, ForwardOutputF64(r0, Qv, modulus, output_mod_factor, vl), vl);
+			rvv::StoreStrided(result + c * Rows + 1, stride, ForwardOutputF64(r1, Qv, modulus, output_mod_factor, vl), vl);
+			rvv::StoreStrided(result + c * Rows + 2, stride, ForwardOutputF64(r2, Qv, modulus, output_mod_factor, vl), vl);
+			rvv::StoreStrided(result + c * Rows + 3, stride, ForwardOutputF64(r3, Qv, modulus, output_mod_factor, vl), vl);
+			rvv::StoreStrided(result + c * Rows + 4, stride, ForwardOutputF64(r4, Qv, modulus, output_mod_factor, vl), vl);
+			rvv::StoreStrided(result + c * Rows + 5, stride, ForwardOutputF64(r5, Qv, modulus, output_mod_factor, vl), vl);
+			rvv::StoreStrided(result + c * Rows + 6, stride, ForwardOutputF64(r6, Qv, modulus, output_mod_factor, vl), vl);
+			rvv::StoreStrided(result + c * Rows + 7, stride, ForwardOutputF64(r7, Qv, modulus, output_mod_factor, vl), vl);
+			rvv::StoreStrided(result + c * Rows + 8, stride, ForwardOutputF64(r8, Qv, modulus, output_mod_factor, vl), vl);
+			rvv::StoreStrided(result + c * Rows + 9, stride, ForwardOutputF64(r9, Qv, modulus, output_mod_factor, vl), vl);
+			rvv::StoreStrided(result + c * Rows + 10, stride, ForwardOutputF64(r10, Qv, modulus, output_mod_factor, vl), vl);
+			rvv::StoreStrided(result + c * Rows + 11, stride, ForwardOutputF64(r11, Qv, modulus, output_mod_factor, vl), vl);
+			rvv::StoreStrided(result + c * Rows + 12, stride, ForwardOutputF64(r12, Qv, modulus, output_mod_factor, vl), vl);
+			rvv::StoreStrided(result + c * Rows + 13, stride, ForwardOutputF64(r13, Qv, modulus, output_mod_factor, vl), vl);
+			rvv::StoreStrided(result + c * Rows + 14, stride, ForwardOutputF64(r14, Qv, modulus, output_mod_factor, vl), vl);
+			rvv::StoreStrided(result + c * Rows + 15, stride, ForwardOutputF64(r15, Qv, modulus, output_mod_factor, vl), vl);
+		}
+	}
+}
+
+/// Inverse stages t = 1 .. Rows/2, FP64: operand ([0, 2q)) into f ([-q, q]),
+/// for the per-block stages that follow.
+template <class VF, class S>
+HEXL_RVV_TILE_FN void InverseTransposedRVVF64(double* f, const uint64_t* operand, uint64_t n,
+		uint64_t modulus,
+		const NttSmallSpanTables<S, double>& tables) {
+	static_assert(rvv::ntt::kIsTransposed<S>, "S must be a rvv::ntt::Transposed shape");
+	using VU = TransposedLane<S, rvv::UintOf<VF>>;
+	using VT = rvv::F64Of<VU>;
+	const register uint64_t vl = tables.vl;
+	const register uint64_t stride = n/vl;
+	const register uint64_t Rows = S::kRows;
+	const register uint64_t tile = vl * Rows;
+	const register double* tw  = tables.inv.data();
+	const register double* twq = tables.inv_precon.data();   // w / q
+	const VT Qv = rvv::SplatF64<VT>(static_cast<double>(modulus), vl);
+	const VT Cv = rvv::SplatF64<VT>(0x1.8p52, vl);
+	if constexpr (S::kRows == 4) {
+		for (uint64_t c = 0; c < n/tile; ++c){
+			VT r0 = InverseInputF64<VT>(rvv::LoadStrided<VU>(operand + c * Rows + 0, stride, vl), Qv, vl);
+			VT r1 = InverseInputF64<VT>(rvv::LoadStrided<VU>(operand + c * Rows + 1, stride, vl), Qv, vl);
+			VT r2 = InverseInputF64<VT>(rvv::LoadStrided<VU>(operand + c * Rows + 2, stride, vl), Qv, vl);
+			VT r3 = InverseInputF64<VT>(rvv::LoadStrided<VU>(operand + c * Rows + 3, stride, vl), Qv, vl);
+
+			VT W, Wq;
+			// stage t = 1, 2 row groups
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::InvButterflyF64(r0, r1, W, Wq, Qv, Cv, vl);   // group 0
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::InvButterflyF64(r2, r3, W, Wq, Qv, Cv, vl);   // group 1
+
+			// stage t = 2
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::InvButterflyF64(r0, r2, W, Wq, Qv, Cv, vl);
+			rvv::InvButterflyF64(r1, r3, W, Wq, Qv, Cv, vl);
+
+			rvv::StoreStrided(f + c * Rows + 0, stride, r0, vl);
+			rvv::StoreStrided(f + c * Rows + 1, stride, r1, vl);
+			rvv::StoreStrided(f + c * Rows + 2, stride, r2, vl);
+			rvv::StoreStrided(f + c * Rows + 3, stride, r3, vl);
+		}
+	} else if constexpr (S::kRows == 8) {
+		for (uint64_t c = 0; c < n/tile; ++c){
+			VT r0 = InverseInputF64<VT>(rvv::LoadStrided<VU>(operand + c * Rows + 0, stride, vl), Qv, vl);
+			VT r1 = InverseInputF64<VT>(rvv::LoadStrided<VU>(operand + c * Rows + 1, stride, vl), Qv, vl);
+			VT r2 = InverseInputF64<VT>(rvv::LoadStrided<VU>(operand + c * Rows + 2, stride, vl), Qv, vl);
+			VT r3 = InverseInputF64<VT>(rvv::LoadStrided<VU>(operand + c * Rows + 3, stride, vl), Qv, vl);
+			VT r4 = InverseInputF64<VT>(rvv::LoadStrided<VU>(operand + c * Rows + 4, stride, vl), Qv, vl);
+			VT r5 = InverseInputF64<VT>(rvv::LoadStrided<VU>(operand + c * Rows + 5, stride, vl), Qv, vl);
+			VT r6 = InverseInputF64<VT>(rvv::LoadStrided<VU>(operand + c * Rows + 6, stride, vl), Qv, vl);
+			VT r7 = InverseInputF64<VT>(rvv::LoadStrided<VU>(operand + c * Rows + 7, stride, vl), Qv, vl);
+
+			VT W, Wq;
+			// stage t = 1, 4 row groups
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::InvButterflyF64(r0, r1, W, Wq, Qv, Cv, vl);   // group 0
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::InvButterflyF64(r2, r3, W, Wq, Qv, Cv, vl);   // group 1
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::InvButterflyF64(r4, r5, W, Wq, Qv, Cv, vl);   // group 2
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::InvButterflyF64(r6, r7, W, Wq, Qv, Cv, vl);   // group 3
+
+			// stage t = 2, 2 row groups
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::InvButterflyF64(r0, r2, W, Wq, Qv, Cv, vl);   // group 0
+			rvv::InvButterflyF64(r1, r3, W, Wq, Qv, Cv, vl);
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::InvButterflyF64(r4, r6, W, Wq, Qv, Cv, vl);   // group 1
+			rvv::InvButterflyF64(r5, r7, W, Wq, Qv, Cv, vl);
+
+			// stage t = 4
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::InvButterflyF64(r0, r4, W, Wq, Qv, Cv, vl);
+			rvv::InvButterflyF64(r1, r5, W, Wq, Qv, Cv, vl);
+			rvv::InvButterflyF64(r2, r6, W, Wq, Qv, Cv, vl);
+			rvv::InvButterflyF64(r3, r7, W, Wq, Qv, Cv, vl);
+
+			rvv::StoreStrided(f + c * Rows + 0, stride, r0, vl);
+			rvv::StoreStrided(f + c * Rows + 1, stride, r1, vl);
+			rvv::StoreStrided(f + c * Rows + 2, stride, r2, vl);
+			rvv::StoreStrided(f + c * Rows + 3, stride, r3, vl);
+			rvv::StoreStrided(f + c * Rows + 4, stride, r4, vl);
+			rvv::StoreStrided(f + c * Rows + 5, stride, r5, vl);
+			rvv::StoreStrided(f + c * Rows + 6, stride, r6, vl);
+			rvv::StoreStrided(f + c * Rows + 7, stride, r7, vl);
+		}
+	} else if constexpr (S::kRows == 16) {
+		for (uint64_t c = 0; c < n/tile; ++c){
+			VT r0 = InverseInputF64<VT>(rvv::LoadStrided<VU>(operand + c * Rows + 0, stride, vl), Qv, vl);
+			VT r1 = InverseInputF64<VT>(rvv::LoadStrided<VU>(operand + c * Rows + 1, stride, vl), Qv, vl);
+			VT r2 = InverseInputF64<VT>(rvv::LoadStrided<VU>(operand + c * Rows + 2, stride, vl), Qv, vl);
+			VT r3 = InverseInputF64<VT>(rvv::LoadStrided<VU>(operand + c * Rows + 3, stride, vl), Qv, vl);
+			VT r4 = InverseInputF64<VT>(rvv::LoadStrided<VU>(operand + c * Rows + 4, stride, vl), Qv, vl);
+			VT r5 = InverseInputF64<VT>(rvv::LoadStrided<VU>(operand + c * Rows + 5, stride, vl), Qv, vl);
+			VT r6 = InverseInputF64<VT>(rvv::LoadStrided<VU>(operand + c * Rows + 6, stride, vl), Qv, vl);
+			VT r7 = InverseInputF64<VT>(rvv::LoadStrided<VU>(operand + c * Rows + 7, stride, vl), Qv, vl);
+			VT r8 = InverseInputF64<VT>(rvv::LoadStrided<VU>(operand + c * Rows + 8, stride, vl), Qv, vl);
+			VT r9 = InverseInputF64<VT>(rvv::LoadStrided<VU>(operand + c * Rows + 9, stride, vl), Qv, vl);
+			VT r10 = InverseInputF64<VT>(rvv::LoadStrided<VU>(operand + c * Rows + 10, stride, vl), Qv, vl);
+			VT r11 = InverseInputF64<VT>(rvv::LoadStrided<VU>(operand + c * Rows + 11, stride, vl), Qv, vl);
+			VT r12 = InverseInputF64<VT>(rvv::LoadStrided<VU>(operand + c * Rows + 12, stride, vl), Qv, vl);
+			VT r13 = InverseInputF64<VT>(rvv::LoadStrided<VU>(operand + c * Rows + 13, stride, vl), Qv, vl);
+			VT r14 = InverseInputF64<VT>(rvv::LoadStrided<VU>(operand + c * Rows + 14, stride, vl), Qv, vl);
+			VT r15 = InverseInputF64<VT>(rvv::LoadStrided<VU>(operand + c * Rows + 15, stride, vl), Qv, vl);
+
+			VT W, Wq;
+			// stage t = 1, 8 row groups
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::InvButterflyF64(r0, r1, W, Wq, Qv, Cv, vl);   // group 0
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::InvButterflyF64(r2, r3, W, Wq, Qv, Cv, vl);   // group 1
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::InvButterflyF64(r4, r5, W, Wq, Qv, Cv, vl);   // group 2
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::InvButterflyF64(r6, r7, W, Wq, Qv, Cv, vl);   // group 3
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::InvButterflyF64(r8, r9, W, Wq, Qv, Cv, vl);   // group 4
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::InvButterflyF64(r10, r11, W, Wq, Qv, Cv, vl);   // group 5
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::InvButterflyF64(r12, r13, W, Wq, Qv, Cv, vl);   // group 6
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::InvButterflyF64(r14, r15, W, Wq, Qv, Cv, vl);   // group 7
+
+			// stage t = 2, 4 row groups
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::InvButterflyF64(r0, r2, W, Wq, Qv, Cv, vl);   // group 0
+			rvv::InvButterflyF64(r1, r3, W, Wq, Qv, Cv, vl);
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::InvButterflyF64(r4, r6, W, Wq, Qv, Cv, vl);   // group 1
+			rvv::InvButterflyF64(r5, r7, W, Wq, Qv, Cv, vl);
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::InvButterflyF64(r8, r10, W, Wq, Qv, Cv, vl);   // group 2
+			rvv::InvButterflyF64(r9, r11, W, Wq, Qv, Cv, vl);
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::InvButterflyF64(r12, r14, W, Wq, Qv, Cv, vl);   // group 3
+			rvv::InvButterflyF64(r13, r15, W, Wq, Qv, Cv, vl);
+
+			// stage t = 4, 2 row groups
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::InvButterflyF64(r0, r4, W, Wq, Qv, Cv, vl);   // group 0
+			rvv::InvButterflyF64(r1, r5, W, Wq, Qv, Cv, vl);
+			rvv::InvButterflyF64(r2, r6, W, Wq, Qv, Cv, vl);
+			rvv::InvButterflyF64(r3, r7, W, Wq, Qv, Cv, vl);
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::InvButterflyF64(r8, r12, W, Wq, Qv, Cv, vl);   // group 1
+			rvv::InvButterflyF64(r9, r13, W, Wq, Qv, Cv, vl);
+			rvv::InvButterflyF64(r10, r14, W, Wq, Qv, Cv, vl);
+			rvv::InvButterflyF64(r11, r15, W, Wq, Qv, Cv, vl);
+
+			// stage t = 8
+			W = rvv::LoadF64<VT>(tw, vl);  Wq = rvv::LoadF64<VT>(twq, vl);  tw += vl; twq += vl;
+			rvv::InvButterflyF64(r0, r8, W, Wq, Qv, Cv, vl);
+			rvv::InvButterflyF64(r1, r9, W, Wq, Qv, Cv, vl);
+			rvv::InvButterflyF64(r2, r10, W, Wq, Qv, Cv, vl);
+			rvv::InvButterflyF64(r3, r11, W, Wq, Qv, Cv, vl);
+			rvv::InvButterflyF64(r4, r12, W, Wq, Qv, Cv, vl);
+			rvv::InvButterflyF64(r5, r13, W, Wq, Qv, Cv, vl);
+			rvv::InvButterflyF64(r6, r14, W, Wq, Qv, Cv, vl);
+			rvv::InvButterflyF64(r7, r15, W, Wq, Qv, Cv, vl);
+
+			rvv::StoreStrided(f + c * Rows + 0, stride, r0, vl);
+			rvv::StoreStrided(f + c * Rows + 1, stride, r1, vl);
+			rvv::StoreStrided(f + c * Rows + 2, stride, r2, vl);
+			rvv::StoreStrided(f + c * Rows + 3, stride, r3, vl);
+			rvv::StoreStrided(f + c * Rows + 4, stride, r4, vl);
+			rvv::StoreStrided(f + c * Rows + 5, stride, r5, vl);
+			rvv::StoreStrided(f + c * Rows + 6, stride, r6, vl);
+			rvv::StoreStrided(f + c * Rows + 7, stride, r7, vl);
+			rvv::StoreStrided(f + c * Rows + 8, stride, r8, vl);
+			rvv::StoreStrided(f + c * Rows + 9, stride, r9, vl);
+			rvv::StoreStrided(f + c * Rows + 10, stride, r10, vl);
+			rvv::StoreStrided(f + c * Rows + 11, stride, r11, vl);
+			rvv::StoreStrided(f + c * Rows + 12, stride, r12, vl);
+			rvv::StoreStrided(f + c * Rows + 13, stride, r13, vl);
+			rvv::StoreStrided(f + c * Rows + 14, stride, r14, vl);
+			rvv::StoreStrided(f + c * Rows + 15, stride, r15, vl);
+		}
+	}
+}
+
 }  // namespace hexl
 }  // namespace intel
 

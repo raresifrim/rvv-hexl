@@ -215,6 +215,30 @@ inline void Store(double* p, VF v, size_t vl) {
 	__riscv_vse64(p, v, vl);
 }
 
+/// @brief Strided load of vl doubles (stride in elements) as lane type VF, for
+/// the FP64 Transposed small-span NTT.
+template <class VF>
+inline VF LoadStridedF64(const double* p, ptrdiff_t stride, size_t vl) {
+	static_assert(IsF64<VF>, "rvv::LoadStridedF64<VF>: VF must be vfloat64m1_t..m8_t");
+	const ptrdiff_t bs = stride * static_cast<ptrdiff_t>(sizeof(double));
+	if constexpr (std::is_same_v<VF, vfloat64m1_t>) {
+		return __riscv_vlse64_v_f64m1(p, bs, vl);
+	} else if constexpr (std::is_same_v<VF, vfloat64m2_t>) {
+		return __riscv_vlse64_v_f64m2(p, bs, vl);
+	} else if constexpr (std::is_same_v<VF, vfloat64m4_t>) {
+		return __riscv_vlse64_v_f64m4(p, bs, vl);
+	} else {
+		return __riscv_vlse64_v_f64m8(p, bs, vl);
+	}
+}
+
+/// @brief Strided store of vl doubles (stride in elements).
+template <class VF>
+inline void StoreStrided(double* p, ptrdiff_t stride, VF v, size_t vl) {
+	static_assert(IsF64<VF>, "rvv::StoreStrided(double*, v): v must be an f64 vector");
+	__riscv_vsse64(p, stride * static_cast<ptrdiff_t>(sizeof(double)), v, vl);
+}
+
 /// @brief The same register read as signed / unsigned lanes (no instruction):
 /// for the signed shifts (vsra, vssra) of kernels that keep their values in the
 /// unsigned lane types. One overload per lane type.
@@ -800,6 +824,68 @@ __attribute__((always_inline)) inline void InvButterfly32(V& x, V& y, Tw w, Tw w
 	const V d = __riscv_vadd(__riscv_vsub(x, y, vl), q2, vl);
 	x = ReduceFromTwice32(__riscv_vadd(x, y, vl), q2, vl);
 	y = MulModShoupLazy32(d, w, w_precon, q, vl);
+}
+
+// ---------------------------------------------------------------------------
+// FP64 NTT butterflies (src/ntt/ntt-rvv-fp64.hpp; the modular multiply of
+// util/fp64-mod.hpp), on doubles holding integers, 2^30 <= q < 2^50, with
+// signed lazy ranges: forward values in [-2q, 2q], inverse in [-q, q] (every
+// value and partial result an exact double). The twiddle w is a VF vector
+// (per-lane twiddles) or a double scalar, with its quotient factor
+// w_over_q = fl(w / q) (NttFp64Tables). qv and cv hold q and 0x1.8p52 in
+// every lane (SplatF64 once per kernel, at VLMAX): vfsgnj and the addend of
+// vfmadd take vectors only. always_inline for the same reason as above.
+// ---------------------------------------------------------------------------
+
+/// @brief [-2q, 2q] -> [-q, q]: x - q for x >= 0, x + q below (vfsgnj gives q
+/// the sign of x). Exact; the FP64 counterpart of ReduceFromTwice.
+template <class VF>
+__attribute__((always_inline)) inline VF ReduceFromTwiceF64(VF x, VF qv, size_t vl) {
+	return __riscv_vfsub(x, __riscv_vfsgnj(qv, x, vl), vl);
+}
+
+/// @brief y * w mod q in (-q, q) for y in [-2q, 2q] (|y w / q| <= 2q < 2^51,
+/// the range of the rounding trick); the FP64 counterpart of MulModShoupLazy:
+///   h = y w rounded, l = y w - h exact, t = round(y * w_over_q),
+///   r = (h - t q) + l = y w - t q, exact (integers below 2^51)
+/// |t - y w / q| <= 1/2 + 2q 2^-53 < 3/4, so |r| < 3q/4.
+template <class VF, class Tw>
+__attribute__((always_inline)) inline VF MulModF64(VF y, Tw w, Tw w_over_q, VF qv, VF cv, size_t vl) {
+	static_assert(IsF64<VF>, "rvv::MulModF64 takes f64 vectors");
+	static_assert(std::is_same_v<Tw, VF> || std::is_same_v<Tw, double>, "twiddle: a VF vector or a double scalar");
+	const VF h = __riscv_vfmul(y, w, vl);                                       // y w rounded
+	const VF l = __riscv_vfmsub(y, w, h, vl);                                   // y w - h, exact
+	const VF t = __riscv_vfsub(__riscv_vfmadd(y, w_over_q, cv, vl), cv, vl);   // round(y w / q)
+	return __riscv_vfadd(__riscv_vfnmsac(h, qv, t, vl), l, vl);                 // y w - t q
+}
+
+/// @brief An integer r in [-q, q] (a double) as uint64_t lanes in [0, q]: the
+/// signed convert (vfcvt.xu.f would clamp negatives to 0), + q when negative
+/// (vadd + vminu, as the FP64 eltwise kernels).
+template <class VF>
+__attribute__((always_inline)) inline UintOf<VF> ToUintModF64(VF r, uint64_t q, size_t vl) {
+	const UintOf<VF> u = AsUnsigned(__riscv_vfcvt_x(r, vl));
+	return __riscv_vminu(u, __riscv_vadd(u, q, vl), vl);
+}
+
+/// @brief Forward (Cooley-Tukey) butterfly, FP64:
+///   x' = x + w*y,  y' = x - w*y  (mod q), x, y in [-2q, 2q] in and out
+/// (strictly inside: |x'|, |y'| <= q + 3q/4).
+template <class VF, class Tw>
+__attribute__((always_inline)) inline void FwdButterflyF64(VF& x, VF& y, Tw w, Tw w_over_q, VF qv, VF cv, size_t vl) {
+	x = ReduceFromTwiceF64(x, qv, vl);                    // [-q, q]
+	const VF t = MulModF64(y, w, w_over_q, qv, cv, vl);   // w*y in (-q, q)
+	y = __riscv_vfsub(x, t, vl);                          // (-2q, 2q)
+	x = __riscv_vfadd(x, t, vl);                          // (-2q, 2q)
+}
+
+/// @brief Inverse (Gentleman-Sande) butterfly, FP64:
+///   x' = x + y,  y' = (x - y)*w  (mod q), x, y in [-q, q] in and out.
+template <class VF, class Tw>
+__attribute__((always_inline)) inline void InvButterflyF64(VF& x, VF& y, Tw w, Tw w_over_q, VF qv, VF cv, size_t vl) {
+	const VF d = __riscv_vfsub(x, y, vl);                       // [-2q, 2q]
+	x = ReduceFromTwiceF64(__riscv_vfadd(x, y, vl), qv, vl);    // [-q, q]
+	y = MulModF64(d, w, w_over_q, qv, cv, vl);                  // (-q, q)
 }
 
 }  // namespace rvv

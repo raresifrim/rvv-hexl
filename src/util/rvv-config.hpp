@@ -204,10 +204,22 @@ using Ntt32U64 = NttBestLanes<NttSmallSpan32>::Ntt32U64;  // RVV32 NTT on uint64
 // FP64 NTT path (src/ntt/ntt-rvv-fp64.hpp), for 2^30 <= q < 2^50: the K3 runs
 // FP64 FMA at 4 elements per cycle against 1 for the e64 integer multiply
 // (vfmadd.vf / vmul.vx at m1, 16 chains, both clusters, 2026-10-20). Off until
-// the FP64 kernels are written and measured against Ntt64; the lane type is a
-// placeholder until BM_Lanes_NttF64 has been measured on both clusters.
+// the inverse is written and the path is measured on the protocol. Strategy
+// (any rvv::ntt strategy, as NttSmallSpan64) and lanes: the best overall
+// geomean of the forward over both clusters, N = 1024 .. 16384, 49-bit q,
+// against the integer default (Ntt64 + NttSmallSpan64), X100 / A100 / overall
+// (rvv-hexl results/ntt-fp64-small-span-2026-10-26, 2026-10-26):
+//                   m1                 m2                 m4                 m8
+//   PerBlock      0.49 / 0.52 / 0.50  0.53 / 0.40 / 0.46  0.44 / 0.25 / 0.33  0.19 / 0.10 / 0.14
+//   FusedSlides   0.58 / 1.41 / 0.90  0.85 / 1.38 / 1.08  0.94 / 1.65 / 1.25  0.56 / 0.98 / 0.74
+//   Transposed16  0.72 / 1.11 / 0.89  0.92 / 1.16 / 1.04  1.03 / 1.10 / 1.06  0.86 / 0.80 / 0.83
+//   Transposed8   0.72 / 1.06 / 0.87  0.95 / 1.05 / 1.00  0.99 / 0.91 / 0.95  0.73 / 0.56 / 0.64
+//   Transposed8x2 0.75 / 1.08 / 0.90  1.01 / 1.08 / 1.04  1.05 / 0.93 / 0.99  0.77 / 0.56 / 0.66
+//   Transposed4x4 0.68 / 0.94 / 0.80  0.86 / 0.87 / 0.86  0.80 / 0.67 / 0.73  0.52 / 0.34 / 0.42
+// Per cluster: X100 best Transposed8x2 m4 (1.05x), A100 FusedSlides m4 (1.65x).
 inline constexpr bool kNttFp64 = false;
-using NttF64 = vfloat64m2_t;
+using NttF64 = vfloat64m4_t;
+using NttSmallSpanF64 = ntt::FusedSlides;
 
 }  // namespace cfg
 
