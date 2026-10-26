@@ -283,9 +283,9 @@ prebuilt route, with `INTEL_HEXL_HINT_DIR` pointing at the rvv-hexl install.
   and ModDown) on whole vectors of coefficients, bit for bit OpenFHE's result. Scalar in
   OpenFHE (128-bit sums and Barrett reductions): 15% (X100) and 33% (A100) of the CKKS central
   node's FHE time after rvv-hexl (blindloop `ckks_openfhe` profiles). The native kernel uses
-  Shoup products with lazy sums; the RVV kernel (`src/eltwise/eltwise-base-convert-rvv.cpp`) is
-  a stub that runs it. `openfhe-pke-baseconv.py` routes OpenFHE to it with
-  `OPENFHE_HEXL_BASECONV=1` (default 0 while the RVV kernel is a stub). Tests:
+  Shoup products with lazy sums; the RVV kernel (`src/eltwise/eltwise-base-convert-rvv.cpp`)
+  runs the same arithmetic on strips of coefficients. `openfhe-pke-baseconv.py` routes OpenFHE
+  to it by default (`OPENFHE_HEXL_BASECONV=0` keeps OpenFHE's loop). Tests:
   `Eltwise_BaseConvert`, `RvvLanes_BaseConvert`; benchmarks: `BM_BaseConvert` against
   `BM_BaseConvertOpenFHELoop` (OpenFHE's loop), `BM_Lanes_BaseConvert`.
 * FP64 paths (off by default): for 2^30 <= q < 2^50 the modular multiply can run on the FP64

@@ -413,27 +413,36 @@ void BM_Lanes_MultAddModF64(benchmark::State& state) {
 }
 
 /// BaseConvert's RVV kernel at lane type V (or, with V = void, the native
-/// kernel), at blindloop ckks_openfhe's ModUp shape: N = 8192, a 36-bit digit
-/// to 4 limbs (46, 37, 37, 59 bits).
+/// kernel), N = 8192, at blindloop ckks_openfhe's ModUp shape (shape 0: a
+/// 36-bit digit to 4 limbs, 46, 37, 37, 59 bits; the L = 1 path) or a 3 -> 5
+/// conversion (shape 1: the L > 1 path). The constants are timing stand-ins
+/// (any value below the modulus costs the same).
 template <class V>
 void BM_Lanes_BaseConvert(benchmark::State& state) {
 	namespace O = hexltest::oracle;
 	const uint64_t n = 8192;
-	const std::vector<uint64_t> q{hexlbench::Prime(36, n)},
-	      p{hexlbench::Prime(46, n), hexlbench::Prime(37, n), O::NttPrime(37, n, 1), hexlbench::Prime(59, n)};
-	std::vector<uint64_t> q_hat_inv{1}, q_hat_mod_p(p.size(), 1);  // L = 1: Q_0 = 1
-	const auto args = intel::hexl::MakeBaseConvertArgs(q.data(), 1, p.data(), p.size(), q_hat_inv.data(),
+	const std::vector<uint64_t> q = state.range(0) == 0
+		? std::vector<uint64_t>{hexlbench::Prime(36, n)}
+		: std::vector<uint64_t>{hexlbench::Prime(46, n), hexlbench::Prime(37, n), hexlbench::Prime(36, n)};
+	const std::vector<uint64_t> p = state.range(0) == 0
+		? std::vector<uint64_t>{hexlbench::Prime(46, n), hexlbench::Prime(37, n), O::NttPrime(37, n, 1), hexlbench::Prime(59, n)}
+		: std::vector<uint64_t>{O::NttPrime(37, n, 1), hexlbench::Prime(59, n), O::NttPrime(59, n, 1), O::NttPrime(46, n, 1),
+			O::NttPrime(36, n, 1)};
+	const size_t L = q.size(), K = p.size();
+	std::vector<uint64_t> q_hat_inv(L, 1), q_hat_mod_p(L * K, 1);
+	const auto args = intel::hexl::MakeBaseConvertArgs(q.data(), L, p.data(), K, q_hat_inv.data(),
 			q_hat_mod_p.data());
-	auto x = hexlbench::RandomW<uint64_t>(n, q[0]);
-	std::vector<intel::hexl::AlignedVector64<uint64_t>> y(p.size(), intel::hexl::AlignedVector64<uint64_t>(n));
-	const uint64_t* in[1] = {x.data()};
+	std::vector<intel::hexl::AlignedVector64<uint64_t>> x, y(K, intel::hexl::AlignedVector64<uint64_t>(n));
+	for (size_t i = 0; i < L; ++i) x.push_back(hexlbench::RandomW<uint64_t>(n, q[i]));
+	std::vector<const uint64_t*> in;
 	std::vector<uint64_t*> out;
+	for (auto& v : x) in.push_back(v.data());
 	for (auto& v : y) out.push_back(v.data());
 	for (auto _ : state) {
 		if constexpr (std::is_void_v<V>) {
-			intel::hexl::BaseConvertNative(out.data(), in, n, args);
+			intel::hexl::BaseConvertNative(out.data(), in.data(), n, args);
 		} else {
-			intel::hexl::BaseConvertRVV64<V>(out.data(), in, n, args);
+			intel::hexl::BaseConvertRVV64<V>(out.data(), in.data(), n, args);
 		}
 		benchmark::ClobberMemory();
 	}
@@ -524,11 +533,11 @@ HEXL_NTT_F64_STRATEGIES(BM_Lanes_NttF64Inverse);
 #undef HEXL_NTT_F64_STRATEGIES
 #undef HEXL_NTT_F64_LANES
 // BaseConvert: void = the native kernel
-BENCHMARK_TEMPLATE(BM_Lanes_BaseConvert, void);
-BENCHMARK_TEMPLATE(BM_Lanes_BaseConvert, vuint64m1_t);
-BENCHMARK_TEMPLATE(BM_Lanes_BaseConvert, vuint64m2_t);
-BENCHMARK_TEMPLATE(BM_Lanes_BaseConvert, vuint64m4_t);
-BENCHMARK_TEMPLATE(BM_Lanes_BaseConvert, vuint64m8_t);
+BENCHMARK_TEMPLATE(BM_Lanes_BaseConvert, void)->ArgName("shape")->Arg(0)->Arg(1);
+BENCHMARK_TEMPLATE(BM_Lanes_BaseConvert, vuint64m1_t)->ArgName("shape")->Arg(0)->Arg(1);
+BENCHMARK_TEMPLATE(BM_Lanes_BaseConvert, vuint64m2_t)->ArgName("shape")->Arg(0)->Arg(1);
+BENCHMARK_TEMPLATE(BM_Lanes_BaseConvert, vuint64m4_t)->ArgName("shape")->Arg(0)->Arg(1);
+BENCHMARK_TEMPLATE(BM_Lanes_BaseConvert, vuint64m8_t)->ArgName("shape")->Arg(0)->Arg(1);
 
 #define HEXL_ELTWISE_F64_LANES(BM)       \
 	BENCHMARK_TEMPLATE(BM, void);         \

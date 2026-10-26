@@ -111,11 +111,18 @@ using MultAddMod32U64 = vuint32m4_t;  // RVV32 on uint64_t storage (<= m4)
 using SignedDigitDecompose64 = vuint64m8_t;
 using SignedDigitDecompose32 = vuint32m8_t;     // RVV32 on uint32_t storage
 using SignedDigitDecompose32U64 = vuint32m4_t;  // RVV32 on uint64_t storage (<= m4)
-// BaseConvert (rvv-hexl extension, OpenFHE key switching): placeholder until
-// BM_Lanes_BaseConvert has been measured on both clusters. The kernel keeps K
-// accumulators and the Shoup temporaries live: with K = 4-5 (OpenFHE CKKS
-// ModUp) m2 leaves room, m8 would not.
-using BaseConvert64 = vuint64m2_t;
+// BaseConvert (rvv-hexl extension, OpenFHE key switching): one accumulator
+// and the Shoup temporaries live, so every LMUL fits. BM_Lanes_BaseConvert,
+// N = 8192, median of 5 (rvv-hexl results/baseconv-rvv-2026-10-26), gain over
+// BaseConvertNative, shape 1 -> 4 (the L = 1 path, CKKS ModUp / ModDown) and
+// 3 -> 5 (the L > 1 path), X100 / A100:
+//          1 -> 4         3 -> 5        geomean
+//   m1   2.06 / 6.73   1.06 / 4.66     2.88
+//   m2   2.54 / 7.33   1.48 / 5.47     3.50
+//   m4   2.65 / 7.74   1.59 / 5.95     3.73
+//   m8   2.51 / 7.96   1.65 / 6.24     3.79
+// The default is the best geomean (m4 is best on the X100 for L = 1).
+using BaseConvert64 = vuint64m8_t;
 
 // FP64 eltwise path (src/util/fp64-mod.hpp), for 2^30 <= q < 2^50, 64-bit
 // storage: EltwiseMultMod / FMAMod / MultAddMod on the FP64 FMA (4 elements per

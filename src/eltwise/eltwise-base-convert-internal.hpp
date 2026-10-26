@@ -73,8 +73,9 @@ void BaseConvertNative(uint64_t* const* result, const uint64_t* const* operand,
 		uint64_t n, const BaseConvertArgs& a);
 
 #ifdef HEXL_HAS_RVV
-/// @brief RVV, 64-bit lanes (STUB until written: calls BaseConvertNative).
-/// Same contract as BaseConvertNative. Default lane: rvv::cfg::BaseConvert64.
+/// @brief RVV, 64-bit lanes (eltwise-base-convert-rvv.cpp): BaseConvertNative's
+/// arithmetic on strips of coefficients. Same contract as BaseConvertNative.
+/// Default lane: rvv::cfg::BaseConvert64.
 template <class V = rvv::cfg::BaseConvert64>
 void BaseConvertRVV64(uint64_t* const* result, const uint64_t* const* operand,
 		uint64_t n, const BaseConvertArgs& a);

@@ -3,6 +3,9 @@
 
 #include "hexl/eltwise/eltwise-base-convert.hpp"
 
+#include <algorithm>
+#include <vector>
+
 #include "eltwise/eltwise-base-convert-internal.hpp"
 #include "hexl/logging/logging.hpp"
 #include "hexl/number-theory/number-theory.hpp"
@@ -80,8 +83,12 @@ void BaseConvert(uint64_t* const* result, const uint64_t* const* operand,
 
 void BaseConvertNative(uint64_t* const* result, const uint64_t* const* operand,
 		uint64_t n, const BaseConvertArgs& a) {
+	// The corrections are written min(s, s - m) (s - m wraps when s < m): one
+	// minu (Zbb) after the sub, where the ternary compiles to sltu + czero
+	// (Zicond) + sub. result[j] never aliases an operand (checked by
+	// BaseConvert), so each output is stored as soon as it is known.
 	const uint64_t L = a.in_count, K = a.out_count;
-	std::vector<uint64_t> y(L), acc(K);
+	std::vector<uint64_t> y(L);
 	for (uint64_t k = 0; k < n; ++k) {
 		for (uint64_t i = 0; i < L; ++i)  // exact, [0, q_i)
 			y[i] = MultiplyMod(operand[i][k], a.q_hat_inv[i], a.q_hat_inv_precon[i], a.in_moduli[i]);
@@ -90,11 +97,10 @@ void BaseConvertNative(uint64_t* const* result, const uint64_t* const* operand,
 			uint64_t s = 0;  // in [0, 2p)
 			for (uint64_t i = 0; i < L; ++i) {
 				s += MultiplyModLazy<64>(y[i], a.q_hat_mod_p[i * K + j], a.q_hat_mod_p_precon[i * K + j], p);
-				s = s >= two_p ? s - two_p : s;  // s < 4p before: one subtraction
+				s = std::min(s, s - two_p);  // s < 4p before: one subtraction
 			}
-			acc[j] = s >= p ? s - p : s;
+			result[j][k] = std::min(s, s - p);
 		}
-		for (uint64_t j = 0; j < K; ++j) result[j][k] = acc[j];
 	}
 }
 

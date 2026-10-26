@@ -22,8 +22,8 @@ HEXL_RVV_HAS_BASE_CONVERT), bit for bit the same result. Only the branch that
 upstream takes at NATIVE_SIZE=64 without WITH_REDUCED_NOISE is replaced.
 
 Switch HEXL_BASECONV_ENABLE in math/math-hal.h, from OPENFHE_HEXL_BASECONV
-(default 0 while rvv-hexl's RVV kernel is a stub that runs the scalar native
-kernel): 1 calls rvv-hexl, 0 keeps OpenFHE's loop (the comparison baseline).
+(default 1): 1 calls rvv-hexl, 0 keeps OpenFHE's loop (the comparison
+baseline).
 """
 import os
 import pathlib
@@ -32,7 +32,7 @@ import sys
 
 ROOT = pathlib.Path(sys.argv[1])
 MARK = "rvv-hexl: patches/openfhe-pke-baseconv.py"
-VALUE = os.environ.get("OPENFHE_HEXL_BASECONV", "0")
+VALUE = os.environ.get("OPENFHE_HEXL_BASECONV", "1")
 if VALUE not in ("0", "1"):
     sys.exit(f"[openfhe-pke] ERROR: OPENFHE_HEXL_BASECONV must be 0 or 1, got {VALUE!r}")
 
