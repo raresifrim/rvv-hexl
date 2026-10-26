@@ -2,9 +2,7 @@
 // All rights reserved.
 //
 // FP64 NTT path (rvv-hexl extension): the tables and the RVV kernels
-// (algorithm and conditions: ntt-rvv-fp64.hpp). The inverse is a STUB until
-// written: it calls the e64 integer kernel, so the dispatch, the tests and the
-// benchmarks work from the start.
+// (algorithm and conditions: ntt-rvv-fp64.hpp).
 
 #include "ntt/ntt-rvv-fp64.hpp"
 
@@ -114,55 +112,58 @@ void ForwardTransformToBitReverseRVVF64(uint64_t* result, const uint64_t* operan
 		uint64_t modulus, const NttFp64Tables& fp, uint64_t input_mod_factor, uint64_t output_mod_factor,
 		const NttSmallSpanTables<SmallSpan, double>* small_span) {
 	double* f = NttScratchF64(n);
-	ForwardInputRVVF64<VF>(f, operand, n, modulus, input_mod_factor);                                   // [0, 2q)
+	ForwardFirstStageRVVF64<VF>(f, operand, n, modulus, fp.w.data(), fp.w_over_q.data(), input_mod_factor);  // t = n/2, operand -> scratch
 	if constexpr (!std::is_same_v<SmallSpan, rvv::ntt::PerBlock>) {
 		if (UseSmallSpan(small_span, n, SmallSpanLanes<SmallSpan, rvv::UintOf<VF>>())) {
-			ForwardStagesRVVF64<VF>(f, n, modulus, fp.w.data(), fp.w_over_q.data(), n/2, small_span->t_top);  // per block down to t_top
+			ForwardStagesRVVF64<VF>(f, n, modulus, fp.w.data(), fp.w_over_q.data(), n/4, small_span->t_top);  // per block down to t_top
 			ForwardSmallSpanRVVF64<VF, SmallSpan>(result, f, n, modulus, *small_span, output_mod_factor);
 			return;
 		}
 	}
-	ForwardStagesRVVF64<VF>(f, n, modulus, fp.w.data(), fp.w_over_q.data(), n/2, 1);                   // every stage
+	ForwardStagesRVVF64<VF>(f, n, modulus, fp.w.data(), fp.w_over_q.data(), n/4, 1);                   // the other stages
 	ForwardOutputRVVF64<VF>(result, f, n, modulus, output_mod_factor);
 }
 
-template <class VF>
+template <class VF, class SmallSpan>
 void InverseTransformFromBitReverseRVVF64(uint64_t* result, const uint64_t* operand, uint64_t n,
-		uint64_t modulus, const NttFp64Tables& fp, const uint64_t* inv_root_of_unity_powers,
-		const uint64_t* precon_inv_root_of_unity_powers, uint64_t input_mod_factor, uint64_t output_mod_factor,
-		const NttFp64IntSmallSpan* small_span) {
-	// STUB: replace with the FP64 kernel (ntt-rvv-fp64.hpp)
-	(void)fp;
-	InverseTransformFromBitReverseRVV64(result, operand, n, modulus, inv_root_of_unity_powers,
-			precon_inv_root_of_unity_powers, input_mod_factor, output_mod_factor, small_span);
+		uint64_t modulus, const NttFp64Tables& fp, uint64_t input_mod_factor, uint64_t output_mod_factor,
+		const NttSmallSpanTables<SmallSpan, double>* small_span) {
+	(void)input_mod_factor;   // 1 or 2: [0, 2q) either way
+	(void)output_mod_factor;  // 1 or 2: the last stage gives [0, q)
+	double* f = NttScratchF64(n);
+	if constexpr (!std::is_same_v<SmallSpan, rvv::ntt::PerBlock>) {
+		if (UseSmallSpan(small_span, n, SmallSpanLanes<SmallSpan, rvv::UintOf<VF>>())) {
+			// small spans first, operand -> scratch (no input pass)
+			InverseSmallSpanRVVF64<VF, SmallSpan>(f, operand, n, modulus, *small_span);
+			InverseStagesRVVF64<VF>(f, n, modulus, fp.w_inv.data(), fp.w_inv_over_q.data(), small_span->t_top, n/4);   // per block from t_top
+			InverseLastStageRVVF64<VF>(result, f, n, modulus, fp.n_inv, fp.n_inv_over_q, fp.wn_inv, fp.wn_inv_over_q);
+			return;
+		}
+	}
+	InverseInputRVVF64<VF>(f, operand, n, modulus);                                                  // [-q, q)
+	InverseStagesRVVF64<VF>(f, n, modulus, fp.w_inv.data(), fp.w_inv_over_q.data(), 1, n/4);       // every stage but the last
+	InverseLastStageRVVF64<VF>(result, f, n, modulus, fp.n_inv, fp.n_inv_over_q, fp.wn_inv, fp.wn_inv_over_q);
 }
 
-// Every FP64 lane type (and, forward, every strategy), so tests and benchmarks
-// can compare them; the dispatch uses rvv::cfg::NttF64 and NttSmallSpanF64.
-#define HEXL_NTT_RVVF64_FWD(VF, S)                                                                          \
+// Every FP64 lane type and strategy, so tests and benchmarks can compare them;
+// the dispatch uses rvv::cfg::NttF64 and NttSmallSpanF64.
+#define HEXL_NTT_RVVF64(VF, S)                                                                              \
 	template void ForwardTransformToBitReverseRVVF64<VF, S>(uint64_t*, const uint64_t*, uint64_t, uint64_t, \
+			const NttFp64Tables&, uint64_t, uint64_t, const NttSmallSpanTables<S, double>*);              \
+	template void InverseTransformFromBitReverseRVVF64<VF, S>(uint64_t*, const uint64_t*, uint64_t, uint64_t, \
 			const NttFp64Tables&, uint64_t, uint64_t, const NttSmallSpanTables<S, double>*)
-#define HEXL_NTT_RVVF64_INV(VF)                                                                             \
-	template void InverseTransformFromBitReverseRVVF64<VF>(uint64_t*, const uint64_t*, uint64_t, uint64_t, \
-			const NttFp64Tables&, const uint64_t*, const uint64_t*, uint64_t, uint64_t,                   \
-			const NttFp64IntSmallSpan*)
-#define HEXL_NTT_RVVF64_LANES(S)                  \
-	HEXL_NTT_RVVF64_FWD(vfloat64m1_t, S);       \
-	HEXL_NTT_RVVF64_FWD(vfloat64m2_t, S);       \
-	HEXL_NTT_RVVF64_FWD(vfloat64m4_t, S);       \
-	HEXL_NTT_RVVF64_FWD(vfloat64m8_t, S)
+#define HEXL_NTT_RVVF64_LANES(S)              \
+	HEXL_NTT_RVVF64(vfloat64m1_t, S);       \
+	HEXL_NTT_RVVF64(vfloat64m2_t, S);       \
+	HEXL_NTT_RVVF64(vfloat64m4_t, S);       \
+	HEXL_NTT_RVVF64(vfloat64m8_t, S)
 HEXL_NTT_RVVF64_LANES(rvv::ntt::PerBlock);
 HEXL_NTT_RVVF64_LANES(rvv::ntt::FusedSlides);
 #define HEXL_NTT_TRANSPOSED(S) HEXL_NTT_RVVF64_LANES(rvv::ntt::S);
 HEXL_RVV_NTT_TRANSPOSED_SHAPES(HEXL_NTT_TRANSPOSED);
 #undef HEXL_NTT_TRANSPOSED
-HEXL_NTT_RVVF64_INV(vfloat64m1_t);
-HEXL_NTT_RVVF64_INV(vfloat64m2_t);
-HEXL_NTT_RVVF64_INV(vfloat64m4_t);
-HEXL_NTT_RVVF64_INV(vfloat64m8_t);
 #undef HEXL_NTT_RVVF64_LANES
-#undef HEXL_NTT_RVVF64_INV
-#undef HEXL_NTT_RVVF64_FWD
+#undef HEXL_NTT_RVVF64
 
 #endif  // HEXL_HAS_RVV
 

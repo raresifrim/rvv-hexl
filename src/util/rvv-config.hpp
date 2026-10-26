@@ -204,19 +204,28 @@ using Ntt32U64 = NttBestLanes<NttSmallSpan32>::Ntt32U64;  // RVV32 NTT on uint64
 // FP64 NTT path (src/ntt/ntt-rvv-fp64.hpp), for 2^30 <= q < 2^50: the K3 runs
 // FP64 FMA at 4 elements per cycle against 1 for the e64 integer multiply
 // (vfmadd.vf / vmul.vx at m1, 16 chains, both clusters, 2026-10-20). Off until
-// the inverse is written and the path is measured on the protocol. Strategy
-// (any rvv::ntt strategy, as NttSmallSpan64) and lanes: the best overall
-// geomean of the forward over both clusters, N = 1024 .. 16384, 49-bit q,
-// against the integer default (Ntt64 + NttSmallSpan64), X100 / A100 / overall
-// (rvv-hexl results/ntt-fp64-small-span-2026-10-26, 2026-10-26):
+// the path is measured on the protocol. Strategy (any rvv::ntt strategy, as
+// NttSmallSpan64) and lanes: the best overall geomean over both clusters and
+// both directions, N = 1024 .. 16384, 49-bit q, against the integer default
+// (Ntt64 + NttSmallSpan64), X100 / A100 / overall
+// (rvv-hexl results/ntt-fp64-small-span-2026-10-26, 2026-10-26). Forward
+// (input conversion fused into the first stage: +1-3% over a separate pass):
 //                   m1                 m2                 m4                 m8
-//   PerBlock      0.49 / 0.52 / 0.50  0.53 / 0.40 / 0.46  0.44 / 0.25 / 0.33  0.19 / 0.10 / 0.14
-//   FusedSlides   0.58 / 1.41 / 0.90  0.85 / 1.38 / 1.08  0.94 / 1.65 / 1.25  0.56 / 0.98 / 0.74
-//   Transposed16  0.72 / 1.11 / 0.89  0.92 / 1.16 / 1.04  1.03 / 1.10 / 1.06  0.86 / 0.80 / 0.83
-//   Transposed8   0.72 / 1.06 / 0.87  0.95 / 1.05 / 1.00  0.99 / 0.91 / 0.95  0.73 / 0.56 / 0.64
-//   Transposed8x2 0.75 / 1.08 / 0.90  1.01 / 1.08 / 1.04  1.05 / 0.93 / 0.99  0.77 / 0.56 / 0.66
-//   Transposed4x4 0.68 / 0.94 / 0.80  0.86 / 0.87 / 0.86  0.80 / 0.67 / 0.73  0.52 / 0.34 / 0.42
-// Per cluster: X100 best Transposed8x2 m4 (1.05x), A100 FusedSlides m4 (1.65x).
+//   PerBlock      0.50 / 0.52 / 0.51  0.55 / 0.40 / 0.47  0.44 / 0.24 / 0.33  0.20 / 0.10 / 0.14
+//   FusedSlides   0.60 / 1.46 / 0.93  0.87 / 1.67 / 1.20  0.95 / 1.67 / 1.26  0.57 / 0.98 / 0.75
+//   Transposed16  0.75 / 1.13 / 0.92  0.96 / 1.17 / 1.06  1.05 / 1.10 / 1.07  0.87 / 0.79 / 0.83
+//   Transposed8   0.75 / 1.07 / 0.89  0.98 / 1.05 / 1.02  1.00 / 0.91 / 0.95  0.74 / 0.55 / 0.63
+//   Transposed8x2 0.78 / 1.10 / 0.93  1.05 / 1.09 / 1.07  1.07 / 0.93 / 1.00  0.78 / 0.55 / 0.66
+//   Transposed4x4 0.71 / 0.95 / 0.82  0.89 / 0.87 / 0.88  0.81 / 0.67 / 0.74  0.52 / 0.34 / 0.42
+// Inverse (the small spans read the integer operand):
+//   PerBlock      0.52 / 0.49 / 0.51  0.53 / 0.38 / 0.45  0.43 / 0.25 / 0.33  0.19 / 0.09 / 0.13
+//   FusedSlides   0.62 / 1.45 / 0.95  0.86 / 1.64 / 1.19  1.01 / 1.64 / 1.29  0.57 / 0.91 / 0.72
+//   Transposed16  0.81 / 1.15 / 0.97  1.02 / 1.20 / 1.10  1.19 / 1.13 / 1.16  0.96 / 0.78 / 0.86
+//   Transposed8   0.80 / 1.09 / 0.94  1.03 / 1.07 / 1.05  1.14 / 0.93 / 1.03  0.80 / 0.54 / 0.66
+//   Transposed8x2 0.79 / 1.13 / 0.95  1.02 / 1.11 / 1.06  1.13 / 0.95 / 1.04  0.79 / 0.55 / 0.66
+//   Transposed4x4 0.74 / 0.95 / 0.84  0.89 / 0.87 / 0.88  0.86 / 0.68 / 0.76  0.55 / 0.33 / 0.43
+// Both directions: FusedSlides m4 0.98 / 1.66 / 1.28 (the default, best on the
+// A100), Transposed16 m4 1.12 / 1.11 / 1.12 (best on the X100).
 inline constexpr bool kNttFp64 = false;
 using NttF64 = vfloat64m4_t;
 using NttSmallSpanF64 = ntt::FusedSlides;

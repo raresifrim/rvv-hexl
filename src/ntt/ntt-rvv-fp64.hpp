@@ -1,8 +1,7 @@
 // Copyright (C) 2026 Rares Ifrim, National University of Science and Technology POLITEHNICA Bucharest
 // All rights reserved.
 //
-// FP64 NTT path (rvv-hexl extension; the forward kernel is written, the
-// inverse is a STUB that calls the e64 integer kernel). For moduli between
+// FP64 NTT path (rvv-hexl extension). For moduli between
 // 2^30 and 2^50 the butterfly's modular multiply can run on the FP64 FMA; the
 // method and the modulus conditions are in util/fp64-mod.hpp. Here: with a
 // twiddle w < q precompute w / q (one multiply fewer). Inside a transform the
@@ -12,15 +11,16 @@
 //
 // Structure, as the integer kernels (ntt-rvv.cpp), one small-span strategy at
 // compile time (rvv::cfg::NttSmallSpanF64, or the SmallSpan parameter):
-//   forward: input pass (operand -> scratch, ForwardInputRVVF64), per-block
-//            stages t = n/2 .. t_top (ForwardStagesRVVF64), small spans by the
+//   forward: first stage t = n/2 with the input conversion fused in (operand
+//            -> scratch, ForwardFirstStageRVVF64), per-block stages t = n/4 ..
+//            t_top (ForwardStagesRVVF64), small spans by the
 //            strategy, scratch -> result in the output range (FusedSlides /
 //            Transposed: Forward*RVVF64); PerBlock: every stage per block,
 //            then ForwardOutputRVVF64.
-//   inverse (to write): small spans by the strategy, operand -> scratch
-//            (Inverse*RVVF64; PerBlock: an input pass, InverseInputF64), the
-//            per-block stages from t_top, the last stage with N^{-1}
-//            (fp.n_inv, fp.wn_inv) scratch -> result (rvv::ToUintModF64).
+//   inverse: small spans by the strategy, operand -> scratch
+//            (Inverse*RVVF64; PerBlock: the input pass InverseInputRVVF64),
+//            per-block stages t_top .. n/4 (InverseStagesRVVF64), the last
+//            stage with N^{-1} scratch -> result (InverseLastStageRVVF64).
 // Small-span tables: NttSmallSpanTables<S, double>, the integer layouts with
 // the double twiddles and their w / q (BuildNttSmallSpanTablesF64).
 //
@@ -78,10 +78,6 @@ inline bool UseNttFp64(uint64_t modulus, uint64_t n) {
 	return rvv::cfg::kNttFp64 && has_rvv && NttFp64Applicable(modulus, n);
 }
 
-/// The e64 kernel's small-span tables (NttSmallSpanSet::rvv64), which the
-/// inverse stub passes on.
-using NttFp64IntSmallSpan = NttSmallSpanTables<rvv::cfg::NttSmallSpan64, uint64_t>;
-
 /// The small-span layout of Strategy for the FP64 kernels at `lanes`
 /// (SmallSpanLanes<Strategy, rvv::UintOf<VF>>()), from the FP64 tables.
 template <class Strategy>
@@ -101,13 +97,13 @@ void ForwardTransformToBitReverseRVVF64(uint64_t* result, const uint64_t* operan
 		uint64_t modulus, const NttFp64Tables& fp, uint64_t input_mod_factor, uint64_t output_mod_factor,
 		const NttSmallSpanTables<SmallSpan, double>* small_span = nullptr);
 
-/// FP64 inverse NTT, N^{-1} scaling included (STUB: calls
-/// InverseTransformFromBitReverseRVV64). input_mod_factor 1 or 2; output 1 or 2.
-template <class VF = rvv::cfg::NttF64>
+/// FP64 inverse NTT, N^{-1} scaling included. Same contract as the e64 kernel
+/// (input_mod_factor 1 or 2; output 1 or 2, always [0, q) here); tables and
+/// lanes as the forward.
+template <class VF = rvv::cfg::NttF64, class SmallSpan = rvv::cfg::NttSmallSpanF64>
 void InverseTransformFromBitReverseRVVF64(uint64_t* result, const uint64_t* operand, uint64_t n,
-		uint64_t modulus, const NttFp64Tables& fp, const uint64_t* inv_root_of_unity_powers,
-		const uint64_t* precon_inv_root_of_unity_powers, uint64_t input_mod_factor, uint64_t output_mod_factor,
-		const NttFp64IntSmallSpan* small_span = nullptr);
+		uint64_t modulus, const NttFp64Tables& fp, uint64_t input_mod_factor, uint64_t output_mod_factor,
+		const NttSmallSpanTables<SmallSpan, double>* small_span = nullptr);
 #endif  // HEXL_HAS_RVV
 
 }  // namespace hexl

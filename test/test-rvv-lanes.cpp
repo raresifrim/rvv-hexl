@@ -602,7 +602,7 @@ const std::vector<NttCase>& NttFp64Cases() {
 }
 
 /// The FP64 forward and inverse kernels at lane type VF (vfloat64m1_t ..
-/// m8_t) and small-span strategy S (forward; the inverse is a stub), S's
+/// m8_t) and small-span strategy S, S's
 /// tables built for the lanes it runs at under VF. Same checks as CheckNtt.
 template <class VF, class S>
 void CheckNttF64(const char* lane, const char* strategy) {
@@ -627,8 +627,8 @@ void CheckNttF64(const char* lane, const char* strategy) {
 			intel::hexl::ForwardTransformToBitReverseRVVF64<VF, S>(out.data(), operand, c.n, c.q, *fp, c.imf, c.omf,
 					&tables);
 		} else {
-			intel::hexl::InverseTransformFromBitReverseRVVF64<VF>(out.data(), operand, c.n, c.q, *fp,
-					ntt.GetInvRootOfUnityPowers().data(), ntt.GetPrecon64InvRootOfUnityPowers().data(), c.imf, c.omf);
+			intel::hexl::InverseTransformFromBitReverseRVVF64<VF, S>(out.data(), operand, c.n, c.q, *fp, c.imf, c.omf,
+					&tables);
 		}
 		const char* dir = c.forward ? "forward" : "inverse";
 		if (!c.in_place) CHECK_VEC_EQ(c.in, in, << "operand modified " << dir << " " << lane << " n=" << c.n);
@@ -863,7 +863,7 @@ TEST(RvvLanes_BaseConvert) {
 	CheckBaseConvert<vuint64m8_t>("u64m8");
 }
 
-// The FP64 eltwise path (stubs until the kernels are written: they run the e64 kernels)
+// The FP64 eltwise path
 TEST(RvvLanes_EltwiseFp64) {
 	CheckEltwiseF64<vfloat64m1_t>("f64m1");
 	CheckEltwiseF64<vfloat64m2_t>("f64m2");
@@ -936,8 +936,7 @@ TEST(RvvLanes_NttFp64Tables) {
 	}
 }
 
-// The FP64 path, every lane type and strategy (the inverse is a stub until
-// written: it runs the e64 kernel)
+// The FP64 path, every lane type and strategy, forward and inverse
 #define HEXL_FOR_EACH_NTT_F64_LANE(S, NAME)                    \
 	CHECK_EQ(NttFp64Cases().empty(), false, << "no FP64-eligible NTT case"); \
 	CheckNttF64<vfloat64m1_t, S>("f64m1", NAME);              \
