@@ -52,7 +52,9 @@ def patch_casts():
         p = ROOT / rel
         s = p.read_text()
         found += len(CAST.findall(s))
-    if found == 0 and all(MARK in (ROOT / rel).read_text() for rel in CAST_FILES):
+    # casts left on a patched tree come from later patches (openfhe-pke-baseconv.py adds two
+    # behind NATIVEINT == 64), not from upstream
+    if all(MARK in (ROOT / rel).read_text() for rel in CAST_FILES):
         print("[openfhe-hexl] word-size patch already applied")
         return
     if found != EXPECTED_CASTS:
