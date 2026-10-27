@@ -126,8 +126,10 @@ using BaseConvert64 = vuint64m8_t;
 
 // FP64 eltwise path (src/util/fp64-mod.hpp), for 2^30 <= q < 2^50, 64-bit
 // storage: EltwiseMultMod / FMAMod / MultAddMod on the FP64 FMA (4 elements per
-// cycle on the K3) instead of the e64 integer multiply (1). Off until measured
-// on the protocol. BM_Lanes_*F64 (n = 4096, 49-bit q, 2026-10-22, median of 5;
+// cycle on the K3) instead of the e64 integer multiply (1). On by default: on
+// the blindloop protocol (K3, 2026-10-27) the FP64 eltwise + NTT paths over the
+// integer ones never lose on the X100 (1.00-1.09x central) and gain up to 1.33x
+// central on the A100 (SEAL BFV); 60-bit primes keep the integer path. BM_Lanes_*F64 (n = 4096, 49-bit q, 2026-10-22, median of 5;
 // gain over the integer kernel at its default lanes, X100 / A100 / geomean;
 // rvv-hexl results/eltwise-fp64-2026-10-22):
 //                 m1                 m2                 m4                 m8
@@ -135,7 +137,7 @@ using BaseConvert64 = vuint64m8_t;
 //   FMAMod      0.41 / 0.63 / 0.51  0.76 / 0.91 / 0.83  1.17 / 1.19 / 1.18  1.16 / 1.31 / 1.23
 //   MultAddMod  0.54 / 0.70 / 0.61  0.98 / 1.04 / 1.01  1.37 / 1.28 / 1.32  1.14 / 1.39 / 1.26
 // The X100 peaks at m4, the A100 at m8; the defaults are the best geomean.
-inline constexpr bool kEltwiseFp64 = false;
+inline constexpr bool kEltwiseFp64 = true;
 using MultModF64 = vfloat64m8_t;
 using FMAModF64 = vfloat64m8_t;
 using MultAddModF64 = vfloat64m4_t;
@@ -210,8 +212,8 @@ using Ntt32U64 = NttBestLanes<NttSmallSpan32>::Ntt32U64;  // RVV32 NTT on uint64
 
 // FP64 NTT path (src/ntt/ntt-rvv-fp64.hpp), for 2^30 <= q < 2^50: the K3 runs
 // FP64 FMA at 4 elements per cycle against 1 for the e64 integer multiply
-// (vfmadd.vf / vmul.vx at m1, 16 chains, both clusters, 2026-10-20). Off until
-// the path is measured on the protocol. Strategy (any rvv::ntt strategy, as
+// (vfmadd.vf / vmul.vx at m1, 16 chains, both clusters, 2026-10-20). On by
+// default (protocol results with kEltwiseFp64 above). Strategy (any rvv::ntt strategy, as
 // NttSmallSpan64) and lanes: the best overall geomean over both clusters and
 // both directions, N = 1024 .. 16384, 49-bit q, against the integer default
 // (Ntt64 + NttSmallSpan64), X100 / A100 / overall
@@ -233,7 +235,7 @@ using Ntt32U64 = NttBestLanes<NttSmallSpan32>::Ntt32U64;  // RVV32 NTT on uint64
 //   Transposed4x4 0.74 / 0.95 / 0.84  0.89 / 0.87 / 0.88  0.86 / 0.68 / 0.76  0.55 / 0.33 / 0.43
 // Both directions: FusedSlides m4 0.98 / 1.66 / 1.28 (the default, best on the
 // A100), Transposed16 m4 1.12 / 1.11 / 1.12 (best on the X100).
-inline constexpr bool kNttFp64 = false;
+inline constexpr bool kNttFp64 = true;
 using NttF64 = vfloat64m4_t;
 using NttSmallSpanF64 = ntt::FusedSlides;
 
