@@ -617,6 +617,76 @@ void RunBaseConvert() {
 }
 #endif
 
+#ifdef HEXL_RVV_HAS_BASE_CONVERT_EXACT
+/// BaseConvertExact (rvv-hexl extension, OpenFHE SwitchCRTBasis): OpenFHE's procedure
+/// (y_i, the double nu = 0.5 + sum y_i / q_i, alpha = floor(nu), the sum minus alpha Q
+/// mod p_j) for every shape, and for L <= 2 (Q < 2^120) that each output is exactly the
+/// centred lift of the CRT value X (X, or X - Q when X >= Q/2) mod p_j. The HPS shapes of BFV (3 x 60-bit Q, R one limb
+/// larger) and the BaseConvert shapes.
+void RunBaseConvertExact() {
+	using u128 = unsigned __int128;
+	const std::pair<size_t, size_t> shapes[] = {{1, 1}, {2, 3}, {3, 4}, {4, 3}, {4, 5}, {16, 3}};
+	const std::pair<size_t, size_t> bits[] = {{59, 59}, {36, 46}, {59, 30}, {30, 59}};
+	for (auto [L, K] : shapes) {
+		for (auto [bq, bp] : bits) {
+			const BaseConvertCase c(O::Primes(L, bq, true, 1), O::Primes(K, bp, false, 1));
+			std::vector<double> q_inv(L);
+			for (size_t i = 0; i < L; ++i) q_inv[i] = 1.0 / static_cast<double>(c.q[i]);
+			std::vector<uint64_t> alpha_q((L + 1) * K);  // a Q mod p_j
+			for (size_t j = 0; j < K; ++j) {
+				uint64_t Qp = 1;
+				for (size_t i = 0; i < L; ++i) Qp = O::MulMod(Qp, c.q[i] % c.p[j], c.p[j]);
+				for (size_t a = 0; a <= L; ++a) alpha_q[a * K + j] = O::MulMod(a % c.p[j], Qp, c.p[j]);
+			}
+			for (size_t n : O::EltwiseSizes()) {
+				std::vector<std::vector<uint64_t>> x(L);
+				for (size_t i = 0; i < L; ++i) {
+					x[i] = O::Random(n, c.q[i]);
+					x[i][0] = c.q[i] - 1;
+					if (n > 1) x[i][1] = 0;
+				}
+				std::vector<std::vector<uint64_t>> got(K, std::vector<uint64_t>(n, 0x5A5A5A5A5A5A5A5AULL));
+				std::vector<const uint64_t*> in(L);
+				std::vector<uint64_t*> out(K);
+				for (size_t i = 0; i < L; ++i) in[i] = x[i].data();
+				for (size_t j = 0; j < K; ++j) out[j] = got[j].data();
+				BaseConvertExact(out.data(), in.data(), n, c.q.data(), L, c.p.data(), K, c.q_hat_inv.data(),
+						c.q_hat_mod_p.data(), q_inv.data(), alpha_q.data());
+				for (size_t k = 0; k < n; ++k) {
+					std::vector<uint64_t> y(L);
+					double nu = 0.5;  // OpenFHE's order
+					for (size_t i = 0; i < L; ++i) {
+						y[i] = O::MulMod(x[i][k], c.q_hat_inv[i], c.q[i]);
+						nu += static_cast<double>(y[i]) * q_inv[i];
+					}
+					const size_t alpha = static_cast<size_t>(nu);
+					for (size_t j = 0; j < K; ++j) {
+						uint64_t want = 0;
+						for (size_t i = 0; i < L; ++i)
+							want = O::AddMod(want, O::MulMod(y[i] % c.p[j], c.q_hat_mod_p[i * K + j], c.p[j]), c.p[j]);
+						want = O::SubMod(want, alpha_q[alpha * K + j], c.p[j]);
+						CHECK_EQ(got[j][k], want, << "BaseConvertExact L=" << L << " K=" << K << " bits=" << bq << "/"
+								<< bp << " n=" << n << " j=" << j << " k=" << k);
+					}
+					if (L <= 2) {  // exact: the centred lift of X, in [-Q/2, Q/2), mod p_j
+						u128 Q = 1;
+						for (size_t i = 0; i < L; ++i) Q *= c.q[i];
+						u128 X = 0;
+						for (size_t i = 0; i < L; ++i) X = (X + static_cast<u128>(y[i]) * (Q / c.q[i])) % Q;
+						const bool neg = 2 * X >= Q;  // X - Q
+						for (size_t j = 0; j < K; ++j) {
+							const uint64_t pj = c.p[j], xm = static_cast<uint64_t>(X % pj), qm = static_cast<uint64_t>(Q % pj);
+							CHECK_EQ(got[j][k], neg ? O::SubMod(xm, qm, pj) : xm, << "BaseConvertExact is not the centred X mod p: L="
+									<< L << " K=" << K << " bits=" << bq << "/" << bp << " n=" << n << " j=" << j << " k=" << k);
+						}
+					}
+				}
+			}
+		}
+	}
+}
+#endif
+
 }  // namespace
 
 TEST(Eltwise_AddMod) { RunAddSub<uint64_t>(true); }
@@ -635,6 +705,9 @@ TEST(Eltwise_SignedDigitDecompose) { RunSignedDigitDecompose<uint64_t>(); }
 #endif
 #ifdef HEXL_RVV_HAS_BASE_CONVERT
 TEST(Eltwise_BaseConvert) { RunBaseConvert(); }
+#endif
+#ifdef HEXL_RVV_HAS_BASE_CONVERT_EXACT
+TEST(Eltwise_BaseConvertExact) { RunBaseConvertExact(); }
 #endif
 #ifdef HEXL_RVV_HAS_EXTERNAL_PRODUCT
 TEST(Eltwise_ExternalProduct) { RunExternalProduct<uint64_t>(); }

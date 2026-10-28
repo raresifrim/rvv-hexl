@@ -123,6 +123,10 @@ using SignedDigitDecompose32U64 = vuint32m4_t;  // RVV32 on uint64_t storage (<=
 //   m8   2.51 / 7.96   1.65 / 6.24     3.79
 // The default is the best geomean (m4 is best on the X100 for L = 1).
 using BaseConvert64 = vuint64m8_t;
+// BaseConvertExact (OpenFHE SwitchCRTBasis, HPS): placeholder until
+// BM_Lanes_BaseConvertExact has been measured. It keeps the K accumulators plus
+// the FP64 nu accumulator live.
+using BaseConvertExact64 = vuint64m2_t;
 // EltwiseExternalProductMod (rvv-hexl extension, binfhe blind rotation):
 // placeholders until BM_Lanes_ExternalProduct has been measured on both
 // clusters. The kernel keeps k digit strips and four sums live (k = 6 at

@@ -41,6 +41,9 @@
 // BaseConvert: the approximate RNS base conversion of OpenFHE's key switching
 // (include/hexl/eltwise/eltwise-base-convert.hpp), 64-bit storage.
 #define HEXL_RVV_HAS_BASE_CONVERT 1
+// BaseConvertExact: the exact (HPS) conversion of OpenFHE's SwitchCRTBasis, 64-bit
+// storage (include/hexl/eltwise/eltwise-base-convert.hpp).
+#define HEXL_RVV_HAS_BASE_CONVERT_EXACT 1
 // EltwiseExternalProductMod: the external product of OpenFHE binfhe's blind rotation
 // in one call, both storage words (include/hexl/eltwise/eltwise-external-product.hpp).
 #define HEXL_RVV_HAS_EXTERNAL_PRODUCT 1

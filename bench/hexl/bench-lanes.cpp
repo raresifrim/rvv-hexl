@@ -524,6 +524,40 @@ void BM_Lanes_BaseConvert(benchmark::State& state) {
 	state.SetItemsProcessed(state.iterations() * n);
 }
 
+/// BaseConvertExact's RVV kernel at lane type V (or, with V = void, the native kernel),
+/// at bfv_openfhe's HPS shape: N = 8192, 3 x 60-bit limbs to 4 (shape 0) and back
+/// (shape 1). The constants are timing stand-ins; alpha_q_mod_p is all zeros (any row
+/// costs the same).
+template <class V>
+void BM_Lanes_BaseConvertExact(benchmark::State& state) {
+	namespace O = hexltest::oracle;
+	const uint64_t n = 8192;
+	const size_t L = state.range(0) == 0 ? 3 : 4, K = state.range(0) == 0 ? 4 : 3;
+	std::vector<uint64_t> q, p;
+	for (size_t i = 0; i < L + K; ++i) (i < L ? q : p).push_back(O::NttPrime(60, n, i));
+	std::vector<uint64_t> q_hat_inv(L, 1), q_hat_mod_p(L * K, 1), alpha_q((L + 1) * K, 0);
+	std::vector<double> q_inv(L);
+	for (size_t i = 0; i < L; ++i) q_inv[i] = 1.0 / static_cast<double>(q[i]);
+	auto args = intel::hexl::MakeBaseConvertArgs(q.data(), L, p.data(), K, q_hat_inv.data(), q_hat_mod_p.data());
+	args.q_inv = q_inv.data();
+	args.alpha_q_mod_p = alpha_q.data();
+	std::vector<intel::hexl::AlignedVector64<uint64_t>> x, y(K, intel::hexl::AlignedVector64<uint64_t>(n));
+	for (size_t i = 0; i < L; ++i) x.push_back(hexlbench::RandomW<uint64_t>(n, q[i]));
+	std::vector<const uint64_t*> in;
+	std::vector<uint64_t*> out;
+	for (auto& v : x) in.push_back(v.data());
+	for (auto& v : y) out.push_back(v.data());
+	for (auto _ : state) {
+		if constexpr (std::is_void_v<V>) {
+			intel::hexl::BaseConvertExactNative(out.data(), in.data(), n, args);
+		} else {
+			intel::hexl::BaseConvertExactRVV64<V>(out.data(), in.data(), n, args);
+		}
+		benchmark::ClobberMemory();
+	}
+	state.SetItemsProcessed(state.iterations() * n);
+}
+
 // short names for the benchmark labels
 using PerBlock = intel::hexl::rvv::ntt::PerBlock;
 using FusedSlides = intel::hexl::rvv::ntt::FusedSlides;
@@ -625,6 +659,11 @@ BENCHMARK_TEMPLATE(BM_Lanes_BaseConvert, vuint64m1_t)->ArgName("shape")->Arg(0)-
 BENCHMARK_TEMPLATE(BM_Lanes_BaseConvert, vuint64m2_t)->ArgName("shape")->Arg(0)->Arg(1);
 BENCHMARK_TEMPLATE(BM_Lanes_BaseConvert, vuint64m4_t)->ArgName("shape")->Arg(0)->Arg(1);
 BENCHMARK_TEMPLATE(BM_Lanes_BaseConvert, vuint64m8_t)->ArgName("shape")->Arg(0)->Arg(1);
+BENCHMARK_TEMPLATE(BM_Lanes_BaseConvertExact, void)->ArgName("shape")->Arg(0)->Arg(1);
+BENCHMARK_TEMPLATE(BM_Lanes_BaseConvertExact, vuint64m1_t)->ArgName("shape")->Arg(0)->Arg(1);
+BENCHMARK_TEMPLATE(BM_Lanes_BaseConvertExact, vuint64m2_t)->ArgName("shape")->Arg(0)->Arg(1);
+BENCHMARK_TEMPLATE(BM_Lanes_BaseConvertExact, vuint64m4_t)->ArgName("shape")->Arg(0)->Arg(1);
+BENCHMARK_TEMPLATE(BM_Lanes_BaseConvertExact, vuint64m8_t)->ArgName("shape")->Arg(0)->Arg(1);
 
 #define HEXL_ELTWISE_F64_LANES(BM)       \
 	BENCHMARK_TEMPLATE(BM, void);         \

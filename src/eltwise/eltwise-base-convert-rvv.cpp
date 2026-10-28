@@ -84,6 +84,20 @@ template void BaseConvertRVV64<vuint64m2_t>(uint64_t* const*, const uint64_t* co
 template void BaseConvertRVV64<vuint64m4_t>(uint64_t* const*, const uint64_t* const*, uint64_t, const BaseConvertArgs&);
 template void BaseConvertRVV64<vuint64m8_t>(uint64_t* const*, const uint64_t* const*, uint64_t, const BaseConvertArgs&);
 
+// STUB: calls the native kernel until the RVV body is written (BaseConvertRVV64's
+// strips plus the FP64 nu accumulator and the alpha row per coefficient).
+template <class V>
+void BaseConvertExactRVV64(uint64_t* const* result, const uint64_t* const* operand,
+		uint64_t n, const BaseConvertArgs& a) {
+	static_assert(rvv::IsE64<V>, "BaseConvertExactRVV64 takes e64 lanes");
+	BaseConvertExactNative(result, operand, n, a);
+}
+
+template void BaseConvertExactRVV64<vuint64m1_t>(uint64_t* const*, const uint64_t* const*, uint64_t, const BaseConvertArgs&);
+template void BaseConvertExactRVV64<vuint64m2_t>(uint64_t* const*, const uint64_t* const*, uint64_t, const BaseConvertArgs&);
+template void BaseConvertExactRVV64<vuint64m4_t>(uint64_t* const*, const uint64_t* const*, uint64_t, const BaseConvertArgs&);
+template void BaseConvertExactRVV64<vuint64m8_t>(uint64_t* const*, const uint64_t* const*, uint64_t, const BaseConvertArgs&);
+
 }  // namespace hexl
 }  // namespace intel
 

@@ -36,7 +36,9 @@ BaseConvertArgs MakeBaseConvertArgs(const uint64_t* in_moduli, uint64_t in_count
 	return a;
 }
 
-void BaseConvert(uint64_t* const* result, const uint64_t* const* operand,
+namespace {
+
+void CheckBaseConvertArgs(uint64_t* const* result, const uint64_t* const* operand,
 		uint64_t n, const uint64_t* in_moduli, uint64_t in_count,
 		const uint64_t* out_moduli, uint64_t out_count,
 		const uint64_t* q_hat_inv_mod_q, const uint64_t* q_hat_mod_p) {
@@ -61,6 +63,17 @@ void BaseConvert(uint64_t* const* result, const uint64_t* const* operand,
 		for (uint64_t i = 0; i < in_count; ++i)
 			HEXL_CHECK(result[j] != operand[i], "Require result[" << j << "] != operand[" << i << "]");
 	}
+	(void)result; (void)operand; (void)n; (void)in_moduli; (void)in_count; (void)out_moduli; (void)out_count;
+	(void)q_hat_inv_mod_q; (void)q_hat_mod_p;
+}
+
+}  // namespace
+
+void BaseConvert(uint64_t* const* result, const uint64_t* const* operand,
+		uint64_t n, const uint64_t* in_moduli, uint64_t in_count,
+		const uint64_t* out_moduli, uint64_t out_count,
+		const uint64_t* q_hat_inv_mod_q, const uint64_t* q_hat_mod_p) {
+	CheckBaseConvertArgs(result, operand, n, in_moduli, in_count, out_moduli, out_count, q_hat_inv_mod_q, q_hat_mod_p);
 
 	const BaseConvertArgs a = MakeBaseConvertArgs(in_moduli, in_count, out_moduli, out_count,
 			q_hat_inv_mod_q, q_hat_mod_p);
@@ -75,6 +88,35 @@ void BaseConvert(uint64_t* const* result, const uint64_t* const* operand,
 
 	HEXL_VLOG(3, "Calling BaseConvertNative");
 	BaseConvertNative(result, operand, n, a);
+}
+
+void BaseConvertExact(uint64_t* const* result, const uint64_t* const* operand,
+		uint64_t n, const uint64_t* in_moduli, uint64_t in_count,
+		const uint64_t* out_moduli, uint64_t out_count,
+		const uint64_t* q_hat_inv_mod_q, const uint64_t* q_hat_mod_p,
+		const double* q_inv, const uint64_t* alpha_q_mod_p) {
+	CheckBaseConvertArgs(result, operand, n, in_moduli, in_count, out_moduli, out_count, q_hat_inv_mod_q, q_hat_mod_p);
+	HEXL_CHECK(q_inv != nullptr && alpha_q_mod_p != nullptr, "Require q_inv, alpha_q_mod_p != nullptr");
+	for (uint64_t a = 0; a <= in_count; ++a)
+		for (uint64_t j = 0; j < out_count; ++j)
+			HEXL_CHECK(alpha_q_mod_p[a * out_count + j] < out_moduli[j],
+					"Require alpha_q_mod_p[" << a << " * K + " << j << "] < p_" << j);
+
+	BaseConvertArgs a = MakeBaseConvertArgs(in_moduli, in_count, out_moduli, out_count,
+			q_hat_inv_mod_q, q_hat_mod_p);
+	a.q_inv = q_inv;
+	a.alpha_q_mod_p = alpha_q_mod_p;
+
+#ifdef HEXL_HAS_RVV
+	if (has_rvv) {
+		HEXL_VLOG(3, "Calling BaseConvertExactRVV64");
+		BaseConvertExactRVV64(result, operand, n, a);
+		return;
+	}
+#endif
+
+	HEXL_VLOG(3, "Calling BaseConvertExactNative");
+	BaseConvertExactNative(result, operand, n, a);
 }
 
 // ---------------------------------------------------------------------------
@@ -102,6 +144,13 @@ void BaseConvertNative(uint64_t* const* result, const uint64_t* const* operand,
 			result[j][k] = std::min(s, s - p);
 		}
 	}
+}
+
+// STUB: OpenFHE's arithmetic (the reference). To be replaced by BaseConvertNative's
+// Shoup scheme plus the double nu and the alpha row.
+void BaseConvertExactNative(uint64_t* const* result, const uint64_t* const* operand,
+		uint64_t n, const BaseConvertArgs& a) {
+	BaseConvertExactReference(result, operand, n, a);
 }
 
 }  // namespace hexl

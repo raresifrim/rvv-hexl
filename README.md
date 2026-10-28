@@ -286,6 +286,14 @@ prebuilt route, with `INTEL_HEXL_HINT_DIR` pointing at the rvv-hexl install.
   to it by default (`OPENFHE_HEXL_BASECONV=0` keeps OpenFHE's loop). Tests:
   `Eltwise_BaseConvert`, `RvvLanes_BaseConvert`; benchmarks: `BM_BaseConvert` against
   `BM_BaseConvertOpenFHELoop` (OpenFHE's loop), `BM_Lanes_BaseConvert`.
+  `BaseConvertExact` (`HEXL_RVV_HAS_BASE_CONVERT_EXACT`, scaffold) is the exact conversion of
+  OpenFHE's `SwitchCRTBasis` (the HPS base extensions of BFV multiplication): the same sum minus
+  alpha Q, alpha = floor(0.5 + sum y_i / q_i) in double, OpenFHE's `qInv` and `alphaQModp` as
+  inputs. Scalar in OpenFHE: with `ScaleAndRound`, 16% of `bfv_openfhe`'s central node on the
+  X100 and 26% on the A100. Native and RVV kernels are stubs on OpenFHE's arithmetic. Tests:
+  `Eltwise_BaseConvertExact` (OpenFHE's procedure, and X mod p exactly for L <= 2),
+  `RvvLanes_BaseConvertExact`; benchmarks: `BM_BaseConvertExact` against
+  `BM_SwitchCRTBasisOpenFHELoop`, `BM_Lanes_BaseConvertExact`.
 * `EltwiseExternalProductMod` (`HEXL_RVV_HAS_EXTERNAL_PRODUCT`, both storage words) is an
   rvv-hexl extension (scaffold): the external product of OpenFHE binfhe's blind rotation
   (`AddToAccCGGI` / `AddToAccDM` / `AddToAccLMKCDEY`: the k digit polynomials times the

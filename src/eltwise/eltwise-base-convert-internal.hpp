@@ -17,6 +17,12 @@
 // y_i is read once and used for all K outputs: the RVV body can keep the K
 // accumulators in registers when K is small (OpenFHE CKKS, one limb per digit:
 // ModUp L = 1 -> K = all other limbs and P, ModDown L = |P| -> K = |Q|).
+//
+// BaseConvertExact (OpenFHE's SwitchCRTBasis, HPS) adds, per coefficient, the
+// double nu = 0.5 + sum_i y_i * (1 / q_i), alpha = floor(nu) in [0, L], and
+// subtracts alpha_q_mod_p[alpha][j] from each output: one more accumulator, in
+// FP64 lanes, beside the K integer ones, and a gather of the alpha row per
+// coefficient (L + 1 rows: a compare-and-select chain is enough for small L).
 
 #pragma once
 
@@ -41,6 +47,9 @@ struct BaseConvertArgs {
 	const uint64_t* q_hat_mod_p = nullptr;   // Q_i mod p_j, row-major [i * K + j]
 	std::vector<uint64_t> q_hat_inv_precon;  // Shoup factors of q_hat_inv (mod q_i)
 	std::vector<uint64_t> q_hat_mod_p_precon;  // Shoup factors of q_hat_mod_p (mod p_j), [i * K + j]
+	// BaseConvertExact only (nullptr for BaseConvert):
+	const double* q_inv = nullptr;            // 1 / q_i, L values
+	const uint64_t* alpha_q_mod_p = nullptr;  // a Q mod p_j, (L + 1) x K, row-major [a * K + j]
 };
 
 /// @brief Builds the Shoup factors of the conversion's constants.
@@ -67,6 +76,31 @@ inline void BaseConvertReference(uint64_t* const* result, const uint64_t* const*
 	}
 }
 
+/// @brief Reference of BaseConvertExact: OpenFHE's SwitchCRTBasis (hexldcrtpoly-impl.h,
+/// v1.5.1, the HAVE_INT128 branch): unsigned __int128 sums reduced with %, nu summed in
+/// double in OpenFHE's order, the alpha row subtracted. One coefficient at a time.
+inline void BaseConvertExactReference(uint64_t* const* result, const uint64_t* const* operand,
+		uint64_t n, const BaseConvertArgs& a) {
+	using u128 = unsigned __int128;
+	const uint64_t L = a.in_count, K = a.out_count;
+	std::vector<uint64_t> y(L);
+	for (uint64_t k = 0; k < n; ++k) {
+		double nu = 0.5;
+		for (uint64_t i = 0; i < L; ++i) {
+			y[i] = static_cast<uint64_t>(static_cast<u128>(operand[i][k]) * a.q_hat_inv[i] % a.in_moduli[i]);
+			nu += static_cast<double>(y[i]) * a.q_inv[i];
+		}
+		const uint64_t alpha = static_cast<uint64_t>(nu);
+		for (uint64_t j = 0; j < K; ++j) {
+			const uint64_t p = a.out_moduli[j];
+			u128 sum = 0;
+			for (uint64_t i = 0; i < L; ++i) sum += static_cast<u128>(y[i]) * a.q_hat_mod_p[i * K + j];
+			const uint64_t s = static_cast<uint64_t>(sum % p), c = a.alpha_q_mod_p[alpha * K + j];
+			result[j][k] = s >= c ? s - c : s + p - c;
+		}
+	}
+}
+
 /// @brief Native (scalar) kernel: the Shoup scheme above, one coefficient at
 /// a time (the RVV kernel's arithmetic, without vectors).
 void BaseConvertNative(uint64_t* const* result, const uint64_t* const* operand,
@@ -78,6 +112,18 @@ void BaseConvertNative(uint64_t* const* result, const uint64_t* const* operand,
 /// Default lane: rvv::cfg::BaseConvert64.
 template <class V = rvv::cfg::BaseConvert64>
 void BaseConvertRVV64(uint64_t* const* result, const uint64_t* const* operand,
+		uint64_t n, const BaseConvertArgs& a);
+#endif
+
+/// @brief Native (scalar) kernel of BaseConvertExact: a.q_inv and a.alpha_q_mod_p set.
+void BaseConvertExactNative(uint64_t* const* result, const uint64_t* const* operand,
+		uint64_t n, const BaseConvertArgs& a);
+
+#ifdef HEXL_HAS_RVV
+/// @brief RVV kernel of BaseConvertExact, 64-bit integer lanes for the sums
+/// (eltwise-base-convert-rvv.cpp). Default lane: rvv::cfg::BaseConvertExact64.
+template <class V = rvv::cfg::BaseConvertExact64>
+void BaseConvertExactRVV64(uint64_t* const* result, const uint64_t* const* operand,
 		uint64_t n, const BaseConvertArgs& a);
 #endif
 

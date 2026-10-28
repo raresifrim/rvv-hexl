@@ -605,3 +605,103 @@ BENCHMARK_TEMPLATE(BM_DotProductSequence, uint32_t) HEXL_DOT_ARGS32;
 BENCHMARK(BM_BaseConvert)->ArgsProduct({{8192, 16384}, {0, 1, 2}})->ArgNames({"n", "shape"});
 BENCHMARK(BM_BaseConvertOpenFHELoop)->ArgsProduct({{8192, 16384}, {0, 1, 2}})->ArgNames({"n", "shape"});
 #endif
+
+#ifdef HEXL_RVV_HAS_BASE_CONVERT_EXACT
+	// ---- exact (HPS) RNS base conversion (rvv-hexl extension; OpenFHE BFV SwitchCRTBasis) ----
+	// blindloop's bfv_openfhe: N = 8192, Q = 3 x 60-bit limbs; HPS extends Q to a basis one limb
+	// larger and back (shape 0: 3 -> 4, shape 1: 4 -> 3), and a 2 -> 3 conversion (shape 2).
+	// Against OpenFHE's loop (hexldcrtpoly-impl.h, v1.5.1, the HAVE_INT128 branch): BaseConvert's
+	// plus nu = 0.5 + sum y_i / q_i in double and the alpha row subtracted per output.
+	struct ExactSetup {
+		uint64_t n;
+		std::vector<uint64_t> q, p, q_hat_inv, q_hat_mod_p, alpha_q;
+		std::vector<double> q_inv;
+		std::vector<intel::hexl::AlignedVector64<uint64_t>> x, y;
+		std::vector<const uint64_t*> in;
+		std::vector<uint64_t*> out;
+		explicit ExactSetup(benchmark::State& state) : n(state.range(0)) {
+			namespace O = hexltest::oracle;
+			const size_t L = state.range(1) == 1 ? 4 : state.range(1) == 0 ? 3 : 2, K = state.range(1) == 1 ? 3 : state.range(1) == 0 ? 4 : 3;
+			for (size_t i = 0; i < L + K; ++i) (i < L ? q : p).push_back(O::NttPrime(60, n, i));
+			q_hat_inv.resize(L);
+			q_hat_mod_p.resize(L * K);
+			q_inv.resize(L);
+			alpha_q.resize((L + 1) * K);
+			for (size_t i = 0; i < L; ++i) {
+				uint64_t h = 1;
+				for (size_t k = 0; k < L; ++k)
+					if (k != i) h = O::MulMod(h, q[k] % q[i], q[i]);
+				q_hat_inv[i] = O::InvModPrime(h, q[i]);
+				q_inv[i] = 1.0 / static_cast<double>(q[i]);
+				for (size_t j = 0; j < K; ++j) {
+					uint64_t hp = 1;
+					for (size_t k = 0; k < L; ++k)
+						if (k != i) hp = O::MulMod(hp, q[k] % p[j], p[j]);
+					q_hat_mod_p[i * K + j] = hp;
+				}
+			}
+			for (size_t j = 0; j < K; ++j) {
+				uint64_t Qp = 1;
+				for (size_t i = 0; i < L; ++i) Qp = O::MulMod(Qp, q[i] % p[j], p[j]);
+				for (size_t a = 0; a <= L; ++a) alpha_q[a * K + j] = O::MulMod(a % p[j], Qp, p[j]);
+			}
+			for (size_t i = 0; i < L; ++i) x.push_back(RandomW<uint64_t>(n, q[i]));
+			y.assign(K, intel::hexl::AlignedVector64<uint64_t>(n));
+			for (auto& v : x) in.push_back(v.data());
+			for (auto& v : y) out.push_back(v.data());
+		}
+	};
+
+	static void BM_BaseConvertExact(benchmark::State& state) {
+		ExactSetup s(state);
+		const auto run = [&] {
+			BaseConvertExact(s.out.data(), s.in.data(), s.n, s.q.data(), s.q.size(), s.p.data(), s.p.size(),
+					s.q_hat_inv.data(), s.q_hat_mod_p.data(), s.q_inv.data(), s.alpha_q.data());
+		};
+		HEXL_BENCH_PROBE(state, run());
+		for (auto _ : state) {
+			run();
+			benchmark::ClobberMemory();
+		}
+		state.SetItemsProcessed(static_cast<int64_t>(state.iterations() * s.n));
+	}
+
+	static void BM_SwitchCRTBasisOpenFHELoop(benchmark::State& state) {
+		using u128 = unsigned __int128;
+		ExactSetup s(state);
+		const size_t L = s.q.size(), K = s.p.size();
+		std::vector<uint64_t> precon(L), y(L);
+		std::vector<u128> mu(K);  // OpenFHE's modpBarrettMu: floor(2^128 / p_j)
+		for (size_t i = 0; i < L; ++i) precon[i] = MultiplyFactor(s.q_hat_inv[i], 64, s.q[i]).BarrettFactor();
+		for (size_t j = 0; j < K; ++j) mu[j] = ~u128{0} / s.p[j];
+		for (auto _ : state) {
+			for (uint64_t k = 0; k < s.n; ++k) {
+				double nu = 0.5;
+				for (size_t i = 0; i < L; ++i) {
+					y[i] = MultiplyMod(s.x[i][k], s.q_hat_inv[i], precon[i], s.q[i]);  // ModMulFastConst
+					nu += static_cast<double>(y[i]) * s.q_inv[i];
+				}
+				const size_t alpha = static_cast<size_t>(nu);
+				for (size_t j = 0; j < K; ++j) {
+					u128 a = 0;
+					for (size_t i = 0; i < L; ++i) a += static_cast<u128>(y[i]) * s.q_hat_mod_p[i * K + j];
+					// BarrettUint128ModUint64: (a * mu) >> 128, low word
+					const uint64_t a_lo = static_cast<uint64_t>(a), a_hi = static_cast<uint64_t>(a >> 64);
+					const uint64_t m_lo = static_cast<uint64_t>(mu[j]), m_hi = static_cast<uint64_t>(mu[j] >> 64);
+					const u128 mid = (static_cast<u128>(a_lo) * m_lo >> 64) + static_cast<u128>(a_lo) * m_hi +
+						static_cast<u128>(a_hi) * m_lo;
+					const uint64_t qt = a_hi * m_hi + static_cast<uint64_t>(mid >> 64);
+					uint64_t r = a_lo - qt * s.p[j];
+					while (r >= s.p[j]) r -= s.p[j];
+					const uint64_t c = s.alpha_q[alpha * K + j];  // ModSubFast
+					s.out[j][k] = r >= c ? r - c : r + s.p[j] - c;
+				}
+			}
+			benchmark::ClobberMemory();
+		}
+		state.SetItemsProcessed(static_cast<int64_t>(state.iterations() * s.n));
+	}
+
+BENCHMARK(BM_BaseConvertExact)->ArgsProduct({{8192}, {0, 1, 2}})->ArgNames({"n", "shape"});
+BENCHMARK(BM_SwitchCRTBasisOpenFHELoop)->ArgsProduct({{8192}, {0, 1, 2}})->ArgNames({"n", "shape"});
+#endif
