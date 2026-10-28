@@ -296,6 +296,17 @@ prebuilt route, with `INTEL_HEXL_HINT_DIR` pointing at the rvv-hexl install.
   `Eltwise_ExternalProduct` (against OpenFHE's call sequence), `RvvLanes_ExternalProduct`;
   benchmarks: `BM_ExternalProduct` against `BM_ExternalProductOpenFHESequence`,
   `BM_Lanes_ExternalProduct`.
+* `EltwiseDotProductMod` (`HEXL_RVV_HAS_DOT_PRODUCT`, both storage words) is an rvv-hexl
+  extension (scaffold): result[m] (+)= post * sum_i a[i] * b[i M + m], the inner loop of key
+  switching (SEAL `switch_key_inplace`, OpenFHE `KeySwitchBV`, both run today as one
+  `EltwiseMultAddMod` per digit and key component) and, with the monomial as `post`, of one
+  key of binfhe's CGGI step. Lazy inputs (`input_mod_factor` 1, 2, 4) as SEAL's digits come
+  from the lazy NTT. RVV32 (q < 2^30), FP64 (2^30 <= q < 2^50 with the FP64 path on) and RVV64
+  kernels, all stubs on the defining sums for now. Tests: `Eltwise_DotProduct` (against SEAL's
+  and OpenFHE's call sequences, and two calls against `EltwiseExternalProductMod`),
+  `RvvLanes_DotProduct`; benchmarks: `BM_DotProduct` against `BM_DotProductSequence`
+  (TFHE, bfv_openfhe, bfv_seal and ckks_seal shapes), `BM_Lanes_DotProduct`,
+  `BM_Lanes_DotProductF64`.
 * FP64 paths (on by default): for 2^30 <= q < 2^50 the modular multiply can run on the FP64
   FMA (Harvey's double-precision method), which the K3 retires at 4 elements per cycle against 1
   for the e64 integer multiply (`results/ntt-width-2026-10-20`). `src/util/fp64-mod.hpp` has the

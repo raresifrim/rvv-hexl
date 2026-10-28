@@ -33,6 +33,7 @@
 #include "eltwise/eltwise-base-convert-internal.hpp"
 #include "eltwise/eltwise-cmp-add-internal.hpp"
 #include "eltwise/eltwise-cmp-sub-mod-internal.hpp"
+#include "eltwise/eltwise-dot-product-internal.hpp"
 #include "eltwise/eltwise-external-product-internal.hpp"
 #include "eltwise/eltwise-fma-mod-internal.hpp"
 #include "eltwise/eltwise-mult-add-mod-internal.hpp"
@@ -208,6 +209,52 @@ void BM_Lanes_ExternalProduct(benchmark::State& state) {
 			intel::hexl::ExternalProductModRVV32<Word, V>(a0.data(), a1.data(), pd.data(), k, p1.data(), m1.data(),
 					p2.data(), m2.data(), kN, q, true);
 		}
+		benchmark::ClobberMemory();
+	}
+	state.SetItemsProcessed(state.iterations() * kN);
+}
+
+/// EltwiseDotProductMod (rvv-hexl extension), M = 2 results: 32-bit lanes at TFHE's
+/// shape (27-bit q, k = 6, post-multiplied, accumulating), 64-bit integer lanes at
+/// OpenFHE BFV's (60-bit q, k = 3, overwriting).
+template <typename Word, class V>
+void BM_Lanes_DotProduct(benchmark::State& state) {
+	constexpr bool kE64 = std::is_same_v<Word, uint64_t> && intel::hexl::rvv::IsE64<V>;
+	const uint64_t q = kE64 ? hexlbench::Prime(60, 1024) : hexlbench::Prime(27, 1024), k = kE64 ? 3 : 6;
+	std::vector<intel::hexl::AlignedVector64<Word>> av, bv;
+	for (uint64_t i = 0; i < k; ++i) av.push_back(hexlbench::RandomW<Word>(kN, q));
+	for (uint64_t i = 0; i < 2 * k; ++i) bv.push_back(hexlbench::RandomW<Word>(kN, q));
+	auto post = hexlbench::RandomW<Word>(kN, q), r0 = hexlbench::RandomW<Word>(kN, q), r1 = hexlbench::RandomW<Word>(kN, q);
+	std::vector<const Word*> pa(k), pb(2 * k);
+	for (uint64_t i = 0; i < k; ++i) pa[i] = av[i].data();
+	for (uint64_t i = 0; i < 2 * k; ++i) pb[i] = bv[i].data();
+	Word* pr[2] = {r0.data(), r1.data()};
+	for (auto _ : state) {
+		if constexpr (kE64) {
+			intel::hexl::DotProductModRVV64<V>(pr, 2, pa.data(), k, pb.data(), nullptr, kN, q, 1, false);
+		} else {
+			intel::hexl::DotProductModRVV32<Word, V>(pr, 2, pa.data(), k, pb.data(), post.data(), kN, q, 1, true);
+		}
+		benchmark::ClobberMemory();
+	}
+	state.SetItemsProcessed(state.iterations() * kN);
+}
+
+/// EltwiseDotProductMod's FP64 kernel at SEAL BFV's key-switching shape (49-bit q,
+/// k = 8 digits in [0, 4q), M = 2, accumulating).
+template <class VF>
+void BM_Lanes_DotProductF64(benchmark::State& state) {
+	const uint64_t q = hexlbench::Prime(49, 1024), k = 8;
+	std::vector<intel::hexl::AlignedVector64<uint64_t>> av, bv;
+	for (uint64_t i = 0; i < k; ++i) av.push_back(hexlbench::RandomW<uint64_t>(kN, 4 * q));
+	for (uint64_t i = 0; i < 2 * k; ++i) bv.push_back(hexlbench::RandomW<uint64_t>(kN, q));
+	auto r0 = hexlbench::RandomW<uint64_t>(kN, q), r1 = hexlbench::RandomW<uint64_t>(kN, q);
+	std::vector<const uint64_t*> pa(k), pb(2 * k);
+	for (uint64_t i = 0; i < k; ++i) pa[i] = av[i].data();
+	for (uint64_t i = 0; i < 2 * k; ++i) pb[i] = bv[i].data();
+	uint64_t* pr[2] = {r0.data(), r1.data()};
+	for (auto _ : state) {
+		intel::hexl::DotProductModRVVF64<VF>(pr, 2, pa.data(), k, pb.data(), nullptr, kN, q, 4, true);
 		benchmark::ClobberMemory();
 	}
 	state.SetItemsProcessed(state.iterations() * kN);
@@ -511,6 +558,14 @@ BENCHMARK_TEMPLATE(BM_Lanes_MultAddMod32FromU64, vuint32m1_t);
 BENCHMARK_TEMPLATE(BM_Lanes_MultAddMod32FromU64, vuint32m2_t);
 BENCHMARK_TEMPLATE(BM_Lanes_MultAddMod32FromU64, vuint32m4_t);
 HEXL_LANES(BM_Lanes_SignedDigitDecompose);
+HEXL_LANES(BM_Lanes_DotProduct);
+BENCHMARK_TEMPLATE(BM_Lanes_DotProduct, uint64_t, vuint32m1_t);
+BENCHMARK_TEMPLATE(BM_Lanes_DotProduct, uint64_t, vuint32m2_t);
+BENCHMARK_TEMPLATE(BM_Lanes_DotProduct, uint64_t, vuint32m4_t);
+BENCHMARK_TEMPLATE(BM_Lanes_DotProductF64, vfloat64m1_t);
+BENCHMARK_TEMPLATE(BM_Lanes_DotProductF64, vfloat64m2_t);
+BENCHMARK_TEMPLATE(BM_Lanes_DotProductF64, vfloat64m4_t);
+BENCHMARK_TEMPLATE(BM_Lanes_DotProductF64, vfloat64m8_t);
 HEXL_LANES(BM_Lanes_ExternalProduct);
 BENCHMARK_TEMPLATE(BM_Lanes_ExternalProduct, uint64_t, vuint32m1_t);
 BENCHMARK_TEMPLATE(BM_Lanes_ExternalProduct, uint64_t, vuint32m2_t);

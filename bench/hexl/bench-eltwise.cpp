@@ -432,6 +432,85 @@ BENCHMARK_TEMPLATE(BM_ExternalProductOpenFHESequence, uint32_t) HEXL_EXT_PROD_AR
 #undef HEXL_EXT_PROD_ARGS
 #endif
 
+#ifdef HEXL_RVV_HAS_DOT_PRODUCT
+	// ---- multi-output modular dot product (rvv-hexl extension; key switching, blind rotation) ----
+	// M = 2 results. use 0 = SEAL key switching (digits from the lazy NTT in [0, 4q), one
+	// EltwiseMultAddMod per digit and key component into the accumulator), 1 = OpenFHE
+	// KeySwitchBV (zero-initialised results, one EltwiseMultAddMod per digit), 2 = one key of
+	// binfhe's CGGI step (the sum times the monomial, added into the accumulator). Shapes:
+	// TFHE STD128 (N = 1024, k = 6, 27-bit), blindloop's bfv_openfhe (N = 8192, 3 x 60-bit
+	// limbs), bfv_seal (N = 16384, 8 ~49-bit digits) and ckks_seal (N = 8192, 4 digits, 36-bit).
+	template <typename Word>
+	struct DotSetup {
+		uint64_t n, k, q, imf;
+		int use;
+		std::vector<intel::hexl::AlignedVector64<Word>> av, bv, rv;
+		intel::hexl::AlignedVector64<Word> post, tmp;
+		std::vector<const Word*> pa, pb;
+		std::vector<Word*> pr;
+		explicit DotSetup(benchmark::State& state)
+			: n(state.range(0)), k(state.range(1)), q(Prime(state.range(2), state.range(0))),
+			imf(state.range(3) == 0 ? 4 : 1), use(static_cast<int>(state.range(3))),
+			post(RandomW<Word>(n, q)), tmp(n), pa(k), pb(2 * k), pr(2) {
+				for (uint64_t i = 0; i < k; ++i) av.push_back(RandomW<Word>(n, imf * q));
+				for (uint64_t i = 0; i < 2 * k; ++i) bv.push_back(RandomW<Word>(n, q));
+				for (int m = 0; m < 2; ++m) rv.push_back(RandomW<Word>(n, q));
+				for (uint64_t i = 0; i < k; ++i) pa[i] = av[i].data();
+				for (uint64_t i = 0; i < 2 * k; ++i) pb[i] = bv[i].data();
+				for (int m = 0; m < 2; ++m) pr[m] = rv[m].data();
+			}
+		void Fused() {
+			EltwiseDotProductMod(pr.data(), 2, pa.data(), k, pb.data(), use == 2 ? post.data() : nullptr, n, q, imf, use != 1);
+		}
+		void Sequence() {
+			for (int m = 0; m < 2; ++m) {
+				if (use == 0) {  // SEAL: accumulate every digit's product straight into the result
+					for (uint64_t i = 0; i < k; ++i) EltwiseMultAddMod(pr[m], pa[i], pb[2 * i + m], pr[m], n, q, imf);
+					continue;
+				}
+				Word* t = use == 1 ? pr[m] : tmp.data();
+				EltwiseMultMod(t, pa[0], pb[m], n, q, imf);
+				for (uint64_t i = 1; i < k; ++i) EltwiseMultAddMod(t, pa[i], pb[2 * i + m], t, n, q, imf);
+				if (use == 2) EltwiseMultAddMod(pr[m], t, post.data(), pr[m], n, q, 1);
+			}
+		}
+	};
+
+	template <typename Word>
+	static void BM_DotProduct(benchmark::State& state) {
+		DotSetup<Word> s(state);
+		HEXL_BENCH_PROBE(state, s.Fused());
+		for (auto _ : state) {
+			s.Fused();
+			benchmark::ClobberMemory();
+		}
+		state.SetItemsProcessed(static_cast<int64_t>(state.iterations() * s.n));
+	}
+
+	template <typename Word>
+	static void BM_DotProductSequence(benchmark::State& state) {
+		DotSetup<Word> s(state);
+		for (auto _ : state) {
+			s.Sequence();
+			benchmark::ClobberMemory();
+		}
+		state.SetItemsProcessed(static_cast<int64_t>(state.iterations() * s.n));
+	}
+
+#define HEXL_DOT_ARGS64 \
+	->Args({1024, 6, 27, 2})->Args({8192, 3, 60, 1})->Args({16384, 8, 49, 0})->Args({8192, 4, 36, 0}) \
+	->ArgNames({"n", "k", "qbits", "use"})
+#define HEXL_DOT_ARGS32 ->Args({1024, 6, 27, 2})->Args({1024, 6, 27, 1})->ArgNames({"n", "k", "qbits", "use"})
+BENCHMARK_TEMPLATE(BM_DotProduct, uint64_t) HEXL_DOT_ARGS64;
+BENCHMARK_TEMPLATE(BM_DotProductSequence, uint64_t) HEXL_DOT_ARGS64;
+#ifdef HEXL_RVV_HAS_32BIT_API
+BENCHMARK_TEMPLATE(BM_DotProduct, uint32_t) HEXL_DOT_ARGS32;
+BENCHMARK_TEMPLATE(BM_DotProductSequence, uint32_t) HEXL_DOT_ARGS32;
+#endif
+#undef HEXL_DOT_ARGS64
+#undef HEXL_DOT_ARGS32
+#endif
+
 #ifdef HEXL_RVV_HAS_BASE_CONVERT
 	// ---- approximate RNS base conversion (rvv-hexl extension; OpenFHE HYBRID key switching) ----
 	// The shapes of blindloop's ckks_openfhe (N = 8192, Q = 46 + 37 + 36 + 37, P = 60, one limb

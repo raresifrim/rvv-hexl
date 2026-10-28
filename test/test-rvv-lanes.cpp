@@ -30,6 +30,7 @@
 #include "eltwise/eltwise-base-convert-internal.hpp"
 #include "eltwise/eltwise-cmp-add-internal.hpp"
 #include "eltwise/eltwise-cmp-sub-mod-internal.hpp"
+#include "eltwise/eltwise-dot-product-internal.hpp"
 #include "eltwise/eltwise-external-product-internal.hpp"
 #include "eltwise/eltwise-fma-mod-internal.hpp"
 #include "eltwise/eltwise-mult-add-mod-internal.hpp"
@@ -403,6 +404,66 @@ void CheckExternalProduct(const char* lane) {
 			}
 		}
 	}
+}
+
+/// EltwiseDotProductMod's RVV kernels against the defining sums
+/// (DotProductModReference, itself checked against SEAL's and OpenFHE's call
+/// sequences in test-eltwise.cpp): the key-switching shape (M = 2, lazy digits in
+/// [0, 4q), accumulating) at k = 8 and k = 1, and a post-multiplied overwrite.
+/// Integer lanes: e32 (RVV32, q < 2^30) and e64 (RVV64); FP64 lanes: RVVF64 at
+/// 2^30 <= q < 2^50.
+template <typename Word, class V, bool kF64 = false>
+void CheckDotProductKernel(const char* lane, const std::vector<uint64_t>& qs) {
+	struct Use { uint64_t imf; bool post, accumulate; };
+	for (uint64_t q : qs) {
+		for (const Use& u : {Use{4, false, true}, Use{1, true, false}}) {
+			for (uint64_t k : {uint64_t{8}, uint64_t{1}}) {
+				for (size_t n : kSizes) {
+					const uint64_t M = 2;
+					auto poly = [&](uint64_t bound) { auto v = O::Random(n, bound); v[0] = bound - 1; return AsWord<Word>(v); };
+					std::vector<std::vector<Word>> av(k), bv(k * M);
+					for (auto& v : av) v = poly(u.imf * q);
+					for (auto& v : bv) v = poly(q);
+					const auto post = poly(q), r0 = poly(q), r1 = poly(q);
+					std::vector<const Word*> pa(k), pb(k * M);
+					for (uint64_t i = 0; i < k; ++i) pa[i] = av[i].data();
+					for (uint64_t i = 0; i < k * M; ++i) pb[i] = bv[i].data();
+					const Word* pp = u.post ? post.data() : nullptr;
+					auto w0 = r0, w1 = r1, g0 = r0, g1 = r1;
+					Word* pw[2] = {w0.data(), w1.data()};
+					Word* pg[2] = {g0.data(), g1.data()};
+					intel::hexl::DotProductModReference<Word>(pw, M, pa.data(), k, pb.data(), pp, n, q, u.accumulate);
+					if constexpr (kF64) {
+						intel::hexl::DotProductModRVVF64<V>(pg, M, pa.data(), k, pb.data(), pp, n, q, u.imf, u.accumulate);
+					} else if constexpr (rvv::IsE64<V>) {
+						intel::hexl::DotProductModRVV64<V>(pg, M, pa.data(), k, pb.data(), pp, n, q, u.imf, u.accumulate);
+					} else {
+						intel::hexl::DotProductModRVV32<Word, V>(pg, M, pa.data(), k, pb.data(), pp, n, q, u.imf, u.accumulate);
+					}
+					for (size_t i = 0; i < n; ++i) {
+						CHECK_EQ(static_cast<uint64_t>(g0[i]), static_cast<uint64_t>(w0[i]), << "DotProduct " << lane
+								<< " r0 q=" << q << " imf=" << u.imf << " k=" << k << " n=" << n << " i=" << i);
+						CHECK_EQ(static_cast<uint64_t>(g1[i]), static_cast<uint64_t>(w1[i]), << "DotProduct " << lane
+								<< " r1 q=" << q << " imf=" << u.imf << " k=" << k << " n=" << n << " i=" << i);
+					}
+				}
+			}
+		}
+	}
+}
+
+template <typename Word, class V>
+void CheckDotProduct(const char* lane) {
+	if constexpr (rvv::IsE64<V>) {
+		CheckDotProductKernel<Word, V>(lane, {O::NttPrime(27, 1), O::NttPrime(49, 1), O::NttPrime(60, 1)});
+	} else {
+		CheckDotProductKernel<Word, V>(lane, {O::NttPrime(27, 1), O::PrimeBelow(1ULL << 30), 17});
+	}
+}
+
+template <class VF>
+void CheckDotProductF64(const char* lane) {
+	CheckDotProductKernel<uint64_t, VF, true>(lane, {O::PrimeAbove(1ULL << 30), O::NttPrime(49, 1), O::PrimeBelow(1ULL << 50)});
 }
 
 /// SetVl<V> must equal the matching vsetvl; Load<V>/Store must round-trip
@@ -928,6 +989,20 @@ TEST(RvvLanes_ExternalProduct) {
 	CheckExternalProduct<uint64_t, vuint32m1_t>("u64->u32m1");
 	CheckExternalProduct<uint64_t, vuint32m2_t>("u64->u32m2");
 	CheckExternalProduct<uint64_t, vuint32m4_t>("u64->u32m4");
+}
+
+// EltwiseDotProductMod (stub until the kernel is written: it runs the native kernel)
+TEST(RvvLanes_DotProduct) {
+	HEXL_FOR_EACH_LANE(CheckDotProduct);
+	// RVV32 on uint64_t storage (narrowing load): u32m1..m4
+	CheckDotProduct<uint64_t, vuint32m1_t>("u64->u32m1");
+	CheckDotProduct<uint64_t, vuint32m2_t>("u64->u32m2");
+	CheckDotProduct<uint64_t, vuint32m4_t>("u64->u32m4");
+	// the FP64 kernel
+	CheckDotProductF64<vfloat64m1_t>("f64m1");
+	CheckDotProductF64<vfloat64m2_t>("f64m2");
+	CheckDotProductF64<vfloat64m4_t>("f64m4");
+	CheckDotProductF64<vfloat64m8_t>("f64m8");
 }
 
 TEST(RvvLanes_SignedDigitDecompose) {

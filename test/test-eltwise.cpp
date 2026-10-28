@@ -2,7 +2,7 @@
 // All rights reserved.
 //
 // hexl/eltwise: all seven public functions, plus the rvv-hexl extensions
-// EltwiseMultAddMod, SignedDigitDecompose, BaseConvert and EltwiseExternalProductMod, every size tail, every modulus class, every input/output
+// EltwiseMultAddMod, SignedDigitDecompose, BaseConvert, EltwiseExternalProductMod and EltwiseDotProductMod, every size tail, every modulus class, every input/output
 // mod factor, out-of-place AND in-place (OpenFHE calls almost everything with
 // result == operand1).
 //
@@ -454,6 +454,86 @@ void RunExternalProduct() {
 }
 #endif
 
+#ifdef HEXL_RVV_HAS_DOT_PRODUCT
+/// EltwiseDotProductMod (rvv-hexl extension) against the call sequences it replaces, on
+/// the public functions: SEAL's key switching (digits from the lazy NTT in [0, 4q), one
+/// EltwiseMultAddMod per digit and key component into the accumulator), OpenFHE's
+/// KeySwitchBV (zero-initialised results, one EltwiseMultAddMod per digit) and a
+/// post-multiplied sum (one key of binfhe's CGGI step); M = 1 and 2 results, 1, 3 and 8
+/// terms, every size tail and modulus class of the word, the largest operands in
+/// element 0. With EltwiseExternalProductMod too: two calls reproduce a CGGI step.
+template <typename Word>
+void RunDotProduct() {
+	struct Use { const char* name; uint64_t imf, results; bool post, accumulate; };
+	const Use uses[] = {{"SEAL key switching", 4, 2, false, true}, {"OpenFHE KeySwitchBV", 1, 2, false, false},
+		{"post-multiplied", 1, 2, true, true}, {"one result, lazy input", 2, 1, false, false}};
+	for (const Use& u : uses) {
+		auto ok = [&u](uint64_t q) {
+			return Is32<Word>() ? q <= (1ULL << 32) / u.imf : q < (1ULL << 61) && u.imf * q < (1ULL << 63);
+		};
+		for (uint64_t q : Moduli(ok)) {
+			for (uint64_t k : {uint64_t{1}, uint64_t{3}, uint64_t{8}}) {
+				for (size_t n : O::EltwiseSizes()) {
+					const uint64_t M = u.results;
+					auto poly = [&](uint64_t bound) { auto v = O::Random(n, bound); v[0] = bound - 1; return O::As<Word>(v); };
+					std::vector<std::vector<Word>> av(k), bv(k * M), out0(M);
+					for (auto& v : av) v = poly(u.imf * q);
+					for (auto& v : bv) v = poly(q);
+					for (auto& v : out0) v = poly(q);
+					const std::vector<Word> post = poly(q);
+					std::vector<const Word*> pa(k), pb(k * M);
+					for (uint64_t i = 0; i < k; ++i) pa[i] = av[i].data();
+					for (uint64_t i = 0; i < k * M; ++i) pb[i] = bv[i].data();
+
+					std::vector<std::vector<Word>> want(M);
+					for (uint64_t m = 0; m < M; ++m) {
+						std::vector<Word> t(n);
+						EltwiseMultMod(t.data(), pa[0], pb[m], n, q, u.imf);
+						for (uint64_t i = 1; i < k; ++i) EltwiseMultAddMod(t.data(), pa[i], pb[i * M + m], t.data(), n, q, u.imf);
+						if (u.post) EltwiseMultMod(t.data(), t.data(), post.data(), n, q, 1);
+						if (u.accumulate) EltwiseAddMod(t.data(), t.data(), out0[m].data(), n, q);
+						want[m] = t;
+					}
+					std::vector<std::vector<Word>> got = out0;
+					std::vector<Word*> pg(M);
+					for (uint64_t m = 0; m < M; ++m) pg[m] = got[m].data();
+					EltwiseDotProductMod(pg.data(), M, pa.data(), k, pb.data(), u.post ? post.data() : nullptr, n, q, u.imf,
+							u.accumulate);
+					for (uint64_t m = 0; m < M; ++m) {
+						CHECK_VEC_EQ(want[m], got[m], << "DotProduct " << u.name << " m=" << m << " q=" << q << " k=" << k
+								<< " n=" << n << " word=" << 8 * sizeof(Word));
+					}
+				}
+			}
+		}
+	}
+#ifdef HEXL_RVV_HAS_EXTERNAL_PRODUCT
+	// a CGGI step as two dot products (one per key) against EltwiseExternalProductMod
+	for (uint64_t q : Moduli([](uint64_t q) { return q < (1ULL << 30); })) {
+		for (size_t n : O::EltwiseSizes()) {
+			const uint64_t k = 6;
+			auto poly = [&]() { auto v = O::Random(n, q); v[0] = q - 1; return O::As<Word>(v); };
+			std::vector<std::vector<Word>> dg(k), k1(2 * k), k2(2 * k);
+			for (auto& v : dg) v = poly();
+			for (auto& v : k1) v = poly();
+			for (auto& v : k2) v = poly();
+			const auto m1 = poly(), m2 = poly(), a0 = poly(), a1 = poly();
+			std::vector<const Word*> pd(k), p1(2 * k), p2(2 * k);
+			for (uint64_t i = 0; i < k; ++i) pd[i] = dg[i].data();
+			for (uint64_t i = 0; i < 2 * k; ++i) { p1[i] = k1[i].data(); p2[i] = k2[i].data(); }
+			auto e0 = a0, e1 = a1, d0 = a0, d1 = a1;
+			EltwiseExternalProductMod(e0.data(), e1.data(), pd.data(), k, p1.data(), m1.data(), p2.data(), m2.data(), n, q, true);
+			Word* pr[2] = {d0.data(), d1.data()};
+			EltwiseDotProductMod(pr, 2, pd.data(), k, p1.data(), m1.data(), n, q, 1, true);
+			EltwiseDotProductMod(pr, 2, pd.data(), k, p2.data(), m2.data(), n, q, 1, true);
+			CHECK_VEC_EQ(e0, d0, << "DotProduct x2 vs ExternalProduct acc0 q=" << q << " n=" << n);
+			CHECK_VEC_EQ(e1, d1, << "DotProduct x2 vs ExternalProduct acc1 q=" << q << " n=" << n);
+		}
+	}
+#endif
+}
+#endif
+
 #ifdef HEXL_RVV_HAS_BASE_CONVERT
 /// The constants of a base conversion from first principles: Q_i = prod_{k != i} q_k,
 /// q_hat_inv[i] = Q_i^{-1} mod q_i, q_hat_mod_p[i * K + j] = Q_i mod p_j.
@@ -559,6 +639,9 @@ TEST(Eltwise_BaseConvert) { RunBaseConvert(); }
 #ifdef HEXL_RVV_HAS_EXTERNAL_PRODUCT
 TEST(Eltwise_ExternalProduct) { RunExternalProduct<uint64_t>(); }
 #endif
+#ifdef HEXL_RVV_HAS_DOT_PRODUCT
+TEST(Eltwise_DotProduct) { RunDotProduct<uint64_t>(); }
+#endif
 
 #ifdef HEXL_RVV_HAS_32BIT_API
 TEST(Eltwise_AddMod_32) { RunAddSub<uint32_t>(true); }
@@ -577,5 +660,8 @@ TEST(Eltwise_SignedDigitDecompose_32) { RunSignedDigitDecompose<uint32_t>(); }
 #endif
 #ifdef HEXL_RVV_HAS_EXTERNAL_PRODUCT
 TEST(Eltwise_ExternalProduct_32) { RunExternalProduct<uint32_t>(); }
+#endif
+#ifdef HEXL_RVV_HAS_DOT_PRODUCT
+TEST(Eltwise_DotProduct_32) { RunDotProduct<uint32_t>(); }
 #endif
 #endif

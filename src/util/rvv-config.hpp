@@ -130,6 +130,12 @@ using BaseConvert64 = vuint64m8_t;
 using ExternalProduct32 = vuint32m2_t;     // RVV32 on uint32_t storage
 using ExternalProduct32U64 = vuint32m2_t;  // RVV32 on uint64_t storage (<= m4)
 using ExternalProduct64 = vuint64m2_t;
+// EltwiseDotProductMod (rvv-hexl extension, key switching / blind rotation):
+// placeholders until BM_Lanes_DotProduct has been measured on both clusters.
+// The kernel keeps M sums (M = 2 for key switching) and a term's operands live.
+using DotProduct32 = vuint32m2_t;     // RVV32 on uint32_t storage
+using DotProduct32U64 = vuint32m2_t;  // RVV32 on uint64_t storage (<= m4)
+using DotProduct64 = vuint64m2_t;
 
 // FP64 eltwise path (src/util/fp64-mod.hpp), for 2^30 <= q < 2^50, 64-bit
 // storage: EltwiseMultMod / FMAMod / MultAddMod on the FP64 FMA (4 elements per
@@ -148,6 +154,7 @@ inline constexpr bool kEltwiseFp64 = true;
 using MultModF64 = vfloat64m8_t;
 using FMAModF64 = vfloat64m8_t;
 using MultAddModF64 = vfloat64m4_t;
+using DotProductF64 = vfloat64m4_t;  // EltwiseDotProductMod's FP64 kernel: placeholder (BM_Lanes_DotProductF64)
 
 // ---- NTT -------------------------------------------------------------------
 // How the small-span NTT stages (span t < VLMAX) run, one strategy for the RVV64

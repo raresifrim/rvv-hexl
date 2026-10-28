@@ -44,3 +44,6 @@
 // EltwiseExternalProductMod: the external product of OpenFHE binfhe's blind rotation
 // in one call, both storage words (include/hexl/eltwise/eltwise-external-product.hpp).
 #define HEXL_RVV_HAS_EXTERNAL_PRODUCT 1
+// EltwiseDotProductMod: multi-output modular dot product (key switching, blind
+// rotation), both storage words (include/hexl/eltwise/eltwise-dot-product.hpp).
+#define HEXL_RVV_HAS_DOT_PRODUCT 1

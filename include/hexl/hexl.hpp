@@ -15,6 +15,7 @@
 #include "hexl/eltwise/eltwise-base-convert.hpp"
 #include "hexl/eltwise/eltwise-cmp-add.hpp"
 #include "hexl/eltwise/eltwise-cmp-sub-mod.hpp"
+#include "hexl/eltwise/eltwise-dot-product.hpp"
 #include "hexl/eltwise/eltwise-external-product.hpp"
 #include "hexl/eltwise/eltwise-fma-mod.hpp"
 #include "hexl/eltwise/eltwise-mult-add-mod.hpp"
