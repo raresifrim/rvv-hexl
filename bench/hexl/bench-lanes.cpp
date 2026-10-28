@@ -33,6 +33,7 @@
 #include "eltwise/eltwise-base-convert-internal.hpp"
 #include "eltwise/eltwise-cmp-add-internal.hpp"
 #include "eltwise/eltwise-cmp-sub-mod-internal.hpp"
+#include "eltwise/eltwise-external-product-internal.hpp"
 #include "eltwise/eltwise-fma-mod-internal.hpp"
 #include "eltwise/eltwise-mult-add-mod-internal.hpp"
 #include "eltwise/eltwise-mult-mod-internal.hpp"
@@ -179,6 +180,33 @@ void BM_Lanes_SignedDigitDecompose(benchmark::State& state) {
 			intel::hexl::SignedDigitDecomposeRVV64<V>(p.data(), a.data(), kN, q, g, digits);
 		} else {
 			intel::hexl::SignedDigitDecomposeRVV32<Word, V>(p.data(), a.data(), kN, q, g, digits);
+		}
+		benchmark::ClobberMemory();
+	}
+	state.SetItemsProcessed(state.iterations() * kN);
+}
+
+/// EltwiseExternalProductMod (rvv-hexl extension), CGGI at STD128 (27-bit q, k = 6
+/// digit polynomials, two keys and monomials): 32-bit lanes; 64-bit lanes at a 60-bit q.
+template <typename Word, class V>
+void BM_Lanes_ExternalProduct(benchmark::State& state) {
+	constexpr bool kE64 = std::is_same_v<Word, uint64_t> && intel::hexl::rvv::IsE64<V>;
+	const uint64_t q = kE64 ? hexlbench::Prime(60, 1024) : hexlbench::Prime(27, 1024), k = 6;
+	std::vector<intel::hexl::AlignedVector64<Word>> dg, k1, k2;
+	for (uint64_t i = 0; i < k; ++i) dg.push_back(hexlbench::RandomW<Word>(kN, q));
+	for (uint64_t i = 0; i < 2 * k; ++i) { k1.push_back(hexlbench::RandomW<Word>(kN, q)); k2.push_back(hexlbench::RandomW<Word>(kN, q)); }
+	auto m1 = hexlbench::RandomW<Word>(kN, q), m2 = hexlbench::RandomW<Word>(kN, q);
+	auto a0 = hexlbench::RandomW<Word>(kN, q), a1 = hexlbench::RandomW<Word>(kN, q);
+	std::vector<const Word*> pd(k), p1(2 * k), p2(2 * k);
+	for (uint64_t i = 0; i < k; ++i) pd[i] = dg[i].data();
+	for (uint64_t i = 0; i < 2 * k; ++i) { p1[i] = k1[i].data(); p2[i] = k2[i].data(); }
+	for (auto _ : state) {
+		if constexpr (kE64) {
+			intel::hexl::ExternalProductModRVV64<V>(a0.data(), a1.data(), pd.data(), k, p1.data(), m1.data(),
+					p2.data(), m2.data(), kN, q, true);
+		} else {
+			intel::hexl::ExternalProductModRVV32<Word, V>(a0.data(), a1.data(), pd.data(), k, p1.data(), m1.data(),
+					p2.data(), m2.data(), kN, q, true);
 		}
 		benchmark::ClobberMemory();
 	}
@@ -483,6 +511,10 @@ BENCHMARK_TEMPLATE(BM_Lanes_MultAddMod32FromU64, vuint32m1_t);
 BENCHMARK_TEMPLATE(BM_Lanes_MultAddMod32FromU64, vuint32m2_t);
 BENCHMARK_TEMPLATE(BM_Lanes_MultAddMod32FromU64, vuint32m4_t);
 HEXL_LANES(BM_Lanes_SignedDigitDecompose);
+HEXL_LANES(BM_Lanes_ExternalProduct);
+BENCHMARK_TEMPLATE(BM_Lanes_ExternalProduct, uint64_t, vuint32m1_t);
+BENCHMARK_TEMPLATE(BM_Lanes_ExternalProduct, uint64_t, vuint32m2_t);
+BENCHMARK_TEMPLATE(BM_Lanes_ExternalProduct, uint64_t, vuint32m4_t);
 BENCHMARK_TEMPLATE(BM_Lanes_SignedDigitDecompose32FromU64, vuint32m1_t);
 BENCHMARK_TEMPLATE(BM_Lanes_SignedDigitDecompose32FromU64, vuint32m2_t);
 BENCHMARK_TEMPLATE(BM_Lanes_SignedDigitDecompose32FromU64, vuint32m4_t);

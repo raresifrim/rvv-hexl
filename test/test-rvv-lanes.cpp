@@ -30,6 +30,7 @@
 #include "eltwise/eltwise-base-convert-internal.hpp"
 #include "eltwise/eltwise-cmp-add-internal.hpp"
 #include "eltwise/eltwise-cmp-sub-mod-internal.hpp"
+#include "eltwise/eltwise-external-product-internal.hpp"
 #include "eltwise/eltwise-fma-mod-internal.hpp"
 #include "eltwise/eltwise-mult-add-mod-internal.hpp"
 #include "eltwise/eltwise-mult-mod-internal.hpp"
@@ -349,6 +350,55 @@ void CheckSignedDigitDecompose(const char* lane) {
 					CHECK_EQ(static_cast<uint64_t>(got[d][i]), static_cast<uint64_t>(want[d][i]),
 							<< "SignedDigitDecompose " << lane << " q=" << s.q << " g=" << s.g
 							<< " n=" << n << " d=" << d << " i=" << i);
+				}
+			}
+		}
+	}
+}
+
+/// EltwiseExternalProductMod's RVV kernels against the defining sums
+/// (ExternalProductModReference, itself checked against OpenFHE's call sequence
+/// in test-eltwise.cpp): CGGI (two keys, two monomials, accumulating) and DM
+/// (one key, overwriting) at k = 6 digit polynomials (STD128) and k = 1, with
+/// the largest operands at the front. e32 lanes: RVV32 (q < 2^30); e64: RVV64.
+template <typename Word, class V>
+void CheckExternalProduct(const char* lane) {
+	constexpr bool kE64 = rvv::IsE64<V>;
+	const std::vector<uint64_t> qs = kE64
+		? std::vector<uint64_t>{O::NttPrime(27, 1), O::NttPrime(49, 1), O::NttPrime(60, 1)}
+	: std::vector<uint64_t>{O::NttPrime(27, 1), O::PrimeBelow(1ULL << 30), 17};
+	for (uint64_t q : qs) {
+		for (bool cggi : {true, false}) {
+			for (uint64_t k : {uint64_t{6}, uint64_t{1}}) {
+				for (size_t n : kSizes) {
+					auto poly = [&]() { auto v = O::Random(n, q); v[0] = q - 1; return AsWord<Word>(v); };
+					std::vector<std::vector<Word>> dg(k), k1(2 * k), k2(2 * k);
+					for (auto& v : dg) v = poly();
+					for (auto& v : k1) v = poly();
+					for (auto& v : k2) v = poly();
+					const auto m1 = poly(), m2 = poly(), a0 = poly(), a1 = poly();
+					std::vector<const Word*> pd(k), p1(2 * k), p2(2 * k);
+					for (uint64_t i = 0; i < k; ++i) pd[i] = dg[i].data();
+					for (uint64_t i = 0; i < 2 * k; ++i) { p1[i] = k1[i].data(); p2[i] = k2[i].data(); }
+					const Word* mo1 = cggi ? m1.data() : nullptr;
+					const Word* const* ky2 = cggi ? p2.data() : nullptr;
+					const Word* mo2 = cggi ? m2.data() : nullptr;
+					auto w0 = a0, w1 = a1, g0 = a0, g1 = a1;
+					intel::hexl::ExternalProductModReference<Word>(w0.data(), w1.data(), pd.data(), k, p1.data(), mo1,
+							ky2, mo2, n, q, cggi);
+					if constexpr (kE64) {
+						intel::hexl::ExternalProductModRVV64<V>(g0.data(), g1.data(), pd.data(), k, p1.data(), mo1,
+								ky2, mo2, n, q, cggi);
+					} else {
+						intel::hexl::ExternalProductModRVV32<Word, V>(g0.data(), g1.data(), pd.data(), k, p1.data(), mo1,
+								ky2, mo2, n, q, cggi);
+					}
+					for (size_t i = 0; i < n; ++i) {
+						CHECK_EQ(static_cast<uint64_t>(g0[i]), static_cast<uint64_t>(w0[i]), << "ExternalProduct " << lane
+								<< (cggi ? " CGGI" : " DM") << " acc0 q=" << q << " k=" << k << " n=" << n << " i=" << i);
+						CHECK_EQ(static_cast<uint64_t>(g1[i]), static_cast<uint64_t>(w1[i]), << "ExternalProduct " << lane
+								<< (cggi ? " CGGI" : " DM") << " acc1 q=" << q << " k=" << k << " n=" << n << " i=" << i);
+					}
 				}
 			}
 		}
@@ -869,6 +919,15 @@ TEST(RvvLanes_EltwiseFp64) {
 	CheckEltwiseF64<vfloat64m2_t>("f64m2");
 	CheckEltwiseF64<vfloat64m4_t>("f64m4");
 	CheckEltwiseF64<vfloat64m8_t>("f64m8");
+}
+
+// EltwiseExternalProductMod (stub until the kernel is written: it runs the native kernel)
+TEST(RvvLanes_ExternalProduct) {
+	HEXL_FOR_EACH_LANE(CheckExternalProduct);
+	// RVV32 on uint64_t storage (narrowing load): u32m1..m4
+	CheckExternalProduct<uint64_t, vuint32m1_t>("u64->u32m1");
+	CheckExternalProduct<uint64_t, vuint32m2_t>("u64->u32m2");
+	CheckExternalProduct<uint64_t, vuint32m4_t>("u64->u32m4");
 }
 
 TEST(RvvLanes_SignedDigitDecompose) {

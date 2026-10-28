@@ -2,7 +2,7 @@
 // All rights reserved.
 //
 // hexl/eltwise: all seven public functions, plus the rvv-hexl extensions
-// EltwiseMultAddMod, SignedDigitDecompose and BaseConvert, every size tail, every modulus class, every input/output
+// EltwiseMultAddMod, SignedDigitDecompose, BaseConvert and EltwiseExternalProductMod, every size tail, every modulus class, every input/output
 // mod factor, out-of-place AND in-place (OpenFHE calls almost everything with
 // result == operand1).
 //
@@ -393,6 +393,67 @@ void RunSignedDigitDecompose() {
 }
 #endif
 
+#ifdef HEXL_RVV_HAS_EXTERNAL_PRODUCT
+/// EltwiseExternalProductMod (rvv-hexl extension, OpenFHE binfhe) against OpenFHE's own
+/// call sequence on the public functions: per sum one EltwiseMultMod, then one
+/// EltwiseMultAddMod per further digit, the monomial by EltwiseMultMod, the terms added
+/// by EltwiseAddMod. The four uses of the blind rotation (CGGI with two keys and
+/// monomials, DM overwriting, LMKCDEY accumulating, one key with a monomial), 1, 2 and
+/// 6 digit polynomials (6 = STD128), every size tail and modulus class of the word, the
+/// largest operands in element 0.
+template <typename Word>
+void RunExternalProduct() {
+	struct Use { const char* name; bool key2, mono, accumulate; };
+	const Use uses[] = {{"CGGI", true, true, true}, {"DM", false, false, false},
+		{"LMKCDEY", false, false, true}, {"one key + monomial", false, true, true}};
+	auto ok = [](uint64_t q) { return Is32<Word>() ? q < (1ULL << 32) : q < (1ULL << 61); };
+	for (uint64_t q : Moduli(ok)) {
+		for (const Use& u : uses) {
+			for (uint64_t k : {uint64_t{1}, uint64_t{2}, uint64_t{6}}) {
+				for (size_t n : O::EltwiseSizes()) {
+					auto poly = [&]() { auto v = O::Random(n, q); v[0] = q - 1; return O::As<Word>(v); };
+					std::vector<std::vector<Word>> dg(k), k1(2 * k), k2(2 * k);
+					for (auto& v : dg) v = poly();
+					for (auto& v : k1) v = poly();
+					if (u.key2) for (auto& v : k2) v = poly();
+					const std::vector<Word> m1 = poly(), m2 = poly(), a0 = poly(), a1 = poly();
+					std::vector<const Word*> pd(k), p1(2 * k), p2(2 * k);
+					for (uint64_t i = 0; i < k; ++i) pd[i] = dg[i].data();
+					for (uint64_t i = 0; i < 2 * k; ++i) { p1[i] = k1[i].data(); p2[i] = u.key2 ? k2[i].data() : nullptr; }
+
+					// OpenFHE's sequence
+					const std::vector<Word>* acc_in[2] = {&a0, &a1};
+					std::vector<Word> want[2];
+					for (int j = 0; j < 2; ++j) {
+						auto sum = [&](const std::vector<const Word*>& key, const Word* mono) {
+							std::vector<Word> t(n);
+							EltwiseMultMod(t.data(), pd[0], key[j], n, q, 1);
+							for (uint64_t i = 1; i < k; ++i) EltwiseMultAddMod(t.data(), pd[i], key[2 * i + j], t.data(), n, q, 1);
+							if (mono) EltwiseMultMod(t.data(), t.data(), mono, n, q, 1);
+							return t;
+						};
+						want[j] = sum(p1, u.mono ? m1.data() : nullptr);
+						if (u.key2) {
+							const auto t2 = sum(p2, u.mono ? m2.data() : nullptr);
+							EltwiseAddMod(want[j].data(), want[j].data(), t2.data(), n, q);
+						}
+						if (u.accumulate) EltwiseAddMod(want[j].data(), want[j].data(), acc_in[j]->data(), n, q);
+					}
+
+					std::vector<Word> g0 = a0, g1 = a1;
+					EltwiseExternalProductMod(g0.data(), g1.data(), pd.data(), k, p1.data(), u.mono ? m1.data() : nullptr,
+							u.key2 ? p2.data() : nullptr, u.mono ? m2.data() : nullptr, n, q, u.accumulate);
+					CHECK_VEC_EQ(want[0], g0, << "ExternalProduct " << u.name << " acc0 q=" << q << " k=" << k << " n=" << n
+							<< " word=" << 8 * sizeof(Word));
+					CHECK_VEC_EQ(want[1], g1, << "ExternalProduct " << u.name << " acc1 q=" << q << " k=" << k << " n=" << n
+							<< " word=" << 8 * sizeof(Word));
+				}
+			}
+		}
+	}
+}
+#endif
+
 #ifdef HEXL_RVV_HAS_BASE_CONVERT
 /// The constants of a base conversion from first principles: Q_i = prod_{k != i} q_k,
 /// q_hat_inv[i] = Q_i^{-1} mod q_i, q_hat_mod_p[i * K + j] = Q_i mod p_j.
@@ -495,6 +556,9 @@ TEST(Eltwise_SignedDigitDecompose) { RunSignedDigitDecompose<uint64_t>(); }
 #ifdef HEXL_RVV_HAS_BASE_CONVERT
 TEST(Eltwise_BaseConvert) { RunBaseConvert(); }
 #endif
+#ifdef HEXL_RVV_HAS_EXTERNAL_PRODUCT
+TEST(Eltwise_ExternalProduct) { RunExternalProduct<uint64_t>(); }
+#endif
 
 #ifdef HEXL_RVV_HAS_32BIT_API
 TEST(Eltwise_AddMod_32) { RunAddSub<uint32_t>(true); }
@@ -510,5 +574,8 @@ TEST(Eltwise_MultAddMod_32) { RunMultAddMod<uint32_t>(); }
 #endif
 #ifdef HEXL_RVV_HAS_SIGNED_DIGIT_DECOMPOSE
 TEST(Eltwise_SignedDigitDecompose_32) { RunSignedDigitDecompose<uint32_t>(); }
+#endif
+#ifdef HEXL_RVV_HAS_EXTERNAL_PRODUCT
+TEST(Eltwise_ExternalProduct_32) { RunExternalProduct<uint32_t>(); }
 #endif
 #endif

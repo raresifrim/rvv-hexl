@@ -357,6 +357,81 @@ BENCHMARK_TEMPLATE(BM_SignedDigitDecomposeOpenFHELoop, uint32_t)
 #endif
 #endif
 
+#ifdef HEXL_RVV_HAS_EXTERNAL_PRODUCT
+	// ---- external product of the blind rotation (rvv-hexl extension; OpenFHE binfhe) ----
+	// STD128 / STD128_3: N = 1024, Q 27-bit, k = 6 digit polynomials. Variant 0 = CGGI
+	// (two keys, two monomials, accumulating: AddToAccCGGI), 1 = DM (one key, overwriting).
+	// Against OpenFHE's call sequence on the same functions it calls today (after
+	// patches/openfhe-binfhe-multadd.py): per sum one EltwiseMultMod and k - 1
+	// EltwiseMultAddMod, then EltwiseMultAddMod with the monomial into the accumulator.
+	template <typename Word>
+	struct ExtProdSetup {
+		uint64_t n, q, k;
+		bool cggi;
+		std::vector<intel::hexl::AlignedVector64<Word>> dg, k1, k2;
+		intel::hexl::AlignedVector64<Word> m1, m2, a0, a1, tmp;
+		std::vector<const Word*> pd, p1, p2;
+		explicit ExtProdSetup(benchmark::State& state)
+			: n(state.range(0)), q(Prime(27, state.range(0))), k(state.range(1)), cggi(state.range(2) == 0),
+			m1(RandomW<Word>(n, q)), m2(RandomW<Word>(n, q)), a0(RandomW<Word>(n, q)), a1(RandomW<Word>(n, q)),
+			tmp(n), pd(k), p1(2 * k), p2(2 * k) {
+				for (uint64_t i = 0; i < k; ++i) dg.push_back(RandomW<Word>(n, q));
+				for (uint64_t i = 0; i < 2 * k; ++i) { k1.push_back(RandomW<Word>(n, q)); k2.push_back(RandomW<Word>(n, q)); }
+				for (uint64_t i = 0; i < k; ++i) pd[i] = dg[i].data();
+				for (uint64_t i = 0; i < 2 * k; ++i) { p1[i] = k1[i].data(); p2[i] = k2[i].data(); }
+			}
+		void Fused() {
+			EltwiseExternalProductMod(a0.data(), a1.data(), pd.data(), k, p1.data(), cggi ? m1.data() : nullptr,
+					cggi ? p2.data() : nullptr, cggi ? m2.data() : nullptr, n, q, cggi);
+		}
+		// AddToAccCGGI / AddToAccDM as OpenFHE runs them through HEXL today
+		void OpenFHESequence() {
+			Word* acc[2] = {a0.data(), a1.data()};
+			for (int key = 0; key < (cggi ? 2 : 1); ++key) {
+				const std::vector<const Word*>& ev = key == 0 ? p1 : p2;
+				for (int j = 0; j < 2; ++j) {
+					Word* t = cggi ? tmp.data() : acc[j];
+					EltwiseMultMod(t, pd[0], ev[j], n, q, 1);
+					for (uint64_t i = 1; i < k; ++i) EltwiseMultAddMod(t, pd[i], ev[2 * i + j], t, n, q, 1);
+					if (cggi) EltwiseMultAddMod(acc[j], t, key == 0 ? m1.data() : m2.data(), acc[j], n, q, 1);
+				}
+			}
+		}
+	};
+
+template <typename Word>
+static void BM_ExternalProduct(benchmark::State& state) {
+	ExtProdSetup<Word> s(state);
+	HEXL_BENCH_PROBE(state, s.Fused());
+	for (auto _ : state) {
+		s.Fused();
+		benchmark::ClobberMemory();
+	}
+	state.SetItemsProcessed(static_cast<int64_t>(state.iterations() * s.n));
+}
+
+template <typename Word>
+static void BM_ExternalProductOpenFHESequence(benchmark::State& state) {
+	ExtProdSetup<Word> s(state);
+	for (auto _ : state) {
+		s.OpenFHESequence();
+		benchmark::ClobberMemory();
+	}
+	state.SetItemsProcessed(static_cast<int64_t>(state.iterations() * s.n));
+}
+
+// STD128 CGGI and DM, N = 2048, fewer digits
+#define HEXL_EXT_PROD_ARGS \
+	->Args({1024, 6, 0})->Args({1024, 6, 1})->Args({2048, 6, 0})->Args({1024, 4, 0})->ArgNames({"n", "k", "dm"})
+BENCHMARK_TEMPLATE(BM_ExternalProduct, uint64_t) HEXL_EXT_PROD_ARGS;
+BENCHMARK_TEMPLATE(BM_ExternalProductOpenFHESequence, uint64_t) HEXL_EXT_PROD_ARGS;
+#ifdef HEXL_RVV_HAS_32BIT_API
+BENCHMARK_TEMPLATE(BM_ExternalProduct, uint32_t) HEXL_EXT_PROD_ARGS;
+BENCHMARK_TEMPLATE(BM_ExternalProductOpenFHESequence, uint32_t) HEXL_EXT_PROD_ARGS;
+#endif
+#undef HEXL_EXT_PROD_ARGS
+#endif
+
 #ifdef HEXL_RVV_HAS_BASE_CONVERT
 	// ---- approximate RNS base conversion (rvv-hexl extension; OpenFHE HYBRID key switching) ----
 	// The shapes of blindloop's ckks_openfhe (N = 8192, Q = 46 + 37 + 36 + 37, P = 60, one limb

@@ -286,6 +286,16 @@ prebuilt route, with `INTEL_HEXL_HINT_DIR` pointing at the rvv-hexl install.
   to it by default (`OPENFHE_HEXL_BASECONV=0` keeps OpenFHE's loop). Tests:
   `Eltwise_BaseConvert`, `RvvLanes_BaseConvert`; benchmarks: `BM_BaseConvert` against
   `BM_BaseConvertOpenFHELoop` (OpenFHE's loop), `BM_Lanes_BaseConvert`.
+* `EltwiseExternalProductMod` (`HEXL_RVV_HAS_EXTERNAL_PRODUCT`, both storage words) is an
+  rvv-hexl extension (scaffold): the external product of OpenFHE binfhe's blind rotation
+  (`AddToAccCGGI` / `AddToAccDM` / `AddToAccLMKCDEY`: the k digit polynomials times the
+  bootstrapping key, summed per accumulator polynomial, times the monomials) in one call.
+  OpenFHE runs it as one `EltwiseMultMod` plus k `EltwiseMultAddMod` per sum, each a full pass
+  with a full reduction; the fused kernel reads every digit and key polynomial once and keeps
+  the sums in registers. Native and RVV kernels are stubs on the defining sums for now. Tests:
+  `Eltwise_ExternalProduct` (against OpenFHE's call sequence), `RvvLanes_ExternalProduct`;
+  benchmarks: `BM_ExternalProduct` against `BM_ExternalProductOpenFHESequence`,
+  `BM_Lanes_ExternalProduct`.
 * FP64 paths (on by default): for 2^30 <= q < 2^50 the modular multiply can run on the FP64
   FMA (Harvey's double-precision method), which the K3 retires at 4 elements per cycle against 1
   for the e64 integer multiply (`results/ntt-width-2026-10-20`). `src/util/fp64-mod.hpp` has the

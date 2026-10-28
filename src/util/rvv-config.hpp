@@ -123,6 +123,13 @@ using SignedDigitDecompose32U64 = vuint32m4_t;  // RVV32 on uint64_t storage (<=
 //   m8   2.51 / 7.96   1.65 / 6.24     3.79
 // The default is the best geomean (m4 is best on the X100 for L = 1).
 using BaseConvert64 = vuint64m8_t;
+// EltwiseExternalProductMod (rvv-hexl extension, binfhe blind rotation):
+// placeholders until BM_Lanes_ExternalProduct has been measured on both
+// clusters. The kernel keeps k digit strips and four sums live (k = 6 at
+// STD128), so the useful LMUL is small.
+using ExternalProduct32 = vuint32m2_t;     // RVV32 on uint32_t storage
+using ExternalProduct32U64 = vuint32m2_t;  // RVV32 on uint64_t storage (<= m4)
+using ExternalProduct64 = vuint64m2_t;
 
 // FP64 eltwise path (src/util/fp64-mod.hpp), for 2^30 <= q < 2^50, 64-bit
 // storage: EltwiseMultMod / FMAMod / MultAddMod on the FP64 FMA (4 elements per
