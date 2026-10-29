@@ -135,11 +135,18 @@ using ExternalProduct32 = vuint32m2_t;     // RVV32 on uint32_t storage
 using ExternalProduct32U64 = vuint32m2_t;  // RVV32 on uint64_t storage (<= m4)
 using ExternalProduct64 = vuint64m2_t;
 // EltwiseDotProductMod (rvv-hexl extension, key switching / blind rotation):
-// placeholders until BM_Lanes_DotProduct has been measured on both clusters.
-// The kernel keeps M sums (M = 2 for key switching) and a term's operands live.
-using DotProduct32 = vuint32m2_t;     // RVV32 on uint32_t storage
+// the best lane of each kernel on both clusters: m4, except m2 for RVV32 on
+// uint64_t storage. BM_Lanes_DotProduct / BM_Lanes_DotProductF64 (n = 4096,
+// M = 2, fused kernels, median of 3, 2026-10-29, us per call, X100 / A100;
+// rvv-hexl results/dot-product-2026-10-29):
+//                     m1             m2             m4             m8
+//   RVV32 (u32)    108.2 / 72.0   60.2 / 49.2    47.4 / 41.4    70.2 / 50.4
+//   RVV32 (u64)    111.9 / 73.3   90.4 / 56.3    106.7 / 59.6   -
+//   RVV64          129.2 / 105.2  90.2 / 85.0    77.1 / 78.0    93.1 / 83.8
+//   RVVF64         322.9 / 356.1  169.6 / 154.8  121.7 / 137.9  208.9 / 178.2
+using DotProduct32 = vuint32m4_t;     // RVV32 on uint32_t storage
 using DotProduct32U64 = vuint32m2_t;  // RVV32 on uint64_t storage (<= m4)
-using DotProduct64 = vuint64m2_t;
+using DotProduct64 = vuint64m4_t;
 
 // FP64 eltwise path (src/util/fp64-mod.hpp), for 2^30 <= q < 2^50, 64-bit
 // storage: EltwiseMultMod / FMAMod / MultAddMod on the FP64 FMA (4 elements per
@@ -158,7 +165,7 @@ inline constexpr bool kEltwiseFp64 = true;
 using MultModF64 = vfloat64m8_t;
 using FMAModF64 = vfloat64m8_t;
 using MultAddModF64 = vfloat64m4_t;
-using DotProductF64 = vfloat64m4_t;  // EltwiseDotProductMod's FP64 kernel: placeholder (BM_Lanes_DotProductF64)
+using DotProductF64 = vfloat64m4_t;  // EltwiseDotProductMod's FP64 kernel (measured: see DotProduct64 above)
 
 // ---- NTT -------------------------------------------------------------------
 // How the small-span NTT stages (span t < VLMAX) run, one strategy for the RVV64
