@@ -127,13 +127,18 @@ using BaseConvert64 = vuint64m8_t;
 // BM_Lanes_BaseConvertExact has been measured. It keeps the K accumulators plus
 // the FP64 nu accumulator live.
 using BaseConvertExact64 = vuint64m2_t;
-// EltwiseExternalProductMod (rvv-hexl extension, binfhe blind rotation):
-// placeholders until BM_Lanes_ExternalProduct has been measured on both
-// clusters. The kernel keeps k digit strips and four sums live (k = 6 at
-// STD128), so the useful LMUL is small.
-using ExternalProduct32 = vuint32m2_t;     // RVV32 on uint32_t storage
+// EltwiseExternalProductMod (rvv-hexl extension, binfhe blind rotation): the
+// best lane of each kernel on both clusters: m4, except m2 for RVV32 on uint64_t
+// storage. The kernel keeps two sums, a digit strip and a key strip live per
+// output. BM_Lanes_ExternalProduct (n = 4096, CGGI, k = 6, median of 3,
+// 2026-10-29, us per call, X100 / A100; rvv-hexl results/extprod-rvv-2026-10-29):
+//                     m1             m2             m4             m8
+//   RVV32 (u32)    155.0 / 118.1  98.9 / 95.0    95.1 / 84.9    128.6 / 94.3
+//   RVV32 (u64)    205.2 / 167.7  169.8 / 119.3  186.1 / 122.7  -
+//   RVV64          464.2 / 861.2  363.8 / 439.6  346.0 / 397.9  397.7 / 394.1
+using ExternalProduct32 = vuint32m4_t;     // RVV32 on uint32_t storage
 using ExternalProduct32U64 = vuint32m2_t;  // RVV32 on uint64_t storage (<= m4)
-using ExternalProduct64 = vuint64m2_t;
+using ExternalProduct64 = vuint64m4_t;
 // EltwiseDotProductMod (rvv-hexl extension, key switching / blind rotation):
 // the best lane of each kernel on both clusters: m4, except m2 for RVV32 on
 // uint64_t storage. BM_Lanes_DotProduct / BM_Lanes_DotProductF64 (n = 4096,
