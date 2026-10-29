@@ -37,18 +37,6 @@ uint64_t InverseMod(uint64_t input, uint64_t modulus) {
 	return static_cast<uint64_t>(t_prev + (t_prev < 0 ? modulus : 0U)); 
 }
 
-uint64_t AddUIntMod(uint64_t x, uint64_t y, uint64_t modulus) {
-	//(x + y) mod modulus for x, y < modulus.
-	uint64_t sum = x+y;
-	return std::min(sum, sum-modulus);
-}
-
-uint64_t SubUIntMod(uint64_t x, uint64_t y, uint64_t modulus) {
-	// (x - y) mod modulus for x, y < modulus.
-	uint64_t diff = x-y;
-	return std::min(diff, diff + modulus);
-}
-
 static inline uint64_t MontgomeryReduce(uint64_t x_hi, uint64_t x_lo, uint64_t n, uint64_t modulus){
 	uint64_t q = x_lo * n;
 	uint64_t m;

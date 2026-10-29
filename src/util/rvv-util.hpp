@@ -151,6 +151,33 @@ inline void Store(uint32_t* p, V v, size_t vl) {
 	__riscv_vse32(p, v, vl);
 }
 
+/// @brief A vector of V with every lane set to x (vmv.v.x): a zero accumulator,
+/// or a constant. vmv.v.x takes no vector operand, so it has no overloaded
+/// form; this picks the intrinsic from V. e32 lanes take the low 32 bits of x.
+template <class V>
+inline V Splat(uint64_t x, size_t vl) {
+	static_assert(IsE64<V> || IsE32<V>, "rvv::Splat<V>: V must be vuint64m1_t..m8_t or vuint32mf2_t..m8_t");
+	if constexpr (std::is_same_v<V, vuint64m1_t>) {
+		return __riscv_vmv_v_x_u64m1(x, vl);
+	} else if constexpr (std::is_same_v<V, vuint64m2_t>) {
+		return __riscv_vmv_v_x_u64m2(x, vl);
+	} else if constexpr (std::is_same_v<V, vuint64m4_t>) {
+		return __riscv_vmv_v_x_u64m4(x, vl);
+	} else if constexpr (std::is_same_v<V, vuint64m8_t>) {
+		return __riscv_vmv_v_x_u64m8(x, vl);
+	} else if constexpr (std::is_same_v<V, vuint32mf2_t>) {
+		return __riscv_vmv_v_x_u32mf2(static_cast<uint32_t>(x), vl);
+	} else if constexpr (std::is_same_v<V, vuint32m1_t>) {
+		return __riscv_vmv_v_x_u32m1(static_cast<uint32_t>(x), vl);
+	} else if constexpr (std::is_same_v<V, vuint32m2_t>) {
+		return __riscv_vmv_v_x_u32m2(static_cast<uint32_t>(x), vl);
+	} else if constexpr (std::is_same_v<V, vuint32m4_t>) {
+		return __riscv_vmv_v_x_u32m4(static_cast<uint32_t>(x), vl);
+	} else {
+		return __riscv_vmv_v_x_u32m8(static_cast<uint32_t>(x), vl);
+	}
+}
+
 // ---------------------------------------------------------------------------
 // FP64 lanes, for the FP64 paths (util/fp64-mod.hpp): VF is vfloat64m1_t..m8_t.
 // The uint64_t data goes through the e64 lane type with the same LMUL (UintOf):
@@ -415,6 +442,42 @@ inline V MulModBarrett(V a, V b, uint64_t q, uint64_t mu, uint64_t shift, size_t
 	V Q = __riscv_vmulhu(c, mu, vl);
 
 	V r = __riscv_vnmsac(lo, q, Q, vl);  // lo - q*Q in one instruction (8-33% faster than vmul + vsub, measured)
+
+	return __riscv_vminu(
+			r,
+			__riscv_vsub(r, q, vl),
+			vl);
+}
+
+
+/// @brief Full modular multiply and add of three VECTORS, a, b, c < q < 2^62:
+/// (a b + c) mod q in [0, q). The pre-shift Barrett of MulModBarrett (same mu
+/// and shift), the addend joining the low word: a b - Q q is in [0, 3q) (the
+/// estimate at most two short at 62 bits, one below 2^61), plus c below 4q,
+/// then two conditional subtractions (2q, q). With c = 0 it is also the full
+/// product for 61-62-bit q, where MulModBarrett's single correction is not
+/// enough. The e64 counterpart of MulAddModBarrett32.
+template <class V>
+inline V MulAddModBarrett(V a, V b, V c, uint64_t q, uint64_t mu, uint64_t shift, size_t vl) {
+	static_assert(IsE64<V>, "rvv::MulAddModBarrett takes e64 vectors; use MulAddModBarrett32 for e32");
+	V hi, lo;
+	hi = __riscv_vmulhu(a, b, vl);
+	lo = __riscv_vmul(a, b, vl);
+
+	V d = __riscv_vor(
+			__riscv_vsrl(lo, shift, vl),
+			__riscv_vsll(hi, 64-shift, vl),
+			vl
+			);
+
+	V Q = __riscv_vmulhu(d, mu, vl);
+
+	V r = __riscv_vnmsac(__riscv_vadd(lo, c, vl), q, Q, vl);  // a b + c - q Q, in [0, 4q)
+
+	r = __riscv_vminu(
+			r,
+			__riscv_vsub(r, 2*q, vl),
+			vl);
 
 	return __riscv_vminu(
 			r,

@@ -148,15 +148,72 @@ inline uint64_t MultiplyMod(uint64_t x, uint64_t y, uint64_t y_precon,
 	return std::min(r, r - modulus); 
 }
 
+/// @brief Returns (x * y) mod modulus with a precomputed Barrett factor, for
+/// loops: the pre-shift Barrett of MultiplyMod without its per-call division.
+/// Compute once per kernel call:
+///   shift = MSB(modulus) - 1,   mu = MultiplyFactor(1ULL << shift, 64, modulus).BarrettFactor()
+/// Assumes x, y < modulus < 2^62. x y - Q q is in [0, 3q) (the estimate can be
+/// two short at 62 bits, one below 2^61), so two conditional subtractions
+/// (2q, q). For modulus < 4, shift == 0 and hi == 0 (the shift by 64 is harmless
+/// on RISC-V, which takes the amount mod 64). The scalar rvv::MulModBarrett.
+inline uint64_t MulModBarrett(uint64_t x, uint64_t y, uint64_t modulus, uint64_t mu,
+		uint64_t shift) {
+	uint64_t hi, lo;
+	asm("mulhu %0, %1, %2" : "=r"(hi) : "r"(x), "r"(y));
+	asm("mul %0, %1, %2" : "=r"(lo) : "r"(x), "r"(y));
+
+	uint64_t d = lo >> shift | hi << (64-shift);
+	uint64_t q;
+	asm("mulhu %0, %1, %2" : "=r"(q) : "r"(d), "r"(mu));
+
+	uint64_t r = lo - (q * modulus);
+	r = std::min(r, r - 2*modulus);
+	return std::min(r, r - modulus);
+}
+
+/// @brief Returns (x * y + c) mod modulus, x, y, c < modulus < 2^62, with the
+/// factors of MulModBarrett. The addend joins the low word: x y + c - Q q is in
+/// [0, 4q), then the same two conditional subtractions (2q, q). The scalar
+/// rvv::MulAddModBarrett.
+inline uint64_t MulAddModBarrett(uint64_t x, uint64_t y, uint64_t c, uint64_t modulus, uint64_t mu,
+		uint64_t shift) {
+	uint64_t hi, lo;
+	asm("mulhu %0, %1, %2" : "=r"(hi) : "r"(x), "r"(y));
+	asm("mul %0, %1, %2" : "=r"(lo) : "r"(x), "r"(y));
+
+	uint64_t d = lo >> shift | hi << (64-shift);
+	uint64_t q;
+	asm("mulhu %0, %1, %2" : "=r"(q) : "r"(d), "r"(mu));
+
+	uint64_t r = lo + c - (q * modulus);
+	r = std::min(r, r - 2*modulus);
+	return std::min(r, r - modulus);
+}
+
 /// @brief Returns (x + y) mod modulus. Assumes x, y < modulus <= 2^63.
 /// (The rvv-hexl implementation is the branch-free min(s, s - q), which needs
 /// x + y < 2^64. OpenFHE and SEAL moduli are at most 61 bits.)
-uint64_t AddUIntMod(uint64_t x, uint64_t y, uint64_t modulus);
+inline uint64_t AddUIntMod(uint64_t x, uint64_t y, uint64_t modulus) {
+	//(x + y) mod modulus for x, y < modulus.
+	uint64_t sum = x+y;
+	return std::min(sum, sum-modulus);
+}
+
+/// @brief Maps x in [0, 2 modulus) to [0, modulus): the scalar conditional
+/// subtract, branch-free min(x, x - q) (x - q wraps to a huge value when x < q).
+/// rvv::ReduceFromTwice is the vector version.
+inline uint64_t ReduceFromTwice(uint64_t x, uint64_t modulus) {
+	return std::min(x, x - modulus);
+}
 
 /// @brief Returns (x - y) mod modulus. Assumes x, y < modulus <= 2^63.
 /// (The rvv-hexl implementation is the branch-free min(d, d + q), which needs
 /// d + q < 2^64 for every d < q.)
-uint64_t SubUIntMod(uint64_t x, uint64_t y, uint64_t modulus);
+inline uint64_t SubUIntMod(uint64_t x, uint64_t y, uint64_t modulus) {
+	// (x - y) mod modulus for x, y < modulus.
+	uint64_t diff = x-y;
+	return std::min(diff, diff + modulus);
+}
 
 /// @brief Returns base^exp mod modulus. Requires an odd modulus (rvv-hexl
 /// computes it in Montgomery form, R = 2^64); every NTT prime and every
