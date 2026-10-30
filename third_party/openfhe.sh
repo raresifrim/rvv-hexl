@@ -43,6 +43,13 @@
 #     and patches/openfhe-binfhe-multadd.py makes binfhe's external products accumulate with it.
 #     By default it runs as one rvv-hexl EltwiseMultAddMod call; OPENFHE_HEXL_MULADD=0 keeps
 #     the two calls it replaces (EltwiseMultMod + EltwiseAddMod), as a comparison baseline.
+#   * patches/openfhe-binfhe-extprod.py makes each blind-rotation external product (AddToAccCGGI,
+#     AddToAccDM, AddToAccLMKCDEY, LMKCDEY's Automorphism) one rvv-hexl EltwiseExternalProductMod
+#     call. On by default; OPENFHE_HEXL_EXTPROD=0 keeps OpenFHE's ModMulAddEq loops, as a
+#     comparison baseline.
+#   * patches/openfhe-pke-keyswitch-dot.py makes the key-switching inner products (KeySwitchBV,
+#     KeySwitchHYBRID) one rvv-hexl EltwiseDotProductMod call per limb. On by default;
+#     OPENFHE_HEXL_DOTPROD=0 keeps the ModMulAddEq loops, as a comparison baseline.
 #   * patches/openfhe-pke-baseconv.py makes the overlay's ApproxSwitchCRTBasis (HYBRID key
 #     switching: ModUp, ModDown) one rvv-hexl BaseConvert call. On by default;
 #     OPENFHE_HEXL_BASECONV=0 keeps OpenFHE's loop, as a comparison baseline.
@@ -150,7 +157,9 @@ stage_rvvhexl() {
   python3 "$HERE/patches/openfhe-hexl-multadd.py" "$RVVHEXL_SRC"   # switch: OPENFHE_HEXL_MULADD=0|1
   python3 "$HERE/patches/openfhe-binfhe-multadd.py" "$RVVHEXL_SRC"
   python3 "$HERE/patches/openfhe-pke-keyswitch-multadd.py" "$RVVHEXL_SRC"
+  python3 "$HERE/patches/openfhe-pke-keyswitch-dot.py" "$RVVHEXL_SRC"   # switch: OPENFHE_HEXL_DOTPROD=0|1 (default 1)
   python3 "$HERE/patches/openfhe-binfhe-decompose.py" "$RVVHEXL_SRC"   # switch: OPENFHE_HEXL_DECOMPOSE=0|1
+  python3 "$HERE/patches/openfhe-binfhe-extprod.py" "$RVVHEXL_SRC"   # switch: OPENFHE_HEXL_EXTPROD=0|1 (default 1)
   python3 "$HERE/patches/openfhe-pke-baseconv.py" "$RVVHEXL_SRC"   # switch: OPENFHE_HEXL_BASECONV=0|1 (default 1)
 }
 

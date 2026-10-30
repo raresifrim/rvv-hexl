@@ -102,13 +102,16 @@ build_seal() {
 # rvv-hexl patches (patches/seal-*.py): compiled only into HEXL builds, so applying them
 # to the shared source tree leaves the stock build unchanged. Switches, for A/B runs:
 #   SEAL_RVV_HEXL_KEYSWITCH=0|1 (default 1)  key switching on EltwiseMultAddMod
+#   SEAL_RVV_HEXL_DOTPRODUCT=0|1 (default 1) ... as one EltwiseDotProductMod per output limb
+#                                            (0: EltwiseMultAddMod per digit and key component)
 #   SEAL_RVV_HEXL_BASECONV=0|1  (default 1)  RNS base conversion on EltwiseFMAMod
 patch_seal() {
   python3 "$HERE/patches/seal-hexl-keyswitch.py" "$SEAL_SRC"
+  python3 "$HERE/patches/seal-hexl-dotproduct.py" "$SEAL_SRC"
   python3 "$HERE/patches/seal-hexl-baseconv.py" "$SEAL_SRC"
 }
 SEAL_DEFS=""
-for v in KEYSWITCH BASECONV; do
+for v in KEYSWITCH BASECONV DOTPRODUCT; do
   eval "val=\${SEAL_RVV_HEXL_$v:-}"
   if [ -n "$val" ]; then
     case "$val" in 0|1) ;; *) echo "ERROR: SEAL_RVV_HEXL_$v must be 0 or 1" >&2; exit 1 ;; esac

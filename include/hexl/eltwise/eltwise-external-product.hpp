@@ -33,7 +33,8 @@ namespace hexl {
 /// constant 1; a null \p key2 drops the second term (and \p mono2).
 ///   CGGI:    accumulate, key1 = ek1, mono1 = X^a, key2 = ek2, mono2 = X^-a
 ///   DM:      overwrite (accumulate = false), key1 = ek, no monomial, no key2
-///   LMKCDEY: accumulate, key1 = ek, no monomial, no key2
+///   LMKCDEY: overwrite, key1 = ek, no monomial, no key2 (its Automorphism:
+///            accumulate into acc0 = 0 and acc1, key1 = the automorphism key)
 /// @param[in,out] acc0, acc1 The two accumulator polynomials, n elements in
 /// [0, modulus); results in [0, modulus). Must not alias any input.
 /// @param[in] digits k digit polynomials (EVALUATION format), in [0, modulus).
