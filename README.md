@@ -195,9 +195,10 @@ cannot see the target board, so pass `RISCV_MARCH=` for anything other than RVA2
 
 ## Develop on a laptop with spike
 
-The RVV code can be compiled and tested without the board. With `riscv-gnu-toolchain`,
-`riscv-isa-sim` and `riscv-pk` installed (Homebrew tap `riscv-software-src/riscv`, already on the
-development Mac):
+The RVV code can be compiled and tested without the board.
+
+**macOS.** With `riscv-gnu-toolchain`, `riscv-isa-sim` and `riscv-pk` installed (Homebrew tap
+`riscv-software-src/riscv`, already on the development Mac):
 
 ```bash
 make CROSS=riscv64-unknown-elf- RISCV_MARCH=rv64gcv \
@@ -205,9 +206,34 @@ make CROSS=riscv64-unknown-elf- RISCV_MARCH=rv64gcv \
      TEST_ARGS=--quick test
 ```
 
-`zvl256b` emulates the X100 VLEN, `zvl1024b` the A100's. Spike checks correctness only; its
-timings mean nothing. The build is RISC-V only: without `CROSS=`, `make` stops on a non-RISC-V
-host.
+**Ubuntu Linux** (x86-64 or arm64). Everything comes from apt: the Linux cross toolchain replaces
+the bare-metal one, and QEMU user mode replaces spike + pk. The compiler must be GCC >= 14 (see
+[Board and toolchain detection](#board-and-toolchain-detection)); on Ubuntu 24.04 that means the
+versioned `-14` cross packages, hence the `CXX`/`CC` overrides:
+
+```bash
+sudo apt install g++-14-riscv64-linux-gnu binutils-riscv64-linux-gnu qemu-user
+make CROSS=riscv64-linux-gnu- CXX=riscv64-linux-gnu-g++-14 CC=riscv64-linux-gnu-gcc-14 \
+     RISCV_MARCH=rv64gcv \
+     RUN="qemu-riscv64 -L /usr/riscv64-linux-gnu -cpu rv64,v=true,vlen=256" \
+     TEST_ARGS=--quick test
+```
+
+On a release whose default cross compiler is already GCC >= 14, install `g++-riscv64-linux-gnu`
+and drop the two overrides. `-L` gives QEMU the cross sysroot (dynamic loader, libstdc++).
+The test banner must read `available=1 enabled=1`; `available=0` means V was not reported in
+`AT_HWCAP` and only the native path ran. With `RUN=` set, `make test` runs the RVV path only;
+prefix the command with `HEXL_DISABLE_RVV=1` for the native one.
+
+Spike also works on Ubuntu, but nothing it needs is packaged at a usable version: `riscv-isa-sim`
+and `riscv-pk` are not in apt, and `gcc-riscv64-unknown-elf` is older than GCC 14 on 24.04 (the
+toolchain check would fall back to `ISA=scalar`). Build `riscv-gnu-toolchain` (newlib,
+`--with-arch=rv64gcv --with-abi=lp64d`), `riscv-isa-sim` and `riscv-pk` from source, then run the
+macOS command with `RUN="spike --isa=rv64gcv_zvl256b <prefix>/riscv64-unknown-elf/bin/pk"`.
+
+`zvl256b` (spike) or `vlen=256` (QEMU) emulates the X100 VLEN, `zvl1024b` / `vlen=1024` the
+A100's. Simulators check correctness only; their timings mean nothing. The build is RISC-V only:
+without `CROSS=`, `make` stops on a non-RISC-V host.
 
 ## Relation to the upstream Intel HEXL / OpenFHE builds
 

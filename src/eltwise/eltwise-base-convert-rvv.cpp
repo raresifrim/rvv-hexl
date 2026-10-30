@@ -16,6 +16,13 @@
 //   L > 1: per strip the y_i go to a per-thread scratch (L * VLMAX words, in
 //         L1), then each output accumulates in one register over i.
 // Inputs are read once and outputs written once, unit-stride.
+//
+// BaseConvertExact: the L > 1 body (any L) plus, per strip, the FP64 nu =
+// 0.5 + sum_i double(y_i) * (1 / q_i) (vfmacc, fused like the native kernel's
+// fmadd.d) and alpha = floor(nu) in [0, L] (vfcvt.rtz). Each output subtracts its
+// alpha row, alpha_q_mod_p[alpha][j], picked by a compare-and-select chain over
+// the L + 1 rows (vmseq + vmerge.vxm): no indexed load or vrgather, which cost
+// ~17 cycles per element and 64+ cycles per register on the A100.
 
 #include <stdint.h>
 
@@ -84,13 +91,41 @@ template void BaseConvertRVV64<vuint64m2_t>(uint64_t* const*, const uint64_t* co
 template void BaseConvertRVV64<vuint64m4_t>(uint64_t* const*, const uint64_t* const*, uint64_t, const BaseConvertArgs&);
 template void BaseConvertRVV64<vuint64m8_t>(uint64_t* const*, const uint64_t* const*, uint64_t, const BaseConvertArgs&);
 
-// STUB: calls the native kernel until the RVV body is written (BaseConvertRVV64's
-// strips plus the FP64 nu accumulator and the alpha row per coefficient).
 template <class V>
 void BaseConvertExactRVV64(uint64_t* const* result, const uint64_t* const* operand,
 		uint64_t n, const BaseConvertArgs& a) {
 	static_assert(rvv::IsE64<V>, "BaseConvertExactRVV64 takes e64 lanes");
-	BaseConvertExactNative(result, operand, n, a);
+	using VF = rvv::F64Of<V>;
+	const uint64_t L = a.in_count, K = a.out_count;
+	const size_t vlmax = rvv::VlMax<V>();
+	uint64_t* ys = BaseConvertScratch(L * vlmax);  // y_i at ys + i * vlmax
+	for (size_t k = 0, vl; k < n; k += vl){
+		vl = rvv::SetVl<V>(n - k);
+		VF nu = rvv::SplatF64<VF>(0.5, vl);
+		for (uint64_t i = 0; i < L; ++i){                                      // y_i, exact
+			const uint64_t q = a.in_moduli[i];
+			const V y = rvv::ReduceFromTwice(rvv::MulModShoupLazy(rvv::Load<V>(operand[i] + k, vl), a.q_hat_inv[i],
+					a.q_hat_inv_precon[i], q, vl), q, vl);                      // [0, q)
+			rvv::Store(ys + i * vlmax, y, vl);
+			nu = __riscv_vfmacc(nu, a.q_inv[i], __riscv_vfcvt_f(y, vl), vl);   // OpenFHE's order
+		}
+		const V alpha = __riscv_vfcvt_rtz_xu(nu, vl);                          // floor (nu > 0), [0, L]
+		for (uint64_t j = 0; j < K; ++j){                                      // out_j
+			const uint64_t p = a.out_moduli[j], two_p = 2 * p;
+			V s = rvv::MulModShoupLazy(rvv::Load<V>(ys, vl), a.q_hat_mod_p[j], a.q_hat_mod_p_precon[j], p, vl);  // [0, 2p)
+			for (uint64_t i = 1; i < L; ++i){
+				const V t = rvv::MulModShoupLazy(rvv::Load<V>(ys + i * vlmax, vl), a.q_hat_mod_p[i * K + j],
+						a.q_hat_mod_p_precon[i * K + j], p, vl);                    // [0, 2p)
+				s = rvv::ReduceFromTwice(__riscv_vadd(s, t, vl), two_p, vl);   // < 4p before: [0, 2p)
+			}
+			s = rvv::ReduceFromTwice(s, p, vl);                                // [0, p)
+			V c = rvv::Splat<V>(a.alpha_q_mod_p[j], vl);                       // the alpha row
+			for (uint64_t r = 1; r <= L; ++r)
+				c = __riscv_vmerge(c, a.alpha_q_mod_p[r * K + j], __riscv_vmseq(alpha, r, vl), vl);
+			const V d = __riscv_vsub(s, c, vl);                                // wraps when s < c
+			rvv::Store(result[j] + k, __riscv_vminu(d, __riscv_vadd(d, p, vl), vl), vl);  // [0, p)
+		}
+	}
 }
 
 template void BaseConvertExactRVV64<vuint64m1_t>(uint64_t* const*, const uint64_t* const*, uint64_t, const BaseConvertArgs&);

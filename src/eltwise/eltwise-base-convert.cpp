@@ -146,11 +146,32 @@ void BaseConvertNative(uint64_t* const* result, const uint64_t* const* operand,
 	}
 }
 
-// STUB: OpenFHE's arithmetic (the reference). To be replaced by BaseConvertNative's
-// Shoup scheme plus the double nu and the alpha row.
+// BaseConvertNative's Shoup scheme plus the double nu and the alpha row: y_i exact
+// (alpha must stay in [0, L]), lazy terms with one correction each, then the alpha
+// row subtracted as min(d, d + p) (d = s - c wraps when s < c; s, c < p < 2^63).
 void BaseConvertExactNative(uint64_t* const* result, const uint64_t* const* operand,
 		uint64_t n, const BaseConvertArgs& a) {
-	BaseConvertExactReference(result, operand, n, a);
+	const uint64_t L = a.in_count, K = a.out_count;
+	std::vector<uint64_t> y(L);
+	for (uint64_t k = 0; k < n; ++k) {
+		double nu = 0.5;
+		for (uint64_t i = 0; i < L; ++i) {  // exact, [0, q_i)
+			y[i] = MultiplyMod(operand[i][k], a.q_hat_inv[i], a.q_hat_inv_precon[i], a.in_moduli[i]);
+			nu += static_cast<double>(y[i]) * a.q_inv[i];
+		}
+		const uint64_t alpha = static_cast<uint64_t>(nu);
+		for (uint64_t j = 0; j < K; ++j) {
+			const uint64_t p = a.out_moduli[j], two_p = 2 * p;
+			uint64_t s = 0;  // in [0, 2p)
+			for (uint64_t i = 0; i < L; ++i) {
+				s += MultiplyModLazy<64>(y[i], a.q_hat_mod_p[i * K + j], a.q_hat_mod_p_precon[i * K + j], p);
+				s = std::min(s, s - two_p);  // s < 4p before: one subtraction
+			}
+			s = std::min(s, s - p);  // [0, p)
+			const uint64_t d = s - a.alpha_q_mod_p[alpha * K + j];
+			result[j][k] = std::min(d, d + p);
+		}
+	}
 }
 
 }  // namespace hexl
