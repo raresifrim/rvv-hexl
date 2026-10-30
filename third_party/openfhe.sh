@@ -53,6 +53,9 @@
 #   * patches/openfhe-pke-baseconv.py makes the overlay's ApproxSwitchCRTBasis (HYBRID key
 #     switching: ModUp, ModDown) one rvv-hexl BaseConvert call. On by default;
 #     OPENFHE_HEXL_BASECONV=0 keeps OpenFHE's loop, as a comparison baseline.
+#   * patches/openfhe-pke-baseconv-exact.py makes the overlay's SwitchCRTBasis (BFV's HPS exact
+#     base extensions) one rvv-hexl BaseConvertExact call. On by default;
+#     OPENFHE_HEXL_BASECONV_EXACT=0 keeps OpenFHE's loop, as a comparison baseline.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -161,6 +164,7 @@ stage_rvvhexl() {
   python3 "$HERE/patches/openfhe-binfhe-decompose.py" "$RVVHEXL_SRC"   # switch: OPENFHE_HEXL_DECOMPOSE=0|1
   python3 "$HERE/patches/openfhe-binfhe-extprod.py" "$RVVHEXL_SRC"   # switch: OPENFHE_HEXL_EXTPROD=0|1 (default 1)
   python3 "$HERE/patches/openfhe-pke-baseconv.py" "$RVVHEXL_SRC"   # switch: OPENFHE_HEXL_BASECONV=0|1 (default 1)
+  python3 "$HERE/patches/openfhe-pke-baseconv-exact.py" "$RVVHEXL_SRC"   # switch: OPENFHE_HEXL_BASECONV_EXACT=0|1 (default 1)
 }
 
 # build_openfhe <src> <label> [extra cmake args...]
